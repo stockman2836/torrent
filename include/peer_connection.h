@@ -71,6 +71,13 @@ private:
     bool sendMessage(const PeerMessage& message);
     std::vector<uint8_t> serializeMessage(const PeerMessage& message);
 
+    // Low-level socket operations
+    bool sendData(const void* data, size_t length);
+    bool receiveData(void* buffer, size_t length);
+    bool receiveDataWithTimeout(void* buffer, size_t length, int timeout_ms);
+    bool setNonBlocking(bool non_blocking);
+    bool setSocketTimeout(int timeout_ms);
+
     std::string ip_;
     uint16_t port_;
     std::vector<uint8_t> info_hash_;
