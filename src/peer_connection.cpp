@@ -43,8 +43,10 @@ PeerConnection::PeerConnection(const std::string& ip,
     , port_(port)
     , info_hash_(info_hash)
     , peer_id_(peer_id)
+    , remote_peer_id_()
     , socket_fd_(INVALID_SOCKET)
     , connected_(false)
+    , handshake_completed_(false)
     , am_choking_(true)
     , am_interested_(false)
     , peer_choking_(true)
@@ -147,75 +149,150 @@ void PeerConnection::disconnect() {
         socket_fd_ = INVALID_SOCKET;
     }
     connected_ = false;
+    handshake_completed_ = false;
+    remote_peer_id_.clear();
 }
 
 bool PeerConnection::performHandshake() {
     if (!connected_) {
-        std::cerr << "Cannot perform handshake: not connected\n";
+        std::cerr << "ERROR: Cannot perform handshake - not connected\n";
         return false;
     }
 
+    if (handshake_completed_) {
+        std::cout << "WARNING: Handshake already completed\n";
+        return true;
+    }
+
+    std::cout << "Performing BitTorrent handshake with " << ip_ << ":" << port_ << "...\n";
+
     // BitTorrent handshake format:
     // <pstrlen><pstr><reserved><info_hash><peer_id>
-    // pstrlen = 19
-    // pstr = "BitTorrent protocol"
-    // reserved = 8 bytes (all zeros)
+    // pstrlen = 19 (1 byte)
+    // pstr = "BitTorrent protocol" (19 bytes)
+    // reserved = 8 bytes (all zeros for basic protocol)
     // info_hash = 20 bytes
     // peer_id = 20 bytes
+    // Total: 68 bytes
 
+    // Build handshake message
     std::vector<uint8_t> handshake;
+    handshake.reserve(68);
+
+    // Protocol string length
     handshake.push_back(19);
 
+    // Protocol string
     std::string protocol = "BitTorrent protocol";
     handshake.insert(handshake.end(), protocol.begin(), protocol.end());
 
-    // Reserved bytes
+    // Reserved bytes (8 bytes, all zeros for now)
+    // Can be used for protocol extensions in the future
     for (int i = 0; i < 8; ++i) {
         handshake.push_back(0);
     }
 
-    // Info hash
+    // Info hash (20 bytes)
+    if (info_hash_.size() != 20) {
+        std::cerr << "ERROR: Invalid info_hash size: " << info_hash_.size() << " (expected 20)\n";
+        return false;
+    }
     handshake.insert(handshake.end(), info_hash_.begin(), info_hash_.end());
 
-    // Peer ID
+    // Peer ID (20 bytes)
+    if (peer_id_.size() != 20) {
+        std::cerr << "ERROR: Invalid peer_id size: " << peer_id_.size() << " (expected 20)\n";
+        return false;
+    }
     handshake.insert(handshake.end(), peer_id_.begin(), peer_id_.end());
 
+    // Sanity check
+    if (handshake.size() != 68) {
+        std::cerr << "ERROR: Invalid handshake size: " << handshake.size() << " (expected 68)\n";
+        return false;
+    }
+
     // Send handshake
+    std::cout << "  Sending handshake (" << handshake.size() << " bytes)...\n";
     if (!sendData(handshake.data(), handshake.size())) {
-        std::cerr << "Failed to send handshake\n";
+        std::cerr << "ERROR: Failed to send handshake\n";
+        disconnect();
         return false;
     }
 
     // Receive handshake response (same format, 68 bytes total)
+    std::cout << "  Waiting for handshake response...\n";
     std::vector<uint8_t> response(68);
     if (!receiveData(response.data(), response.size())) {
-        std::cerr << "Failed to receive handshake response\n";
+        std::cerr << "ERROR: Failed to receive handshake response\n";
+        disconnect();
         return false;
     }
 
-    // Validate response
+    // Validate response - protocol string length
     if (response[0] != 19) {
-        std::cerr << "Invalid handshake: wrong protocol length\n";
+        std::cerr << "ERROR: Invalid handshake response - wrong protocol length: "
+                  << static_cast<int>(response[0]) << " (expected 19)\n";
+        disconnect();
         return false;
     }
 
+    // Validate response - protocol string
     std::string received_protocol(response.begin() + 1, response.begin() + 20);
     if (received_protocol != "BitTorrent protocol") {
-        std::cerr << "Invalid handshake: wrong protocol string\n";
+        std::cerr << "ERROR: Invalid handshake response - wrong protocol string: '"
+                  << received_protocol << "'\n";
+        disconnect();
         return false;
     }
 
-    // Verify info_hash matches
+    // Extract reserved bytes (bytes 20-27) for future extension support
+    std::vector<uint8_t> reserved_bytes(response.begin() + 20, response.begin() + 28);
+    // Currently we don't validate these, but they could indicate protocol extensions
+
+    // Verify info_hash matches (bytes 28-47)
     std::vector<uint8_t> received_info_hash(response.begin() + 28, response.begin() + 48);
     if (received_info_hash != info_hash_) {
-        std::cerr << "Invalid handshake: info_hash mismatch\n";
+        std::cerr << "ERROR: Invalid handshake response - info_hash mismatch\n";
+        std::cerr << "  Expected: ";
+        for (size_t i = 0; i < std::min(info_hash_.size(), size_t(8)); ++i) {
+            std::cerr << std::hex << static_cast<int>(info_hash_[i]) << " ";
+        }
+        std::cerr << "...\n  Received: ";
+        for (size_t i = 0; i < std::min(received_info_hash.size(), size_t(8)); ++i) {
+            std::cerr << std::hex << static_cast<int>(received_info_hash[i]) << " ";
+        }
+        std::cerr << std::dec << "...\n";
+        disconnect();
         return false;
     }
 
-    // Extract peer_id (bytes 48-68)
-    std::vector<uint8_t> peer_id_response(response.begin() + 48, response.end());
+    // Extract peer_id (bytes 48-67)
+    remote_peer_id_.assign(response.begin() + 48, response.end());
 
-    std::cout << "Handshake successful with peer\n";
+    // Validate peer_id size
+    if (remote_peer_id_.size() != 20) {
+        std::cerr << "ERROR: Invalid peer_id size in response: "
+                  << remote_peer_id_.size() << " (expected 20)\n";
+        disconnect();
+        return false;
+    }
+
+    // Mark handshake as completed
+    handshake_completed_ = true;
+
+    std::cout << "  [SUCCESS] Handshake completed!\n";
+    std::cout << "  Remote Peer ID: ";
+    for (size_t i = 0; i < std::min(remote_peer_id_.size(), size_t(20)); ++i) {
+        char c = remote_peer_id_[i];
+        if (c >= 32 && c <= 126) {
+            std::cout << c;
+        } else {
+            std::cout << '.';
+        }
+    }
+    std::cout << "\n";
+
     return true;
 }
 

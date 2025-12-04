@@ -66,6 +66,7 @@ public:
     bool peerInterested() const { return peer_interested_; }
 
     const std::vector<bool>& peerBitfield() const { return peer_bitfield_; }
+    const std::string& remotePeerId() const { return remote_peer_id_; }
 
 private:
     bool sendMessage(const PeerMessage& message);
@@ -82,9 +83,11 @@ private:
     uint16_t port_;
     std::vector<uint8_t> info_hash_;
     std::string peer_id_;
+    std::string remote_peer_id_;  // Peer ID received during handshake
 
     int socket_fd_;
     bool connected_;
+    bool handshake_completed_;
 
     // Peer state
     bool am_choking_;
