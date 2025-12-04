@@ -43,6 +43,7 @@ set(HEADERS
 # Find dependencies
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(CURL REQUIRED)
 
 # Executable
 add_executable(torrent_client ${SOURCES} ${HEADERS})
@@ -53,6 +54,7 @@ target_link_libraries(torrent_client
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
+    CURL::libcurl
 )
 
 # Platform-specific libraries

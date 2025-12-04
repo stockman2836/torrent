@@ -4,6 +4,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <cstring>
+#include <curl/curl.h>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -18,6 +19,72 @@
 #endif
 
 namespace torrent {
+
+// Callback function for libcurl to write response data
+static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t total_size = size * nmemb;
+    std::string* response = static_cast<std::string*>(userp);
+    response->append(static_cast<char*>(contents), total_size);
+    return total_size;
+}
+
+// Helper function to perform HTTP GET request using libcurl
+static std::string httpGet(const std::string& url, std::string& error_msg) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        error_msg = "Failed to initialize libcurl";
+        return "";
+    }
+
+    std::string response_data;
+    CURLcode res;
+
+    // Set URL
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+
+    // Follow redirects (up to 5)
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+
+    // Set timeout (30 seconds)
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+
+    // Set user agent
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "BitTorrent Client/1.0");
+
+    // Set write callback
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
+
+    // Disable SSL verification for now (can be enabled later)
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+    // Perform the request
+    res = curl_easy_perform(curl);
+
+    if (res != CURLE_OK) {
+        error_msg = std::string("HTTP request failed: ") + curl_easy_strerror(res);
+        curl_easy_cleanup(curl);
+        return "";
+    }
+
+    // Check HTTP response code
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    if (http_code != 200) {
+        std::ostringstream oss;
+        oss << "HTTP error code: " << http_code;
+        error_msg = oss.str();
+        curl_easy_cleanup(curl);
+        return "";
+    }
+
+    curl_easy_cleanup(curl);
+    return response_data;
+}
 
 TrackerClient::TrackerClient(const std::string& announce_url,
                              const std::vector<uint8_t>& info_hash,
@@ -61,17 +128,22 @@ TrackerResponse TrackerClient::announce(int64_t uploaded,
                                        const std::string& event) {
     std::string url = buildAnnounceUrl(uploaded, downloaded, left, port, event);
 
-    // TODO: Implement actual HTTP request
-    // For now, return a dummy response
-    // In a full implementation, you would use libcurl or implement HTTP client
+    // Perform HTTP GET request
+    std::string error_msg;
+    std::string response_body = httpGet(url, error_msg);
 
-    TrackerResponse response;
-    response.interval = 1800;  // 30 minutes
-    response.complete = 0;
-    response.incomplete = 0;
-    response.failure_reason = "HTTP client not yet implemented";
+    // Handle HTTP errors
+    if (response_body.empty()) {
+        TrackerResponse error_response;
+        error_response.interval = 1800;
+        error_response.complete = 0;
+        error_response.incomplete = 0;
+        error_response.failure_reason = error_msg;
+        return error_response;
+    }
 
-    return response;
+    // Parse the tracker response
+    return parseResponse(response_body);
 }
 
 TrackerResponse TrackerClient::parseResponse(const std::string& response) {

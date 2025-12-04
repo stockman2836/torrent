@@ -30,3 +30,6 @@ downloads/*
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Development planning
+ROADMAP.md
