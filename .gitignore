@@ -1,0 +1,32 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Compiled files
+*.exe
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Downloaded files
+downloads/*
+!downloads/.gitkeep
+
+# Torrent files for testing
+*.torrent
+
+# OS specific
+.DS_Store
+Thumbs.db
