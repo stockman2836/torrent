@@ -6,6 +6,7 @@
 #include <bitset>
 #include <map>
 #include <memory>
+#include <set>
 
 namespace torrent {
 
@@ -56,8 +57,19 @@ public:
     bool hasPiece(uint32_t piece_index) const;
     void markPieceComplete(uint32_t piece_index);
 
-    // Get next piece to download
+    // Piece selection strategies
     int32_t getNextPiece(const std::vector<bool>& peer_has_pieces);
+    int32_t getNextPieceRarestFirst(const std::vector<std::vector<bool>>& all_peer_bitfields,
+                                    const std::vector<bool>& peer_has_pieces,
+                                    const std::set<uint32_t>& in_download);
+    int32_t getNextPieceRandomFirst(const std::vector<bool>& peer_has_pieces,
+                                    const std::set<uint32_t>& in_download);
+    int32_t getNextPieceSequential(const std::vector<bool>& peer_has_pieces,
+                                   const std::set<uint32_t>& in_download);
+
+    // Configuration
+    void setSequentialMode(bool sequential) { sequential_mode_ = sequential; }
+    bool isSequentialMode() const { return sequential_mode_; }
 
     // Block management
     std::vector<Block> getBlocksForPiece(uint32_t piece_index);
@@ -89,7 +101,15 @@ private:
     // Pieces in progress (being assembled)
     std::map<uint32_t, std::unique_ptr<PieceInProgress>> pieces_in_progress_;
 
+    // Piece selection configuration
+    bool sequential_mode_ = false;
+    size_t random_first_pieces_ = 4;  // Number of random pieces before rarest-first
+
     mutable std::mutex mutex_;
+
+private:
+    // Helper methods
+    std::vector<int> calculatePieceRarity(const std::vector<std::vector<bool>>& all_peer_bitfields) const;
 };
 
 } // namespace torrent

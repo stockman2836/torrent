@@ -496,19 +496,33 @@ int32_t DownloadManager::selectNextPiece(PeerInfo* peer) {
         return -1;
     }
 
-    // Normal mode - avoid pieces already being downloaded
+    std::vector<bool> peer_has_pieces = peer->connection->peerBitfield();
     std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
 
-    for (uint32_t i = 0; i < torrent_.numPieces(); ++i) {
-        if (!piece_manager_->hasPiece(i) &&
-            !piece_manager_->isPieceInProgress(i) &&
-            pieces_in_download_.find(i) == pieces_in_download_.end() &&
-            peer->connection->peerHasPiece(i)) {
-            return i;
+    // Sequential mode - user preference
+    if (piece_manager_->isSequentialMode()) {
+        return piece_manager_->getNextPieceSequential(peer_has_pieces, pieces_in_download_);
+    }
+
+    // Try random-first for initial pieces (improves swarm health)
+    int32_t random_piece = piece_manager_->getNextPieceRandomFirst(peer_has_pieces, pieces_in_download_);
+    if (random_piece >= 0) {
+        return random_piece;
+    }
+
+    // Collect all peer bitfields for rarity calculation
+    std::vector<std::vector<bool>> all_peer_bitfields;
+    {
+        std::lock_guard<std::mutex> peers_lock(peers_mutex_);
+        for (const auto& peer_info : active_peers_) {
+            if (peer_info.connection && peer_info.connection->isConnected()) {
+                all_peer_bitfields.push_back(peer_info.connection->peerBitfield());
+            }
         }
     }
 
-    return -1;
+    // Rarest-first strategy
+    return piece_manager_->getNextPieceRarestFirst(all_peer_bitfields, peer_has_pieces, pieces_in_download_);
 }
 
 bool DownloadManager::isEndgameMode() const {

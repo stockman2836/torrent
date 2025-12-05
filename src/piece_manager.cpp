@@ -254,4 +254,109 @@ size_t PieceManager::numPiecesInProgress() const {
     return pieces_in_progress_.size();
 }
 
+// Piece selection strategies
+
+std::vector<int> PieceManager::calculatePieceRarity(
+    const std::vector<std::vector<bool>>& all_peer_bitfields) const {
+
+    std::vector<int> rarity(num_pieces_, 0);
+
+    // Count how many peers have each piece
+    for (const auto& bitfield : all_peer_bitfields) {
+        for (size_t i = 0; i < std::min(bitfield.size(), num_pieces_); ++i) {
+            if (bitfield[i]) {
+                rarity[i]++;
+            }
+        }
+    }
+
+    return rarity;
+}
+
+int32_t PieceManager::getNextPieceRarestFirst(
+    const std::vector<std::vector<bool>>& all_peer_bitfields,
+    const std::vector<bool>& peer_has_pieces,
+    const std::set<uint32_t>& in_download) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Calculate rarity
+    std::vector<int> rarity = calculatePieceRarity(all_peer_bitfields);
+
+    // Find rarest piece that this peer has and we need
+    int32_t best_piece = -1;
+    int min_rarity = INT_MAX;
+
+    for (size_t i = 0; i < num_pieces_; ++i) {
+        if (!bitfield_[i] &&  // We don't have it
+            pieces_in_progress_.find(i) == pieces_in_progress_.end() &&  // Not in assembly
+            in_download.find(i) == in_download.end() &&  // Not being downloaded
+            i < peer_has_pieces.size() && peer_has_pieces[i] &&  // Peer has it
+            rarity[i] < min_rarity && rarity[i] > 0) {  // Rarer than current best
+
+            min_rarity = rarity[i];
+            best_piece = static_cast<int32_t>(i);
+        }
+    }
+
+    if (best_piece >= 0) {
+        std::cout << "Selected piece #" << best_piece << " (rarity: " << min_rarity << ")\n";
+    }
+
+    return best_piece;
+}
+
+int32_t PieceManager::getNextPieceRandomFirst(
+    const std::vector<bool>& peer_has_pieces,
+    const std::set<uint32_t>& in_download) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Check if we should still do random-first
+    if (pieces_downloaded_ >= random_first_pieces_) {
+        return -1;  // Switch to rarest-first
+    }
+
+    // Collect available pieces
+    std::vector<uint32_t> available;
+    for (size_t i = 0; i < num_pieces_; ++i) {
+        if (!bitfield_[i] &&
+            pieces_in_progress_.find(i) == pieces_in_progress_.end() &&
+            in_download.find(i) == in_download.end() &&
+            i < peer_has_pieces.size() && peer_has_pieces[i]) {
+            available.push_back(i);
+        }
+    }
+
+    if (available.empty()) {
+        return -1;
+    }
+
+    // Select random piece
+    size_t random_idx = rand() % available.size();
+    int32_t selected = available[random_idx];
+
+    std::cout << "Selected piece #" << selected << " (random-first mode)\n";
+    return selected;
+}
+
+int32_t PieceManager::getNextPieceSequential(
+    const std::vector<bool>& peer_has_pieces,
+    const std::set<uint32_t>& in_download) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Select first piece that we need and peer has
+    for (size_t i = 0; i < num_pieces_; ++i) {
+        if (!bitfield_[i] &&
+            pieces_in_progress_.find(i) == pieces_in_progress_.end() &&
+            in_download.find(i) == in_download.end() &&
+            i < peer_has_pieces.size() && peer_has_pieces[i]) {
+            return static_cast<int32_t>(i);
+        }
+    }
+
+    return -1;
+}
+
 } // namespace torrent
