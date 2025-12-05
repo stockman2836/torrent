@@ -15,6 +15,7 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , listen_port_(listen_port)
     , running_(false)
     , paused_(false)
+    , endgame_mode_(false)
     , total_downloaded_(0)
     , total_uploaded_(0) {
 
@@ -64,6 +65,7 @@ void DownloadManager::start() {
     // Start worker threads
     worker_threads_.emplace_back(&DownloadManager::downloadLoop, this);
     worker_threads_.emplace_back(&DownloadManager::trackerLoop, this);
+    worker_threads_.emplace_back(&DownloadManager::coordinatorLoop, this);
 }
 
 void DownloadManager::stop() {
@@ -83,7 +85,10 @@ void DownloadManager::stop() {
     worker_threads_.clear();
 
     // Disconnect all peers
-    connections_.clear();
+    {
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        active_peers_.clear();
+    }
 
     std::cout << "Download stopped.\n";
 }
@@ -111,11 +116,26 @@ int64_t DownloadManager::uploadSpeed() const {
 }
 
 void DownloadManager::printStatus() const {
+    size_t active_peer_count = 0;
+    size_t downloading_peers = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        active_peer_count = active_peers_.size();
+        for (const auto& peer : active_peers_) {
+            if (peer.current_piece != UINT32_MAX) {
+                downloading_peers++;
+            }
+        }
+    }
+
     std::cout << "\r[Progress: " << std::fixed << std::setprecision(2)
               << progress() << "%] "
               << "Down: " << utils::formatSpeed(downloadSpeed()) << " "
               << "Up: " << utils::formatSpeed(uploadSpeed()) << " "
-              << "Peers: " << connections_.size() << "   " << std::flush;
+              << "Peers: " << active_peer_count << " (" << downloading_peers << " active)"
+              << (endgame_mode_ ? " [ENDGAME]" : "")
+              << "   " << std::flush;
 }
 
 void DownloadManager::downloadLoop() {
@@ -154,7 +174,23 @@ void DownloadManager::trackerLoop() {
     }
 }
 
-void DownloadManager::peerLoop(const Peer& peer) {
+void DownloadManager::peerLoop(size_t peer_index) {
+    // Get peer info
+    PeerInfo* peer_info = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        if (peer_index >= active_peers_.size()) {
+            return;
+        }
+        peer_info = &active_peers_[peer_index];
+    }
+
+    if (!peer_info || !peer_info->connection) {
+        return;
+    }
+
+    PeerConnection* conn = peer_info->connection.get();
+    const Peer& peer = peer_info->peer_data;
     std::cout << "Starting peer loop for " << peer.ip << ":" << peer.port << "\n";
 
     // Create connection
@@ -295,25 +331,50 @@ void DownloadManager::peerLoop(const Peer& peer) {
 }
 
 void DownloadManager::connectToPeers() {
-    std::cout << "Connecting to " << peers_.size() << " peers...\n";
+    std::lock_guard<std::mutex> lock(peers_mutex_);
 
-    // Connect to a limited number of peers (e.g., 5 at a time)
-    size_t max_peers = 5;
-    size_t connected = 0;
+    std::cout << "Connecting to peers (have " << available_peers_.size()
+              << ", active " << active_peers_.size() << "/" << max_peers_ << ")...\n";
 
-    for (const auto& peer : peers_) {
-        if (connected >= max_peers) {
-            break;
+    // Connect to more peers if below max
+    size_t to_connect = std::min(
+        available_peers_.size(),
+        max_peers_ - active_peers_.size()
+    );
+
+    for (size_t i = 0; i < to_connect && !available_peers_.empty(); ++i) {
+        Peer peer = available_peers_.back();
+        available_peers_.pop_back();
+
+        std::cout << "Connecting to: " << peer.ip << ":" << peer.port << "\n";
+
+        // Create connection
+        auto connection = std::make_unique<PeerConnection>(
+            peer.ip, peer.port, torrent_.infoHash(), peer_id_
+        );
+
+        if (!connection->connect()) {
+            std::cerr << "Failed to connect to " << peer.ip << "\n";
+            continue;
         }
 
-        std::cout << "Starting connection to: " << peer.ip << ":" << peer.port << "\n";
+        connection->initializePeerBitfield(torrent_.numPieces());
 
-        // Start peer loop in separate thread
-        worker_threads_.emplace_back(&DownloadManager::peerLoop, this, peer);
-        connected++;
+        std::vector<bool> our_bitfield = piece_manager_->getBitfield();
+        if (!connection->performHandshake(our_bitfield)) {
+            std::cerr << "Failed handshake with " << peer.ip << "\n";
+            continue;
+        }
+
+        // Add to active peers
+        active_peers_.emplace_back(std::move(connection), peer);
+        size_t peer_idx = active_peers_.size() - 1;
+
+        // Start peer thread
+        worker_threads_.emplace_back(&DownloadManager::peerLoop, this, peer_idx);
+
+        std::cout << "Connected to " << peer.ip << " (total active: " << active_peers_.size() << ")\n";
     }
-
-    std::cout << "Started " << connected << " peer connections\n";
 }
 
 void DownloadManager::updateTracker() {
@@ -336,26 +397,167 @@ void DownloadManager::updateTracker() {
               << response.complete << " seeders, "
               << response.incomplete << " leechers\n";
 
-    peers_ = response.peers;
+    available_peers_ = response.peers;
     connectToPeers();
 }
 
 void DownloadManager::broadcastHave(uint32_t piece_index) {
-    std::lock_guard<std::mutex> lock(connections_mutex_);
+    std::lock_guard<std::mutex> lock(peers_mutex_);
 
     std::cout << "Broadcasting HAVE message for piece " << piece_index
-              << " to " << connections_.size() << " peers\n";
+              << " to " << active_peers_.size() << " peers\n";
 
     size_t sent = 0;
-    for (const auto& connection : connections_) {
-        if (connection && connection->isConnected()) {
-            if (connection->sendHave(piece_index)) {
+    for (auto& peer_info : active_peers_) {
+        if (peer_info.connection && peer_info.connection->isConnected()) {
+            if (peer_info.connection->sendHave(piece_index)) {
                 sent++;
             }
         }
     }
 
     std::cout << "HAVE message sent to " << sent << " peers\n";
+}
+
+// Coordinator loop - manages piece distribution across peers
+void DownloadManager::coordinatorLoop() {
+    std::cout << "Coordinator loop started\n";
+
+    while (running_) {
+        if (paused_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            continue;
+        }
+
+        // Assign pieces to available peers
+        assignPiecesToPeers();
+
+        // Cleanup stale peers
+        cleanupStalePeers();
+
+        // Check for endgame mode
+        if (!endgame_mode_ && isEndgameMode()) {
+            endgame_mode_ = true;
+            std::cout << "\n*** ENTERING ENDGAME MODE ***\n";
+        }
+
+        // Sleep before next coordination cycle
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    std::cout << "Coordinator loop ended\n";
+}
+
+void DownloadManager::assignPiecesToPeers() {
+    std::lock_guard<std::mutex> lock(peers_mutex_);
+
+    for (auto& peer_info : active_peers_) {
+        if (!peer_info.connection || !peer_info.connection->canDownload()) {
+            continue;
+        }
+
+        // Skip if peer is already downloading something
+        if (peer_info.current_piece != UINT32_MAX) {
+            continue;
+        }
+
+        // Select next piece for this peer
+        int32_t next_piece = selectNextPiece(&peer_info);
+        if (next_piece < 0) {
+            continue;
+        }
+
+        // Assign piece to peer
+        peer_info.current_piece = next_piece;
+
+        // Mark piece as being downloaded
+        {
+            std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+            pieces_in_download_.insert(next_piece);
+        }
+
+        std::cout << "Assigned piece #" << next_piece << " to peer "
+                  << peer_info.peer_data.ip << "\n";
+    }
+}
+
+int32_t DownloadManager::selectNextPiece(PeerInfo* peer) {
+    if (!peer || !peer->connection) {
+        return -1;
+    }
+
+    // In endgame mode, request any missing piece
+    if (endgame_mode_) {
+        for (uint32_t i = 0; i < torrent_.numPieces(); ++i) {
+            if (!piece_manager_->hasPiece(i) && peer->connection->peerHasPiece(i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // Normal mode - avoid pieces already being downloaded
+    std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+
+    for (uint32_t i = 0; i < torrent_.numPieces(); ++i) {
+        if (!piece_manager_->hasPiece(i) &&
+            !piece_manager_->isPieceInProgress(i) &&
+            pieces_in_download_.find(i) == pieces_in_download_.end() &&
+            peer->connection->peerHasPiece(i)) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+bool DownloadManager::isEndgameMode() const {
+    // Enter endgame when less than 5 pieces remaining
+    size_t remaining = torrent_.numPieces() - piece_manager_->numPiecesDownloaded();
+    return remaining > 0 && remaining <= 5;
+}
+
+void DownloadManager::cleanupStalePeers() {
+    std::lock_guard<std::mutex> lock(peers_mutex_);
+
+    for (auto it = active_peers_.begin(); it != active_peers_.end(); ) {
+        if (!it->connection || !it->connection->isConnected() || it->isStale(60)) {
+            std::cout << "Removing stale/disconnected peer " << it->peer_data.ip << "\n";
+
+            // Remove piece assignment
+            if (it->current_piece != UINT32_MAX) {
+                std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+                pieces_in_download_.erase(it->current_piece);
+            }
+
+            it = active_peers_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+PeerInfo* DownloadManager::selectPeerForPiece(uint32_t piece_index) {
+    std::lock_guard<std::mutex> lock(peers_mutex_);
+
+    PeerInfo* best_peer = nullptr;
+    double best_speed = 0.0;
+
+    for (auto& peer : active_peers_) {
+        if (peer.connection &&
+            peer.connection->canDownload() &&
+            peer.connection->peerHasPiece(piece_index) &&
+            peer.current_piece == UINT32_MAX) {
+
+            double speed = peer.downloadSpeed();
+            if (speed > best_speed) {
+                best_speed = speed;
+                best_peer = &peer;
+            }
+        }
+    }
+
+    return best_peer;
 }
 
 } // namespace torrent
