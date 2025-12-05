@@ -296,6 +296,36 @@ bool PeerConnection::performHandshake() {
     return true;
 }
 
+bool PeerConnection::performHandshake(const std::vector<bool>& our_bitfield) {
+    // First, perform the standard handshake
+    if (!performHandshake()) {
+        return false;
+    }
+
+    // After successful handshake, send our bitfield if we have any pieces
+    bool has_any_piece = false;
+    for (bool piece : our_bitfield) {
+        if (piece) {
+            has_any_piece = true;
+            break;
+        }
+    }
+
+    if (has_any_piece) {
+        std::cout << "Sending our bitfield to peer...\n";
+        if (!sendBitfield(our_bitfield)) {
+            std::cerr << "WARNING: Failed to send bitfield, but handshake succeeded\n";
+            // Don't fail the handshake just because bitfield send failed
+        } else {
+            std::cout << "Successfully sent bitfield to peer\n";
+        }
+    } else {
+        std::cout << "Not sending bitfield (no pieces downloaded yet)\n";
+    }
+
+    return true;
+}
+
 bool PeerConnection::sendMessage(const PeerMessage& message) {
     std::vector<uint8_t> data = serializeMessage(message);
     return sendData(data.data(), data.size());
@@ -412,6 +442,19 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
             if (parseBitfield(*message, bitfield_msg)) {
                 // Update peer bitfield
                 peer_bitfield_ = std::move(bitfield_msg.bitfield);
+
+                // Log statistics
+                size_t piece_count = getPeerPieceCount();
+                size_t total_pieces = peer_bitfield_.size();
+                double completion = total_pieces > 0 ?
+                    (static_cast<double>(piece_count) / total_pieces * 100.0) : 0.0;
+
+                std::cout << "Peer bitfield received: " << piece_count << "/" << total_pieces
+                          << " pieces (" << completion << "%)";
+                if (isPeerSeeder()) {
+                    std::cout << " - SEEDER";
+                }
+                std::cout << "\n";
             }
             break;
         }
@@ -752,7 +795,9 @@ bool PeerConnection::parseBitfield(const PeerMessage& message, BitfieldMessage& 
         }
     }
 
-    std::cout << "Parsed BITFIELD message: " << result.bitfield.size() << " bits\n";
+    // Note: The bitfield may have extra bits due to byte padding
+    // The caller should trim it to the actual number of pieces if needed
+    std::cout << "Parsed BITFIELD message: " << result.bitfield.size() << " bits (may need trimming)\n";
     return true;
 }
 
@@ -876,6 +921,45 @@ bool PeerConnection::parseCancel(const PeerMessage& message, CancelMessage& resu
     std::cout << "Parsed CANCEL message: piece_index=" << result.piece_index
               << ", offset=" << result.offset
               << ", length=" << result.length << "\n";
+    return true;
+}
+
+// Bitfield management methods
+
+void PeerConnection::initializePeerBitfield(size_t num_pieces) {
+    peer_bitfield_.clear();
+    peer_bitfield_.resize(num_pieces, false);
+    std::cout << "Initialized peer bitfield with " << num_pieces << " pieces\n";
+}
+
+bool PeerConnection::peerHasPiece(uint32_t piece_index) const {
+    if (piece_index >= peer_bitfield_.size()) {
+        return false;
+    }
+    return peer_bitfield_[piece_index];
+}
+
+size_t PeerConnection::getPeerPieceCount() const {
+    size_t count = 0;
+    for (bool has_piece : peer_bitfield_) {
+        if (has_piece) {
+            count++;
+        }
+    }
+    return count;
+}
+
+bool PeerConnection::isPeerSeeder() const {
+    if (peer_bitfield_.empty()) {
+        return false;
+    }
+
+    // A peer is a seeder if it has all pieces
+    for (bool has_piece : peer_bitfield_) {
+        if (!has_piece) {
+            return false;
+        }
+    }
     return true;
 }
 

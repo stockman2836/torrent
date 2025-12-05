@@ -72,6 +72,7 @@ public:
 
     // Handshake
     bool performHandshake();
+    bool performHandshake(const std::vector<bool>& our_bitfield);
 
     // Message sending
     bool sendKeepAlive();
@@ -109,6 +110,13 @@ public:
 
     const std::vector<bool>& peerBitfield() const { return peer_bitfield_; }
     const std::string& remotePeerId() const { return remote_peer_id_; }
+
+    // Bitfield management
+    void initializePeerBitfield(size_t num_pieces);
+    bool peerHasPiece(uint32_t piece_index) const;
+    size_t getPeerPieceCount() const;
+    size_t getPeerBitfieldSize() const { return peer_bitfield_.size(); }
+    bool isPeerSeeder() const;
 
 private:
     bool sendMessage(const PeerMessage& message);
