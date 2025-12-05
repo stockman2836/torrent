@@ -340,12 +340,16 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
 
     // Keep-alive message (length = 0)
     if (message_length == 0) {
-        return std::make_unique<PeerMessage>();
+        auto message = std::make_unique<PeerMessage>();
+        message->type = MessageType::KEEP_ALIVE;
+        std::cout << "Received KEEP_ALIVE message\n";
+        message_queue_.push(std::move(message));
+        return popMessage();
     }
 
-    // Sanity check on message length (max 256KB for piece messages)
-    if (message_length > 262144) {
-        std::cerr << "Invalid message length: " << message_length << "\n";
+    // Sanity check on message length (max 256KB for piece messages + overhead)
+    if (message_length > 262144 + 9) {
+        std::cerr << "ERROR: Invalid message length: " << message_length << " (max 262153)\n";
         disconnect();
         return nullptr;
     }
@@ -353,6 +357,7 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
     // Read message ID (1 byte)
     uint8_t message_id;
     if (!receiveData(&message_id, 1)) {
+        std::cerr << "ERROR: Failed to read message ID\n";
         return nullptr;
     }
 
@@ -361,6 +366,7 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
     if (message_length > 1) {
         payload.resize(message_length - 1);
         if (!receiveData(payload.data(), payload.size())) {
+            std::cerr << "ERROR: Failed to read message payload (expected " << (message_length - 1) << " bytes)\n";
             return nullptr;
         }
     }
@@ -373,21 +379,61 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
     switch (message->type) {
         case MessageType::CHOKE:
             peer_choking_ = true;
+            std::cout << "Received CHOKE message\n";
             break;
         case MessageType::UNCHOKE:
             peer_choking_ = false;
+            std::cout << "Received UNCHOKE message\n";
             break;
         case MessageType::INTERESTED:
             peer_interested_ = true;
+            std::cout << "Received INTERESTED message\n";
             break;
         case MessageType::NOT_INTERESTED:
             peer_interested_ = false;
+            std::cout << "Received NOT_INTERESTED message\n";
+            break;
+        case MessageType::HAVE: {
+            HaveMessage have_msg;
+            if (parseHave(*message, have_msg)) {
+                // Update peer bitfield - mark the piece as available
+                if (have_msg.piece_index < peer_bitfield_.size()) {
+                    peer_bitfield_[have_msg.piece_index] = true;
+                } else {
+                    // Expand bitfield if needed
+                    peer_bitfield_.resize(have_msg.piece_index + 1, false);
+                    peer_bitfield_[have_msg.piece_index] = true;
+                }
+            }
+            break;
+        }
+        case MessageType::BITFIELD: {
+            BitfieldMessage bitfield_msg;
+            if (parseBitfield(*message, bitfield_msg)) {
+                // Update peer bitfield
+                peer_bitfield_ = std::move(bitfield_msg.bitfield);
+            }
+            break;
+        }
+        case MessageType::REQUEST:
+            std::cout << "Received REQUEST message\n";
+            break;
+        case MessageType::PIECE:
+            std::cout << "Received PIECE message (" << message->payload.size() << " bytes payload)\n";
+            break;
+        case MessageType::CANCEL:
+            std::cout << "Received CANCEL message\n";
             break;
         default:
+            std::cout << "Received unknown message type: " << static_cast<int>(message->type) << "\n";
             break;
     }
 
-    return message;
+    // Add message to queue for processing
+    message_queue_.push(std::move(message));
+
+    // Return the message from queue
+    return popMessage();
 }
 
 bool PeerConnection::sendKeepAlive() {
@@ -672,6 +718,165 @@ bool PeerConnection::receiveDataWithTimeout(void* buffer, size_t length, int tim
     }
 
     return receiveData(buffer, length);
+}
+
+std::unique_ptr<PeerMessage> PeerConnection::popMessage() {
+    if (message_queue_.empty()) {
+        return nullptr;
+    }
+
+    auto message = std::move(message_queue_.front());
+    message_queue_.pop();
+    return message;
+}
+
+bool PeerConnection::parseBitfield(const PeerMessage& message, BitfieldMessage& result) {
+    if (message.type != MessageType::BITFIELD) {
+        std::cerr << "ERROR: Message is not a BITFIELD message\n";
+        return false;
+    }
+
+    if (message.payload.empty()) {
+        std::cerr << "ERROR: BITFIELD message has empty payload\n";
+        return false;
+    }
+
+    // Convert byte array to vector<bool>
+    result.bitfield.clear();
+    result.bitfield.reserve(message.payload.size() * 8);
+
+    for (size_t i = 0; i < message.payload.size(); ++i) {
+        uint8_t byte = message.payload[i];
+        for (int bit = 7; bit >= 0; --bit) {
+            result.bitfield.push_back((byte & (1 << bit)) != 0);
+        }
+    }
+
+    std::cout << "Parsed BITFIELD message: " << result.bitfield.size() << " bits\n";
+    return true;
+}
+
+bool PeerConnection::parseHave(const PeerMessage& message, HaveMessage& result) {
+    if (message.type != MessageType::HAVE) {
+        std::cerr << "ERROR: Message is not a HAVE message\n";
+        return false;
+    }
+
+    if (message.payload.size() != 4) {
+        std::cerr << "ERROR: HAVE message payload must be 4 bytes, got " << message.payload.size() << "\n";
+        return false;
+    }
+
+    // Parse piece index (big-endian)
+    result.piece_index = (static_cast<uint32_t>(message.payload[0]) << 24) |
+                         (static_cast<uint32_t>(message.payload[1]) << 16) |
+                         (static_cast<uint32_t>(message.payload[2]) << 8) |
+                         static_cast<uint32_t>(message.payload[3]);
+
+    std::cout << "Parsed HAVE message: piece_index=" << result.piece_index << "\n";
+    return true;
+}
+
+bool PeerConnection::parsePiece(const PeerMessage& message, PieceMessage& result) {
+    if (message.type != MessageType::PIECE) {
+        std::cerr << "ERROR: Message is not a PIECE message\n";
+        return false;
+    }
+
+    if (message.payload.size() < 8) {
+        std::cerr << "ERROR: PIECE message payload must be at least 8 bytes, got " << message.payload.size() << "\n";
+        return false;
+    }
+
+    // Parse piece index (big-endian, bytes 0-3)
+    result.piece_index = (static_cast<uint32_t>(message.payload[0]) << 24) |
+                         (static_cast<uint32_t>(message.payload[1]) << 16) |
+                         (static_cast<uint32_t>(message.payload[2]) << 8) |
+                         static_cast<uint32_t>(message.payload[3]);
+
+    // Parse offset (big-endian, bytes 4-7)
+    result.offset = (static_cast<uint32_t>(message.payload[4]) << 24) |
+                    (static_cast<uint32_t>(message.payload[5]) << 16) |
+                    (static_cast<uint32_t>(message.payload[6]) << 8) |
+                    static_cast<uint32_t>(message.payload[7]);
+
+    // Extract data (remaining bytes)
+    result.data.assign(message.payload.begin() + 8, message.payload.end());
+
+    std::cout << "Parsed PIECE message: piece_index=" << result.piece_index
+              << ", offset=" << result.offset
+              << ", data_size=" << result.data.size() << " bytes\n";
+    return true;
+}
+
+bool PeerConnection::parseRequest(const PeerMessage& message, RequestMessage& result) {
+    if (message.type != MessageType::REQUEST) {
+        std::cerr << "ERROR: Message is not a REQUEST message\n";
+        return false;
+    }
+
+    if (message.payload.size() != 12) {
+        std::cerr << "ERROR: REQUEST message payload must be 12 bytes, got " << message.payload.size() << "\n";
+        return false;
+    }
+
+    // Parse piece index (big-endian, bytes 0-3)
+    result.piece_index = (static_cast<uint32_t>(message.payload[0]) << 24) |
+                         (static_cast<uint32_t>(message.payload[1]) << 16) |
+                         (static_cast<uint32_t>(message.payload[2]) << 8) |
+                         static_cast<uint32_t>(message.payload[3]);
+
+    // Parse offset (big-endian, bytes 4-7)
+    result.offset = (static_cast<uint32_t>(message.payload[4]) << 24) |
+                    (static_cast<uint32_t>(message.payload[5]) << 16) |
+                    (static_cast<uint32_t>(message.payload[6]) << 8) |
+                    static_cast<uint32_t>(message.payload[7]);
+
+    // Parse length (big-endian, bytes 8-11)
+    result.length = (static_cast<uint32_t>(message.payload[8]) << 24) |
+                    (static_cast<uint32_t>(message.payload[9]) << 16) |
+                    (static_cast<uint32_t>(message.payload[10]) << 8) |
+                    static_cast<uint32_t>(message.payload[11]);
+
+    std::cout << "Parsed REQUEST message: piece_index=" << result.piece_index
+              << ", offset=" << result.offset
+              << ", length=" << result.length << "\n";
+    return true;
+}
+
+bool PeerConnection::parseCancel(const PeerMessage& message, CancelMessage& result) {
+    if (message.type != MessageType::CANCEL) {
+        std::cerr << "ERROR: Message is not a CANCEL message\n";
+        return false;
+    }
+
+    if (message.payload.size() != 12) {
+        std::cerr << "ERROR: CANCEL message payload must be 12 bytes, got " << message.payload.size() << "\n";
+        return false;
+    }
+
+    // Parse piece index (big-endian, bytes 0-3)
+    result.piece_index = (static_cast<uint32_t>(message.payload[0]) << 24) |
+                         (static_cast<uint32_t>(message.payload[1]) << 16) |
+                         (static_cast<uint32_t>(message.payload[2]) << 8) |
+                         static_cast<uint32_t>(message.payload[3]);
+
+    // Parse offset (big-endian, bytes 4-7)
+    result.offset = (static_cast<uint32_t>(message.payload[4]) << 24) |
+                    (static_cast<uint32_t>(message.payload[5]) << 16) |
+                    (static_cast<uint32_t>(message.payload[6]) << 8) |
+                    static_cast<uint32_t>(message.payload[7]);
+
+    // Parse length (big-endian, bytes 8-11)
+    result.length = (static_cast<uint32_t>(message.payload[8]) << 24) |
+                    (static_cast<uint32_t>(message.payload[9]) << 16) |
+                    (static_cast<uint32_t>(message.payload[10]) << 8) |
+                    static_cast<uint32_t>(message.payload[11]);
+
+    std::cout << "Parsed CANCEL message: piece_index=" << result.piece_index
+              << ", offset=" << result.offset
+              << ", length=" << result.length << "\n";
+    return true;
 }
 
 } // namespace torrent

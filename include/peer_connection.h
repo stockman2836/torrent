@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <functional>
+#include <queue>
 
 namespace torrent {
 
@@ -19,12 +20,40 @@ enum class MessageType : uint8_t {
     REQUEST = 6,
     PIECE = 7,
     CANCEL = 8,
-    PORT = 9
+    PORT = 9,
+    KEEP_ALIVE = 255  // Special type for keep-alive messages
 };
 
 struct PeerMessage {
     MessageType type;
     std::vector<uint8_t> payload;
+};
+
+// Parsed message structures for specific message types
+struct BitfieldMessage {
+    std::vector<bool> bitfield;
+};
+
+struct HaveMessage {
+    uint32_t piece_index;
+};
+
+struct PieceMessage {
+    uint32_t piece_index;
+    uint32_t offset;
+    std::vector<uint8_t> data;
+};
+
+struct RequestMessage {
+    uint32_t piece_index;
+    uint32_t offset;
+    uint32_t length;
+};
+
+struct CancelMessage {
+    uint32_t piece_index;
+    uint32_t offset;
+    uint32_t length;
 };
 
 class PeerConnection {
@@ -58,6 +87,19 @@ public:
 
     // Message receiving
     std::unique_ptr<PeerMessage> receiveMessage();
+
+    // Check if there are messages in the queue
+    bool hasMessages() const { return !message_queue_.empty(); }
+
+    // Get the next message from the queue
+    std::unique_ptr<PeerMessage> popMessage();
+
+    // Parse specific message types
+    bool parseBitfield(const PeerMessage& message, BitfieldMessage& result);
+    bool parseHave(const PeerMessage& message, HaveMessage& result);
+    bool parsePiece(const PeerMessage& message, PieceMessage& result);
+    bool parseRequest(const PeerMessage& message, RequestMessage& result);
+    bool parseCancel(const PeerMessage& message, CancelMessage& result);
 
     // State
     bool amChoking() const { return am_choking_; }
@@ -96,6 +138,9 @@ private:
     bool peer_interested_;
 
     std::vector<bool> peer_bitfield_;
+
+    // Message queue for processing messages in order
+    std::queue<std::unique_ptr<PeerMessage>> message_queue_;
 };
 
 } // namespace torrent
