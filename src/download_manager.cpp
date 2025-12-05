@@ -1,6 +1,7 @@
 #include "download_manager.h"
 #include "utils.h"
 #include <iostream>
+#include <iomanip>
 #include <chrono>
 #include <thread>
 
@@ -118,20 +119,26 @@ void DownloadManager::printStatus() const {
 }
 
 void DownloadManager::downloadLoop() {
+    // Wait for initial peer list from tracker
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
     while (running_) {
         if (paused_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
 
-        // TODO: Implement actual download logic
-        // For now, just sleep
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Print status
+        printStatus();
 
         // Check if complete
         if (progress() >= 100.0) {
+            std::cout << "\nDownload complete!\n";
             break;
         }
+
+        // Sleep
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
 
@@ -148,15 +155,124 @@ void DownloadManager::trackerLoop() {
 }
 
 void DownloadManager::peerLoop(const Peer& peer) {
-    // TODO: Implement peer communication loop
-    std::cout << "Peer loop for " << peer.ip << ":" << peer.port << "\n";
+    std::cout << "Starting peer loop for " << peer.ip << ":" << peer.port << "\n";
+
+    // Create connection
+    auto connection = std::make_unique<PeerConnection>(
+        peer.ip,
+        peer.port,
+        torrent_.infoHash(),
+        peer_id_
+    );
+
+    // Connect
+    if (!connection->connect()) {
+        std::cerr << "Failed to connect to peer " << peer.ip << ":" << peer.port << "\n";
+        return;
+    }
+
+    // Initialize peer bitfield
+    connection->initializePeerBitfield(torrent_.numPieces());
+
+    // Perform handshake with our bitfield
+    std::vector<bool> our_bitfield = piece_manager_->getBitfield();
+    if (!connection->performHandshake(our_bitfield)) {
+        std::cerr << "Failed to perform handshake with " << peer.ip << ":" << peer.port << "\n";
+        return;
+    }
+
+    // Main communication loop
+    while (running_ && !paused_ && connection->isConnected()) {
+        // Receive and process messages
+        auto message = connection->receiveMessage();
+        if (!message) {
+            std::cerr << "Connection closed by peer " << peer.ip << ":" << peer.port << "\n";
+            break;
+        }
+
+        // Check if we're interested in this peer
+        if (!connection->amInterested()) {
+            // Check if peer has pieces we need
+            bool has_needed_pieces = false;
+            for (uint32_t i = 0; i < torrent_.numPieces(); ++i) {
+                if (!piece_manager_->hasPiece(i) && connection->peerHasPiece(i)) {
+                    has_needed_pieces = true;
+                    break;
+                }
+            }
+
+            if (has_needed_pieces) {
+                std::cout << "Sending INTERESTED to " << peer.ip << "\n";
+                connection->sendInterested();
+            }
+        }
+
+        // If we can download, request pieces
+        if (connection->canDownload() && !connection->hasPendingRequests()) {
+            // Get next piece to download
+            int32_t next_piece = piece_manager_->getNextPiece(connection->peerBitfield());
+
+            if (next_piece >= 0) {
+                std::cout << "Requesting piece #" << next_piece << " from " << peer.ip << "\n";
+
+                // Get blocks for this piece
+                std::vector<Block> blocks = piece_manager_->getBlocksForPiece(next_piece);
+
+                // Request the piece
+                connection->requestPiece(next_piece, blocks);
+            }
+        }
+
+        // Handle timed out requests
+        auto timed_out = connection->getTimedOutRequests(30);
+        if (!timed_out.empty()) {
+            std::cout << "Detected " << timed_out.size() << " timed out requests\n";
+            // Could retry or move to another peer
+        }
+
+        // Process received pieces
+        if (message->type == MessageType::PIECE) {
+            PieceMessage piece_msg;
+            if (connection->parsePiece(*message, piece_msg)) {
+                std::cout << "Received piece data: piece=" << piece_msg.piece_index
+                          << " offset=" << piece_msg.offset
+                          << " size=" << piece_msg.data.size() << "\n";
+
+                // Add block to piece manager
+                piece_manager_->addBlock(piece_msg.piece_index, piece_msg.offset, piece_msg.data);
+
+                // Update statistics
+                total_downloaded_ += piece_msg.data.size();
+            }
+        }
+
+        // Small sleep to prevent busy loop
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    std::cout << "Peer loop ended for " << peer.ip << ":" << peer.port << "\n";
 }
 
 void DownloadManager::connectToPeers() {
-    // TODO: Connect to peers from tracker
+    std::cout << "Connecting to " << peers_.size() << " peers...\n";
+
+    // Connect to a limited number of peers (e.g., 5 at a time)
+    size_t max_peers = 5;
+    size_t connected = 0;
+
     for (const auto& peer : peers_) {
-        std::cout << "Would connect to: " << peer.ip << ":" << peer.port << "\n";
+        if (connected >= max_peers) {
+            break;
+        }
+
+        std::cout << "Starting connection to: " << peer.ip << ":" << peer.port << "\n";
+
+        // Start peer loop in separate thread
+        worker_threads_.emplace_back(&DownloadManager::peerLoop, this, peer);
+        connected++;
     }
+
+    std::cout << "Started " << connected << " peer connections\n";
 }
 
 void DownloadManager::updateTracker() {

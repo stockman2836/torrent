@@ -6,8 +6,13 @@
 #include <memory>
 #include <functional>
 #include <queue>
+#include <chrono>
+#include <map>
 
 namespace torrent {
+
+// Forward declaration
+struct Block;
 
 // BitTorrent protocol message types
 enum class MessageType : uint8_t {
@@ -54,6 +59,18 @@ struct CancelMessage {
     uint32_t piece_index;
     uint32_t offset;
     uint32_t length;
+};
+
+// Structure to track pending block requests
+struct PendingRequest {
+    uint32_t piece_index;
+    uint32_t offset;
+    uint32_t length;
+    std::chrono::steady_clock::time_point request_time;
+
+    PendingRequest(uint32_t pi, uint32_t off, uint32_t len)
+        : piece_index(pi), offset(off), length(len),
+          request_time(std::chrono::steady_clock::now()) {}
 };
 
 class PeerConnection {
@@ -118,6 +135,20 @@ public:
     size_t getPeerBitfieldSize() const { return peer_bitfield_.size(); }
     bool isPeerSeeder() const;
 
+    // Piece request management
+    bool requestPiece(uint32_t piece_index, const std::vector<Block>& blocks);
+    bool requestBlock(uint32_t piece_index, uint32_t offset, uint32_t length);
+    bool hasPendingRequests() const { return !pending_requests_.empty(); }
+    size_t numPendingRequests() const { return pending_requests_.size(); }
+    void clearPendingRequests();
+    bool isPendingRequest(uint32_t piece_index, uint32_t offset) const;
+    std::vector<PendingRequest> getTimedOutRequests(int timeout_seconds = 30);
+    void removeRequest(uint32_t piece_index, uint32_t offset);
+
+    // Workflow helpers
+    bool canDownload() const { return !peer_choking_ && am_interested_; }
+    bool isReadyForRequests() const { return handshake_completed_ && !peer_choking_ && am_interested_; }
+
 private:
     bool sendMessage(const PeerMessage& message);
     std::vector<uint8_t> serializeMessage(const PeerMessage& message);
@@ -149,6 +180,9 @@ private:
 
     // Message queue for processing messages in order
     std::queue<std::unique_ptr<PeerMessage>> message_queue_;
+
+    // Pending request tracking (key: "piece_index:offset")
+    std::map<std::string, PendingRequest> pending_requests_;
 };
 
 } // namespace torrent
