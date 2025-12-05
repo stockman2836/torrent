@@ -74,8 +74,74 @@ std::vector<Block> PieceManager::getBlocksForPiece(uint32_t piece_index) {
 }
 
 bool PieceManager::addBlock(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data) {
-    // TODO: Store block data and check if piece is complete
-    // For now, just a stub
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (piece_index >= num_pieces_) {
+        std::cerr << "Invalid piece index: " << piece_index << "\n";
+        return false;
+    }
+
+    // Check if already have this piece
+    if (bitfield_[piece_index]) {
+        std::cout << "Piece " << piece_index << " already completed, ignoring block\n";
+        return true;
+    }
+
+    // Get or create PieceInProgress
+    auto it = pieces_in_progress_.find(piece_index);
+    if (it == pieces_in_progress_.end()) {
+        // Create new piece in progress
+        size_t piece_size = piece_length_;
+        if (piece_index == num_pieces_ - 1) {
+            size_t last_piece_size = total_length_ % piece_length_;
+            if (last_piece_size != 0) {
+                piece_size = last_piece_size;
+            }
+        }
+
+        size_t num_blocks = (piece_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        auto piece = std::make_unique<PieceInProgress>(piece_index, piece_size, num_blocks);
+        it = pieces_in_progress_.emplace(piece_index, std::move(piece)).first;
+
+        std::cout << "Started assembling piece " << piece_index
+                  << " (size=" << piece_size << " bytes, "
+                  << num_blocks << " blocks)\n";
+    }
+
+    PieceInProgress* piece = it->second.get();
+
+    // Calculate block index
+    size_t block_index = offset / BLOCK_SIZE;
+    if (block_index >= piece->total_blocks) {
+        std::cerr << "Invalid block index " << block_index
+                  << " for piece " << piece_index << "\n";
+        return false;
+    }
+
+    // Check if already have this block
+    if (piece->blocks_received[block_index]) {
+        std::cout << "Block already received: piece=" << piece_index
+                  << " offset=" << offset << "\n";
+        return true;
+    }
+
+    // Copy block data into piece buffer
+    if (offset + data.size() > piece->piece_size) {
+        std::cerr << "Block data exceeds piece size\n";
+        return false;
+    }
+
+    std::copy(data.begin(), data.end(), piece->data.begin() + offset);
+    piece->blocks_received[block_index] = true;
+    piece->blocks_downloaded++;
+
+    std::cout << "Block received: piece=" << piece_index
+              << " offset=" << offset
+              << " size=" << data.size()
+              << " (" << piece->blocks_downloaded << "/"
+              << piece->total_blocks << " blocks, "
+              << static_cast<int>(piece->progress() * 100) << "%)\n";
+
     return true;
 }
 
@@ -113,6 +179,79 @@ double PieceManager::percentComplete() const {
 std::vector<bool> PieceManager::getBitfield() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return bitfield_;
+}
+
+bool PieceManager::isPieceInProgress(uint32_t piece_index) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pieces_in_progress_.find(piece_index) != pieces_in_progress_.end();
+}
+
+PieceInProgress* PieceManager::getPieceInProgress(uint32_t piece_index) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = pieces_in_progress_.find(piece_index);
+    return (it != pieces_in_progress_.end()) ? it->second.get() : nullptr;
+}
+
+bool PieceManager::completePiece(uint32_t piece_index, FileManager* file_manager) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Check if piece is in progress
+    auto it = pieces_in_progress_.find(piece_index);
+    if (it == pieces_in_progress_.end()) {
+        std::cerr << "Piece " << piece_index << " is not in progress\n";
+        return false;
+    }
+
+    PieceInProgress* piece = it->second.get();
+
+    // Check if all blocks received
+    if (!piece->isComplete()) {
+        std::cerr << "Piece " << piece_index << " is not complete yet ("
+                  << piece->blocks_downloaded << "/" << piece->total_blocks << " blocks)\n";
+        return false;
+    }
+
+    std::cout << "Piece " << piece_index << " assembly complete, verifying hash...\n";
+
+    // Verify hash
+    if (!verifyPiece(piece_index, piece->data)) {
+        std::cerr << "ERROR: Piece " << piece_index << " hash verification FAILED!\n";
+        std::cerr << "  Discarding piece and will re-request\n";
+
+        // Remove from in-progress
+        pieces_in_progress_.erase(it);
+        return false;
+    }
+
+    std::cout << "Piece " << piece_index << " hash verification SUCCESS\n";
+
+    // Write to disk
+    if (file_manager && !file_manager->writePiece(piece_index, piece->data)) {
+        std::cerr << "ERROR: Failed to write piece " << piece_index << " to disk\n";
+        pieces_in_progress_.erase(it);
+        return false;
+    }
+
+    std::cout << "Piece " << piece_index << " written to disk successfully\n";
+
+    // Mark as complete
+    if (!bitfield_[piece_index]) {
+        bitfield_[piece_index] = true;
+        pieces_downloaded_++;
+    }
+
+    // Remove from in-progress
+    pieces_in_progress_.erase(it);
+
+    std::cout << "✓ Piece " << piece_index << " COMPLETED! Progress: "
+              << percentComplete() << "%\n";
+
+    return true;
+}
+
+size_t PieceManager::numPiecesInProgress() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pieces_in_progress_.size();
 }
 
 } // namespace torrent

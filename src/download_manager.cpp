@@ -174,28 +174,47 @@ void DownloadManager::peerLoop(const Peer& peer) {
     // Initialize peer bitfield
     connection->initializePeerBitfield(torrent_.numPieces());
 
+    // Add to connections list
+    {
+        std::lock_guard<std::mutex> lock(connections_mutex_);
+        connections_.push_back(std::move(connection));
+    }
+
+    // Get pointer to connection (last element)
+    PeerConnection* conn_ptr = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(connections_mutex_);
+        if (!connections_.empty()) {
+            conn_ptr = connections_.back().get();
+        }
+    }
+
+    if (!conn_ptr) {
+        return;
+    }
+
     // Perform handshake with our bitfield
     std::vector<bool> our_bitfield = piece_manager_->getBitfield();
-    if (!connection->performHandshake(our_bitfield)) {
+    if (!conn_ptr->performHandshake(our_bitfield)) {
         std::cerr << "Failed to perform handshake with " << peer.ip << ":" << peer.port << "\n";
         return;
     }
 
     // Main communication loop
-    while (running_ && !paused_ && connection->isConnected()) {
+    while (running_ && !paused_ && conn_ptr->isConnected()) {
         // Receive and process messages
-        auto message = connection->receiveMessage();
+        auto message = conn_ptr->receiveMessage();
         if (!message) {
             std::cerr << "Connection closed by peer " << peer.ip << ":" << peer.port << "\n";
             break;
         }
 
         // Check if we're interested in this peer
-        if (!connection->amInterested()) {
+        if (!conn_ptr->amInterested()) {
             // Check if peer has pieces we need
             bool has_needed_pieces = false;
             for (uint32_t i = 0; i < torrent_.numPieces(); ++i) {
-                if (!piece_manager_->hasPiece(i) && connection->peerHasPiece(i)) {
+                if (!piece_manager_->hasPiece(i) && conn_ptr->peerHasPiece(i)) {
                     has_needed_pieces = true;
                     break;
                 }
@@ -203,14 +222,14 @@ void DownloadManager::peerLoop(const Peer& peer) {
 
             if (has_needed_pieces) {
                 std::cout << "Sending INTERESTED to " << peer.ip << "\n";
-                connection->sendInterested();
+                conn_ptr->sendInterested();
             }
         }
 
         // If we can download, request pieces
-        if (connection->canDownload() && !connection->hasPendingRequests()) {
+        if (conn_ptr->canDownload() && !conn_ptr->hasPendingRequests()) {
             // Get next piece to download
-            int32_t next_piece = piece_manager_->getNextPiece(connection->peerBitfield());
+            int32_t next_piece = piece_manager_->getNextPiece(conn_ptr->peerBitfield());
 
             if (next_piece >= 0) {
                 std::cout << "Requesting piece #" << next_piece << " from " << peer.ip << "\n";
@@ -219,12 +238,12 @@ void DownloadManager::peerLoop(const Peer& peer) {
                 std::vector<Block> blocks = piece_manager_->getBlocksForPiece(next_piece);
 
                 // Request the piece
-                connection->requestPiece(next_piece, blocks);
+                conn_ptr->requestPiece(next_piece, blocks);
             }
         }
 
         // Handle timed out requests
-        auto timed_out = connection->getTimedOutRequests(30);
+        auto timed_out = conn_ptr->getTimedOutRequests(30);
         if (!timed_out.empty()) {
             std::cout << "Detected " << timed_out.size() << " timed out requests\n";
             // Could retry or move to another peer
@@ -233,7 +252,7 @@ void DownloadManager::peerLoop(const Peer& peer) {
         // Process received pieces
         if (message->type == MessageType::PIECE) {
             PieceMessage piece_msg;
-            if (connection->parsePiece(*message, piece_msg)) {
+            if (conn_ptr->parsePiece(*message, piece_msg)) {
                 std::cout << "Received piece data: piece=" << piece_msg.piece_index
                           << " offset=" << piece_msg.offset
                           << " size=" << piece_msg.data.size() << "\n";
@@ -243,6 +262,28 @@ void DownloadManager::peerLoop(const Peer& peer) {
 
                 // Update statistics
                 total_downloaded_ += piece_msg.data.size();
+
+                // Check if piece is complete
+                if (piece_manager_->isPieceInProgress(piece_msg.piece_index)) {
+                    PieceInProgress* piece = piece_manager_->getPieceInProgress(piece_msg.piece_index);
+                    if (piece && piece->isComplete()) {
+                        std::cout << "\n========== PIECE COMPLETE ==========\n";
+                        std::cout << "All blocks received for piece " << piece_msg.piece_index << "\n";
+
+                        // Complete the piece (verify and write to disk)
+                        if (piece_manager_->completePiece(piece_msg.piece_index, file_manager_.get())) {
+                            std::cout << "SUCCESS: Piece " << piece_msg.piece_index << " verified and saved!\n";
+
+                            // Send HAVE message to all connected peers
+                            broadcastHave(piece_msg.piece_index);
+
+                            std::cout << "===================================\n\n";
+                        } else {
+                            std::cerr << "FAILED: Piece " << piece_msg.piece_index << " verification or write failed\n";
+                            std::cerr << "Will re-request this piece\n";
+                        }
+                    }
+                }
             }
         }
 
@@ -297,6 +338,24 @@ void DownloadManager::updateTracker() {
 
     peers_ = response.peers;
     connectToPeers();
+}
+
+void DownloadManager::broadcastHave(uint32_t piece_index) {
+    std::lock_guard<std::mutex> lock(connections_mutex_);
+
+    std::cout << "Broadcasting HAVE message for piece " << piece_index
+              << " to " << connections_.size() << " peers\n";
+
+    size_t sent = 0;
+    for (const auto& connection : connections_) {
+        if (connection && connection->isConnected()) {
+            if (connection->sendHave(piece_index)) {
+                sent++;
+            }
+        }
+    }
+
+    std::cout << "HAVE message sent to " << sent << " peers\n";
 }
 
 } // namespace torrent

@@ -41,6 +41,7 @@ private:
 
     void connectToPeers();
     void updateTracker();
+    void broadcastHave(uint32_t piece_index);
 
     TorrentFile torrent_;
     std::string download_dir_;
@@ -53,6 +54,7 @@ private:
 
     std::vector<Peer> peers_;
     std::vector<std::unique_ptr<PeerConnection>> connections_;
+    std::mutex connections_mutex_;
 
     std::atomic<bool> running_;
     std::atomic<bool> paused_;
