@@ -285,13 +285,35 @@ void DownloadManager::peerLoop(size_t peer_index) {
     }
 
     // Main communication loop
+    auto last_keepalive = std::chrono::steady_clock::now();
+    auto last_activity = std::chrono::steady_clock::now();
+
     while (running_ && !paused_ && conn_ptr->isConnected()) {
+        // Send keep-alive periodically (every 2 minutes)
+        auto now = std::chrono::steady_clock::now();
+        auto since_keepalive = std::chrono::duration_cast<std::chrono::seconds>(now - last_keepalive).count();
+        if (since_keepalive >= 120) {
+            conn_ptr->sendKeepAlive();
+            last_keepalive = now;
+        }
+
+        // Check for connection timeout (5 minutes no activity)
+        auto since_activity = std::chrono::duration_cast<std::chrono::seconds>(now - last_activity).count();
+        if (since_activity >= 300) {
+            std::cerr << "Connection timeout: no activity for " << since_activity << " seconds from "
+                      << peer.ip << ":" << peer.port << "\n";
+            break;
+        }
+
         // Receive and process messages
         auto message = conn_ptr->receiveMessage();
         if (!message) {
-            std::cerr << "Connection closed by peer " << peer.ip << ":" << peer.port << "\n";
+            std::cerr << "Connection closed or timeout from peer " << peer.ip << ":" << peer.port << "\n";
             break;
         }
+
+        // Update activity timestamp on message receive
+        last_activity = std::chrono::steady_clock::now();
 
         // Check if we're interested in this peer
         if (!conn_ptr->amInterested()) {
@@ -329,8 +351,21 @@ void DownloadManager::peerLoop(size_t peer_index) {
         // Handle timed out requests
         auto timed_out = conn_ptr->getTimedOutRequests(30);
         if (!timed_out.empty()) {
-            std::cout << "Detected " << timed_out.size() << " timed out requests\n";
-            // Could retry or move to another peer
+            std::cout << "Detected " << timed_out.size() << " timed out requests from " << peer.ip << "\n";
+
+            // Retry timed out requests
+            for (const auto& req : timed_out) {
+                std::cout << "Retrying timed out request: piece=" << req.piece_index
+                          << " offset=" << req.offset << " length=" << req.length << "\n";
+
+                // Retry the request
+                if (conn_ptr->requestBlock(req.piece_index, req.offset, req.length)) {
+                    std::cout << "Successfully re-requested block\n";
+                } else {
+                    std::cerr << "Failed to re-request block (peer may be choking us)\n";
+                    // Note: If retry fails, coordinatorLoop will eventually reassign to another peer
+                }
+            }
         }
 
         // Process received pieces
@@ -364,7 +399,27 @@ void DownloadManager::peerLoop(size_t peer_index) {
                             std::cout << "===================================\n\n";
                         } else {
                             std::cerr << "FAILED: Piece " << piece_msg.piece_index << " verification or write failed\n";
-                            std::cerr << "Will re-request this piece\n";
+                            std::cerr << "Marking piece for re-download\n";
+
+                            // Remove from pieces_in_download so it can be reassigned
+                            {
+                                std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+                                pieces_in_download_.erase(piece_msg.piece_index);
+                            }
+
+                            // Clear current_piece assignment from peer
+                            {
+                                std::lock_guard<std::mutex> peers_lock(peers_mutex_);
+                                for (auto& peer_info : active_peers_) {
+                                    if (peer_info.current_piece == piece_msg.piece_index) {
+                                        peer_info.current_piece = UINT32_MAX;
+                                        peer_info.failed_requests++;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            std::cout << "Piece " << piece_msg.piece_index << " will be re-requested from another peer\n";
                         }
                     }
                 }
@@ -465,6 +520,40 @@ void DownloadManager::peerLoop(size_t peer_index) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
+    // Graceful cleanup on peer disconnection
+    std::cout << "Peer loop ending for " << peer.ip << ":" << peer.port;
+    if (!conn_ptr->isConnected()) {
+        std::cout << " (disconnected)";
+    }
+    std::cout << "\n";
+
+    // Clear pending requests - blocks will be re-requested by other peers
+    if (conn_ptr->hasPendingRequests()) {
+        std::cout << "Clearing " << conn_ptr->numPendingRequests() << " pending requests from disconnected peer\n";
+        conn_ptr->clearPendingRequests();
+    }
+
+    // Mark piece assignment as free (will be cleaned up by cleanupStalePeers)
+    {
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        for (auto& peer_info : active_peers_) {
+            if (peer_info.connection.get() == conn_ptr) {
+                if (peer_info.current_piece != UINT32_MAX) {
+                    std::cout << "Freeing piece assignment " << peer_info.current_piece << " from disconnected peer\n";
+
+                    // Remove from pieces_in_download so it can be reassigned
+                    {
+                        std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+                        pieces_in_download_.erase(peer_info.current_piece);
+                    }
+
+                    peer_info.current_piece = UINT32_MAX;
+                }
+                break;
+            }
+        }
+    }
+
     std::cout << "Peer loop ended for " << peer.ip << ":" << peer.port << "\n";
 }
 
@@ -526,25 +615,51 @@ void DownloadManager::updateTracker() {
     }
     // Note: "completed" event is sent directly from downloadLoop when transitioning to seeding
 
-    TrackerResponse response = tracker_client_->announce(
-        total_uploaded_,
-        total_downloaded_,
-        left,
-        listen_port_,
-        event
-    );
+    try {
+        TrackerResponse response = tracker_client_->announce(
+            total_uploaded_,
+            total_downloaded_,
+            left,
+            listen_port_,
+            event
+        );
 
-    if (!response.isSuccess()) {
-        std::cerr << "Tracker error: " << response.failure_reason << "\n";
-        return;
+        if (!response.isSuccess()) {
+            tracker_failures_++;
+            std::cerr << "Tracker error (" << tracker_failures_ << " failures): "
+                      << response.failure_reason << "\n";
+
+            // Exponential backoff for retries
+            if (tracker_failures_ <= 10) {
+                int backoff_ms = utils::calculateBackoffDelay(tracker_failures_ - 1, 1000, 60000);
+                std::cout << "Will retry tracker in " << (backoff_ms / 1000) << " seconds\n";
+                // Note: retry happens in next trackerLoop iteration
+            } else {
+                std::cerr << "Too many tracker failures, continuing with existing peers\n";
+            }
+            return;
+        }
+
+        // Success - reset failure counter
+        tracker_failures_ = 0;
+
+        std::cout << "Tracker response: " << response.peers.size() << " peers, "
+                  << response.complete << " seeders, "
+                  << response.incomplete << " leechers\n";
+
+        available_peers_ = response.peers;
+        connectToPeers();
+
+    } catch (const std::exception& e) {
+        tracker_failures_++;
+        std::cerr << "Tracker exception (" << tracker_failures_ << " failures): "
+                  << e.what() << "\n";
+
+        if (tracker_failures_ <= 10) {
+            int backoff_ms = utils::calculateBackoffDelay(tracker_failures_ - 1, 1000, 60000);
+            std::cout << "Will retry tracker in " << (backoff_ms / 1000) << " seconds\n";
+        }
     }
-
-    std::cout << "Tracker response: " << response.peers.size() << " peers, "
-              << response.complete << " seeders, "
-              << response.incomplete << " leechers\n";
-
-    available_peers_ = response.peers;
-    connectToPeers();
 }
 
 void DownloadManager::broadcastHave(uint32_t piece_index) {

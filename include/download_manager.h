@@ -127,6 +127,7 @@ private:
 
     // Tracker state
     bool first_announce_ = true;
+    int tracker_failures_ = 0;
 };
 
 } // namespace torrent

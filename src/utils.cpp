@@ -137,5 +137,22 @@ std::string formatSpeed(double bytesPerSec) {
     return formatBytes(static_cast<int64_t>(bytesPerSec)) + "/s";
 }
 
+// Exponential backoff calculation
+int calculateBackoffDelay(int attempt, int base_delay_ms, int max_delay_ms) {
+    // Exponential backoff: base_delay * 2^attempt
+    // Example: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped)
+    if (attempt < 0) attempt = 0;
+
+    int delay = base_delay_ms;
+    for (int i = 0; i < attempt; ++i) {
+        delay *= 2;
+        if (delay >= max_delay_ms) {
+            return max_delay_ms;
+        }
+    }
+
+    return delay;
+}
+
 } // namespace utils
 } // namespace torrent

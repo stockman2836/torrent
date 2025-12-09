@@ -34,5 +34,8 @@ uint16_t ntohs(uint16_t netshort);
 std::string formatBytes(int64_t bytes);
 std::string formatSpeed(double bytesPerSec);
 
+// Retry helpers
+int calculateBackoffDelay(int attempt, int base_delay_ms = 1000, int max_delay_ms = 60000);
+
 } // namespace utils
 } // namespace torrent
