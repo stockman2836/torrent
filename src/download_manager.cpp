@@ -16,6 +16,7 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , running_(false)
     , paused_(false)
     , endgame_mode_(false)
+    , seeding_mode_(false)
     , total_downloaded_(0)
     , total_uploaded_(0) {
 
@@ -73,6 +74,18 @@ void DownloadManager::stop() {
         return;
     }
 
+    std::cout << "Stopping client...\n";
+
+    // Notify tracker we're stopping
+    int64_t left = torrent_.totalLength() - total_downloaded_;
+    tracker_client_->announce(
+        total_uploaded_,
+        total_downloaded_,
+        left,
+        listen_port_,
+        "stopped"
+    );
+
     running_ = false;
 
     // Wait for threads to finish
@@ -90,7 +103,7 @@ void DownloadManager::stop() {
         active_peers_.clear();
     }
 
-    std::cout << "Download stopped.\n";
+    std::cout << "Client stopped.\n";
 }
 
 void DownloadManager::pause() {
@@ -144,6 +157,7 @@ void DownloadManager::printStatus() const {
               << "Down: " << utils::formatSpeed(downloadSpeed()) << " "
               << "Up: " << utils::formatSpeed(uploadSpeed()) << " "
               << "Peers: " << active_peer_count << " (" << downloading_peers << " active)"
+              << (seeding_mode_ ? " [SEEDING]" : "")
               << (endgame_mode_ ? " [ENDGAME]" : "")
               << "   " << std::flush;
 }
@@ -161,10 +175,34 @@ void DownloadManager::downloadLoop() {
         // Print status
         printStatus();
 
-        // Check if complete
-        if (progress() >= 100.0) {
-            std::cout << "\nDownload complete!\n";
-            break;
+        // Check if download complete and transition to seeding
+        if (!seeding_mode_ && progress() >= 100.0) {
+            std::cout << "\n========================================\n";
+            std::cout << "Download complete! Transitioning to seeding mode...\n";
+            std::cout << "========================================\n";
+
+            // Switch to seeding mode
+            seeding_mode_ = true;
+
+            // Notify tracker of completion
+            int64_t left = 0; // No bytes left to download
+            TrackerResponse response = tracker_client_->announce(
+                total_uploaded_,
+                total_downloaded_,
+                left,
+                listen_port_,
+                "completed"
+            );
+
+            if (response.isSuccess()) {
+                std::cout << "Tracker notified of completion. Now seeding to "
+                          << response.peers.size() << " peers.\n";
+            } else {
+                std::cerr << "Failed to notify tracker: " << response.failure_reason << "\n";
+            }
+
+            std::cout << "Seeding will continue until client is stopped.\n";
+            std::cout << "========================================\n\n";
         }
 
         // Sleep
@@ -480,12 +518,20 @@ void DownloadManager::connectToPeers() {
 void DownloadManager::updateTracker() {
     int64_t left = torrent_.totalLength() - total_downloaded_;
 
+    // Determine event type
+    std::string event = "";
+    if (first_announce_) {
+        event = "started";
+        first_announce_ = false;
+    }
+    // Note: "completed" event is sent directly from downloadLoop when transitioning to seeding
+
     TrackerResponse response = tracker_client_->announce(
         total_uploaded_,
         total_downloaded_,
         left,
         listen_port_,
-        "started"
+        event
     );
 
     if (!response.isSuccess()) {

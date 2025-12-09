@@ -113,6 +113,7 @@ private:
     std::atomic<bool> running_;
     std::atomic<bool> paused_;
     std::atomic<bool> endgame_mode_;
+    std::atomic<bool> seeding_mode_;
 
     std::vector<std::thread> worker_threads_;
 
@@ -123,6 +124,9 @@ private:
     // Statistics
     std::atomic<int64_t> total_downloaded_;
     std::atomic<int64_t> total_uploaded_;
+
+    // Tracker state
+    bool first_announce_ = true;
 };
 
 } // namespace torrent
