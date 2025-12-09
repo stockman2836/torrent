@@ -1,6 +1,7 @@
 #include "tracker_client.h"
 #include "bencode.h"
 #include "utils.h"
+#include "logger.h"
 #include <sstream>
 #include <stdexcept>
 #include <cstring>
@@ -30,9 +31,12 @@ static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* use
 
 // Helper function to perform HTTP GET request using libcurl
 static std::string httpGet(const std::string& url, std::string& error_msg) {
+    LOG_DEBUG("HTTP GET request to: {}", url);
+
     CURL* curl = curl_easy_init();
     if (!curl) {
         error_msg = "Failed to initialize libcurl";
+        LOG_ERROR("Failed to initialize libcurl");
         return "";
     }
 
@@ -66,6 +70,7 @@ static std::string httpGet(const std::string& url, std::string& error_msg) {
 
     if (res != CURLE_OK) {
         error_msg = std::string("HTTP request failed: ") + curl_easy_strerror(res);
+        LOG_ERROR("HTTP request failed: {}", curl_easy_strerror(res));
         curl_easy_cleanup(curl);
         return "";
     }
@@ -78,10 +83,12 @@ static std::string httpGet(const std::string& url, std::string& error_msg) {
         std::ostringstream oss;
         oss << "HTTP error code: " << http_code;
         error_msg = oss.str();
+        LOG_ERROR("HTTP error code: {}", http_code);
         curl_easy_cleanup(curl);
         return "";
     }
 
+    LOG_DEBUG("HTTP request successful, received {} bytes", response_data.size());
     curl_easy_cleanup(curl);
     return response_data;
 }
@@ -126,6 +133,9 @@ TrackerResponse TrackerClient::announce(int64_t uploaded,
                                        int64_t left,
                                        uint16_t port,
                                        const std::string& event) {
+    LOG_INFO("Announcing to tracker: uploaded={}, downloaded={}, left={}, port={}, event={}",
+             uploaded, downloaded, left, port, event);
+
     std::string url = buildAnnounceUrl(uploaded, downloaded, left, port, event);
 
     // Perform HTTP GET request
@@ -134,6 +144,7 @@ TrackerResponse TrackerClient::announce(int64_t uploaded,
 
     // Handle HTTP errors
     if (response_body.empty()) {
+        LOG_ERROR("Tracker announce failed: {}", error_msg);
         TrackerResponse error_response;
         error_response.interval = 1800;
         error_response.complete = 0;
@@ -149,10 +160,13 @@ TrackerResponse TrackerClient::announce(int64_t uploaded,
 TrackerResponse TrackerClient::parseResponse(const std::string& response) {
     TrackerResponse result;
 
+    LOG_DEBUG("Parsing tracker response");
+
     try {
         BencodeValue parsed = BencodeParser::parse(response);
         if (!parsed.isDictionary()) {
             result.failure_reason = "Invalid tracker response";
+            LOG_ERROR("Invalid tracker response: not a dictionary");
             return result;
         }
 
@@ -162,6 +176,7 @@ TrackerResponse TrackerClient::parseResponse(const std::string& response) {
         auto it = dict.find("failure reason");
         if (it != dict.end() && it->second.isString()) {
             result.failure_reason = it->second.getString();
+            LOG_WARN("Tracker returned failure: {}", result.failure_reason);
             return result;
         }
 
@@ -232,6 +247,12 @@ TrackerResponse TrackerClient::parseResponse(const std::string& response) {
 
     } catch (const std::exception& e) {
         result.failure_reason = std::string("Failed to parse tracker response: ") + e.what();
+        LOG_ERROR("Exception parsing tracker response: {}", e.what());
+    }
+
+    if (result.failure_reason.empty()) {
+        LOG_INFO("Tracker response parsed: interval={}, complete={}, incomplete={}, peers={}",
+                 result.interval, result.complete, result.incomplete, result.peers.size());
     }
 
     return result;

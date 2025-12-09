@@ -28,6 +28,7 @@ add_library(torrent_lib STATIC
     ${PROJECT_SOURCE_DIR}/src/piece_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/file_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/download_manager.cpp
+    ${PROJECT_SOURCE_DIR}/src/logger.cpp
 )
 
 target_link_libraries(torrent_lib
@@ -36,6 +37,7 @@ target_link_libraries(torrent_lib
     OpenSSL::SSL
     OpenSSL::Crypto
     CURL::libcurl
+    spdlog::spdlog
 )
 
 if(WIN32)

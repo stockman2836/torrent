@@ -26,6 +26,7 @@ set(SOURCES
     src/piece_manager.cpp
     src/file_manager.cpp
     src/download_manager.cpp
+    src/logger.cpp
 )
 
 # Header files
@@ -38,7 +39,17 @@ set(HEADERS
     include/file_manager.h
     include/download_manager.h
     include/utils.h
+    include/logger.h
 )
+
+# Fetch spdlog
+include(FetchContent)
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG        v1.12.0
+)
+FetchContent_MakeAvailable(spdlog)
 
 # Find dependencies
 find_package(Threads REQUIRED)
@@ -55,6 +66,7 @@ target_link_libraries(torrent_client
     OpenSSL::SSL
     OpenSSL::Crypto
     CURL::libcurl
+    spdlog::spdlog
 )
 
 # Platform-specific libraries

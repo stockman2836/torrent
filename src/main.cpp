@@ -1,4 +1,5 @@
 #include "download_manager.h"
+#include "logger.h"
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -12,6 +13,7 @@ void printUsage(const char* program_name) {
     std::cout << "  --max-download <KB/s>     Maximum download speed in KB/s (default: unlimited)\n";
     std::cout << "  --max-upload <KB/s>       Maximum upload speed in KB/s (default: unlimited)\n";
     std::cout << "  --port <port>             Listen port (default: 6881)\n";
+    std::cout << "  --log-level <level>       Log level: trace, debug, info, warn, error (default: info)\n";
     std::cout << "  --help                    Show this help message\n";
     std::cout << "\nExamples:\n";
     std::cout << "  " << program_name << " example.torrent\n";
@@ -42,6 +44,7 @@ int main(int argc, char* argv[]) {
     int64_t max_download_speed = 0;  // 0 = unlimited (bytes/sec)
     int64_t max_upload_speed = 0;    // 0 = unlimited (bytes/sec)
     uint16_t listen_port = 6881;
+    std::string log_level = "info";
 
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
@@ -60,6 +63,9 @@ int main(int argc, char* argv[]) {
         else if (arg == "--port" && i + 1 < argc) {
             listen_port = static_cast<uint16_t>(std::stoi(argv[++i]));
         }
+        else if (arg == "--log-level" && i + 1 < argc) {
+            log_level = argv[++i];
+        }
         else {
             std::cerr << "Unknown option: " << arg << "\n";
             printUsage(argv[0]);
@@ -67,7 +73,26 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Initialize logger
+    torrent::Logger::Level console_level = torrent::Logger::Level::INFO;
+    if (log_level == "trace") console_level = torrent::Logger::Level::TRACE;
+    else if (log_level == "debug") console_level = torrent::Logger::Level::DEBUG;
+    else if (log_level == "info") console_level = torrent::Logger::Level::INFO;
+    else if (log_level == "warn") console_level = torrent::Logger::Level::WARN;
+    else if (log_level == "error") console_level = torrent::Logger::Level::ERROR;
+    else {
+        std::cerr << "Invalid log level: " << log_level << "\n";
+        return 1;
+    }
+
+    torrent::Logger::init("torrent_client.log", console_level, torrent::Logger::Level::DEBUG);
+
     try {
+        LOG_INFO("=== BitTorrent Client Starting ===");
+        LOG_INFO("Loading torrent: {}", torrent_file);
+        LOG_INFO("Download directory: {}", download_dir);
+        LOG_INFO("Listen port: {}", listen_port);
+
         std::cout << "Loading torrent: " << torrent_file << "\n";
         std::cout << "Download directory: " << download_dir << "\n";
         std::cout << "Listen port: " << listen_port << "\n";

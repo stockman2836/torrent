@@ -1,6 +1,7 @@
 #include "peer_connection.h"
 #include "piece_manager.h"
 #include "utils.h"
+#include "logger.h"
 #include <cstring>
 #include <iostream>
 #include <chrono>
@@ -65,13 +66,16 @@ bool PeerConnection::connect() {
 #endif
 
     if (connected_) {
+        LOG_DEBUG("Already connected to peer {}:{}", ip_, port_);
         return true;
     }
+
+    LOG_INFO("Connecting to peer {}:{}", ip_, port_);
 
     // Create socket
     socket_fd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (socket_fd_ == INVALID_SOCKET) {
-        std::cerr << "Failed to create socket\n";
+        LOG_ERROR("Failed to create socket for {}:{}", ip_, port_);
         return false;
     }
 
@@ -83,7 +87,7 @@ bool PeerConnection::connect() {
 
     // Convert IP address
     if (inet_pton(AF_INET, ip_.c_str(), &server_addr.sin_addr) <= 0) {
-        std::cerr << "Invalid IP address: " << ip_ << "\n";
+        LOG_ERROR("Invalid IP address: {}", ip_);
         closesocket(socket_fd_);
         socket_fd_ = INVALID_SOCKET;
         return false;
@@ -100,7 +104,7 @@ bool PeerConnection::connect() {
 #else
     if (result == SOCKET_ERROR && errno != EINPROGRESS) {
 #endif
-        std::cerr << "Connection failed immediately\n";
+        LOG_ERROR("Connection to {}:{} failed immediately", ip_, port_);
         closesocket(socket_fd_);
         socket_fd_ = INVALID_SOCKET;
         return false;
@@ -118,7 +122,7 @@ bool PeerConnection::connect() {
     result = select(socket_fd_ + 1, nullptr, &write_fds, nullptr, &timeout);
 
     if (result <= 0) {
-        std::cerr << "Connection timeout or error\n";
+        LOG_WARN("Connection to {}:{} timeout or error", ip_, port_);
         closesocket(socket_fd_);
         socket_fd_ = INVALID_SOCKET;
         return false;
@@ -128,7 +132,7 @@ bool PeerConnection::connect() {
     int error = 0;
     socklen_t len = sizeof(error);
     if (getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, (char*)&error, &len) < 0 || error != 0) {
-        std::cerr << "Connection failed: error code " << error << "\n";
+        LOG_ERROR("Connection to {}:{} failed with error code {}", ip_, port_, error);
         closesocket(socket_fd_);
         socket_fd_ = INVALID_SOCKET;
         return false;
@@ -141,12 +145,13 @@ bool PeerConnection::connect() {
     setSocketTimeout(30000); // 30 seconds
 
     connected_ = true;
-    std::cout << "Connected to peer " << ip_ << ":" << port_ << "\n";
+    LOG_INFO("Successfully connected to peer {}:{}", ip_, port_);
     return true;
 }
 
 void PeerConnection::disconnect() {
     if (socket_fd_ != INVALID_SOCKET) {
+        LOG_DEBUG("Disconnecting from peer {}:{}", ip_, port_);
         closesocket(socket_fd_);
         socket_fd_ = INVALID_SOCKET;
     }
@@ -159,12 +164,12 @@ void PeerConnection::disconnect() {
 
 bool PeerConnection::performHandshake() {
     if (!connected_) {
-        std::cerr << "ERROR: Cannot perform handshake - not connected\n";
+        LOG_ERROR("Cannot perform handshake with {}:{} - not connected", ip_, port_);
         return false;
     }
 
     if (handshake_completed_) {
-        std::cout << "WARNING: Handshake already completed\n";
+        LOG_WARN("Handshake with {}:{} already completed", ip_, port_);
         return true;
     }
 

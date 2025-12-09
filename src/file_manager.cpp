@@ -1,4 +1,5 @@
 #include "file_manager.h"
+#include "logger.h"
 #include <filesystem>
 #include <iostream>
 
@@ -17,6 +18,8 @@ FileManager::~FileManager() {
 
 bool FileManager::initialize() {
     try {
+        LOG_INFO("Initializing file manager in directory: {}", download_dir_);
+
         // Create download directory if it doesn't exist
         fs::create_directories(download_dir_);
 
@@ -34,15 +37,17 @@ bool FileManager::initialize() {
                 fs::create_directories(file_path.parent_path());
             }
 
+            LOG_DEBUG("Created file handle: {} (size: {} bytes)", handle.path, handle.length);
             file_handles_.push_back(std::move(handle));
             current_offset += file_info.length;
         }
 
         openFiles();
+        LOG_INFO("File manager initialized successfully with {} files", file_handles_.size());
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize files: " << e.what() << "\n";
+        LOG_ERROR("Failed to initialize files: {}", e.what());
         return false;
     }
 }

@@ -1,5 +1,6 @@
 #include "piece_manager.h"
 #include "utils.h"
+#include "logger.h"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -31,6 +32,8 @@ void PieceManager::markPieceComplete(uint32_t piece_index) {
     if (piece_index < num_pieces_ && !bitfield_[piece_index]) {
         bitfield_[piece_index] = true;
         pieces_downloaded_++;
+        LOG_INFO("Piece {} marked complete. Progress: {}/{} ({:.2f}%)",
+                 piece_index, pieces_downloaded_, num_pieces_, percentComplete());
     }
 }
 
