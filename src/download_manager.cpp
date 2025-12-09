@@ -111,7 +111,17 @@ int64_t DownloadManager::downloadSpeed() const {
 }
 
 int64_t DownloadManager::uploadSpeed() const {
-    // TODO: Calculate actual upload speed
+    // Calculate upload speed based on recent activity
+    // For now, use total uploaded divided by elapsed time
+    // TODO: Implement sliding window for more accurate speed calculation
+
+    static auto start_time = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
+
+    if (elapsed_seconds > 0) {
+        return total_uploaded_ / elapsed_seconds;
+    }
     return 0;
 }
 
@@ -319,6 +329,96 @@ void DownloadManager::peerLoop(size_t peer_index) {
                             std::cerr << "Will re-request this piece\n";
                         }
                     }
+                }
+            }
+        }
+
+        // Handle REQUEST messages (peer wants to download from us)
+        if (message->type == MessageType::REQUEST) {
+            RequestMessage req_msg;
+            if (conn_ptr->parseRequest(*message, req_msg)) {
+                std::cout << "Peer " << peer.ip << " requests: piece=" << req_msg.piece_index
+                          << " offset=" << req_msg.offset
+                          << " length=" << req_msg.length << "\n";
+
+                // Check if we're choking this peer
+                if (conn_ptr->amChoking()) {
+                    std::cout << "Ignoring REQUEST: we are choking this peer\n";
+                }
+                // Check if we have the requested piece
+                else if (!piece_manager_->hasPiece(req_msg.piece_index)) {
+                    std::cout << "Ignoring REQUEST: we don't have piece " << req_msg.piece_index << "\n";
+                }
+                // Validate request parameters
+                else if (req_msg.length == 0 || req_msg.length > 16384) {
+                    std::cerr << "Invalid REQUEST: length=" << req_msg.length << " (max 16384)\n";
+                }
+                else {
+                    // Read the complete piece from disk
+                    std::vector<uint8_t> piece_data = file_manager_->readPiece(req_msg.piece_index);
+
+                    if (piece_data.empty()) {
+                        std::cerr << "Failed to read piece " << req_msg.piece_index << " from disk\n";
+                    }
+                    // Validate offset and length
+                    else if (req_msg.offset + req_msg.length > piece_data.size()) {
+                        std::cerr << "Invalid REQUEST: offset=" << req_msg.offset
+                                  << " length=" << req_msg.length
+                                  << " exceeds piece size " << piece_data.size() << "\n";
+                    }
+                    else {
+                        // Extract the requested block
+                        std::vector<uint8_t> block_data(
+                            piece_data.begin() + req_msg.offset,
+                            piece_data.begin() + req_msg.offset + req_msg.length
+                        );
+
+                        // Track this upload
+                        conn_ptr->addPendingUpload(req_msg.piece_index, req_msg.offset, req_msg.length);
+
+                        // Send PIECE message
+                        if (conn_ptr->sendPiece(req_msg.piece_index, req_msg.offset, block_data)) {
+                            std::cout << "Uploaded block: piece=" << req_msg.piece_index
+                                      << " offset=" << req_msg.offset
+                                      << " size=" << block_data.size() << " bytes to " << peer.ip << "\n";
+
+                            // Update upload statistics
+                            total_uploaded_ += block_data.size();
+
+                            // Update peer statistics
+                            {
+                                std::lock_guard<std::mutex> lock(peers_mutex_);
+                                if (peer_index < active_peers_.size()) {
+                                    active_peers_[peer_index].bytes_uploaded += block_data.size();
+                                }
+                            }
+
+                            // Remove from pending uploads
+                            conn_ptr->removePendingUpload(req_msg.piece_index, req_msg.offset);
+                        } else {
+                            std::cerr << "Failed to send PIECE message to " << peer.ip << "\n";
+                            conn_ptr->removePendingUpload(req_msg.piece_index, req_msg.offset);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle CANCEL messages (peer cancels a previous request)
+        if (message->type == MessageType::CANCEL) {
+            CancelMessage cancel_msg;
+            if (conn_ptr->parseCancel(*message, cancel_msg)) {
+                std::cout << "Peer " << peer.ip << " cancels: piece=" << cancel_msg.piece_index
+                          << " offset=" << cancel_msg.offset
+                          << " length=" << cancel_msg.length << "\n";
+
+                // Remove from pending uploads if present
+                if (conn_ptr->isPendingUpload(cancel_msg.piece_index, cancel_msg.offset)) {
+                    conn_ptr->removePendingUpload(cancel_msg.piece_index, cancel_msg.offset);
+                    std::cout << "Cancelled pending upload: piece=" << cancel_msg.piece_index
+                              << " offset=" << cancel_msg.offset << "\n";
+                } else {
+                    std::cout << "No pending upload found for cancellation\n";
                 }
             }
         }

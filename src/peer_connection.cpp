@@ -49,7 +49,7 @@ PeerConnection::PeerConnection(const std::string& ip,
     , socket_fd_(INVALID_SOCKET)
     , connected_(false)
     , handshake_completed_(false)
-    , am_choking_(true)
+    , am_choking_(false)  // Start unchoked - allow uploads
     , am_interested_(false)
     , peer_choking_(true)
     , peer_interested_(false) {
@@ -154,6 +154,7 @@ void PeerConnection::disconnect() {
     handshake_completed_ = false;
     remote_peer_id_.clear();
     clearPendingRequests();
+    clearPendingUploads();
 }
 
 bool PeerConnection::performHandshake() {
@@ -1093,6 +1094,37 @@ void PeerConnection::removeRequest(uint32_t piece_index, uint32_t offset) {
 
         pending_requests_.erase(it);
     }
+}
+
+// Upload tracking methods
+
+bool PeerConnection::addPendingUpload(uint32_t piece_index, uint32_t offset, uint32_t length) {
+    std::stringstream key;
+    key << piece_index << ":" << offset;
+    std::string key_str = key.str();
+
+    if (pending_uploads_.find(key_str) != pending_uploads_.end()) {
+        return false; // Already pending
+    }
+
+    pending_uploads_.emplace(key_str, PendingUpload(piece_index, offset, length));
+    return true;
+}
+
+void PeerConnection::removePendingUpload(uint32_t piece_index, uint32_t offset) {
+    std::stringstream key;
+    key << piece_index << ":" << offset;
+    pending_uploads_.erase(key.str());
+}
+
+void PeerConnection::clearPendingUploads() {
+    pending_uploads_.clear();
+}
+
+bool PeerConnection::isPendingUpload(uint32_t piece_index, uint32_t offset) const {
+    std::stringstream key;
+    key << piece_index << ":" << offset;
+    return pending_uploads_.find(key.str()) != pending_uploads_.end();
 }
 
 } // namespace torrent

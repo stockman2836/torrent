@@ -61,6 +61,18 @@ struct CancelMessage {
     uint32_t length;
 };
 
+// Structure to track pending uploads to peer
+struct PendingUpload {
+    uint32_t piece_index;
+    uint32_t offset;
+    uint32_t length;
+    std::chrono::steady_clock::time_point request_time;
+
+    PendingUpload(uint32_t pi, uint32_t off, uint32_t len)
+        : piece_index(pi), offset(off), length(len),
+          request_time(std::chrono::steady_clock::now()) {}
+};
+
 // Structure to track pending block requests
 struct PendingRequest {
     uint32_t piece_index;
@@ -145,6 +157,14 @@ public:
     std::vector<PendingRequest> getTimedOutRequests(int timeout_seconds = 30);
     void removeRequest(uint32_t piece_index, uint32_t offset);
 
+    // Upload request tracking
+    bool hasPendingUploads() const { return !pending_uploads_.empty(); }
+    size_t numPendingUploads() const { return pending_uploads_.size(); }
+    bool addPendingUpload(uint32_t piece_index, uint32_t offset, uint32_t length);
+    void removePendingUpload(uint32_t piece_index, uint32_t offset);
+    void clearPendingUploads();
+    bool isPendingUpload(uint32_t piece_index, uint32_t offset) const;
+
     // Workflow helpers
     bool canDownload() const { return !peer_choking_ && am_interested_; }
     bool isReadyForRequests() const { return handshake_completed_ && !peer_choking_ && am_interested_; }
@@ -183,6 +203,9 @@ private:
 
     // Pending request tracking (key: "piece_index:offset")
     std::map<std::string, PendingRequest> pending_requests_;
+
+    // Pending upload tracking (key: "piece_index:offset")
+    std::map<std::string, PendingUpload> pending_uploads_;
 };
 
 } // namespace torrent
