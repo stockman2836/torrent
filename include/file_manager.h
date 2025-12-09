@@ -24,6 +24,7 @@ public:
 
     // Verification
     bool verifyExistingFiles();
+    bool verifyPiece(uint32_t piece_index, const std::vector<uint8_t>& expected_hash);
 
 private:
     struct FileHandle {

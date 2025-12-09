@@ -89,6 +89,11 @@ public:
     std::vector<bool> getBitfield() const { return bitfield_; }
     size_t numPiecesInProgress() const;
 
+    // Resume capability
+    bool saveStateToDisk(const std::string& resume_file_path) const;
+    bool loadStateFromDisk(const std::string& resume_file_path);
+    void setBitfield(const std::vector<bool>& bitfield);
+
 private:
     size_t num_pieces_;
     size_t piece_length_;

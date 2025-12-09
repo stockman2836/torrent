@@ -1,6 +1,8 @@
 #include "piece_manager.h"
 #include "utils.h"
 #include <algorithm>
+#include <fstream>
+#include <iostream>
 
 namespace torrent {
 
@@ -357,6 +359,147 @@ int32_t PieceManager::getNextPieceSequential(
     }
 
     return -1;
+}
+
+// Resume capability methods
+
+bool PieceManager::saveStateToDisk(const std::string& resume_file_path) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    try {
+        std::ofstream file(resume_file_path, std::ios::binary);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open resume file for writing: " << resume_file_path << "\n";
+            return false;
+        }
+
+        // Magic header
+        file.write("BTRESUME", 8);
+
+        // Version
+        uint8_t version = 1;
+        file.write(reinterpret_cast<const char*>(&version), 1);
+
+        // Number of pieces (big-endian)
+        uint32_t num_pieces_be = htonl(static_cast<uint32_t>(num_pieces_));
+        file.write(reinterpret_cast<const char*>(&num_pieces_be), 4);
+
+        // Bitfield (pack into bytes)
+        size_t bitfield_bytes = (num_pieces_ + 7) / 8;
+        std::vector<uint8_t> packed_bitfield(bitfield_bytes, 0);
+
+        for (size_t i = 0; i < num_pieces_; ++i) {
+            if (bitfield_[i]) {
+                packed_bitfield[i / 8] |= (1 << (7 - (i % 8)));
+            }
+        }
+
+        file.write(reinterpret_cast<const char*>(packed_bitfield.data()), bitfield_bytes);
+
+        // Timestamp
+        auto now = std::chrono::system_clock::now();
+        int64_t timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+            now.time_since_epoch()
+        ).count();
+        file.write(reinterpret_cast<const char*>(&timestamp), 8);
+
+        file.close();
+        return true;
+
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to save resume state: " << e.what() << "\n";
+        return false;
+    }
+}
+
+bool PieceManager::loadStateFromDisk(const std::string& resume_file_path) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    try {
+        std::ifstream file(resume_file_path, std::ios::binary);
+        if (!file.is_open()) {
+            // File doesn't exist - not an error, just no resume data
+            return false;
+        }
+
+        // Verify magic header
+        char magic[8];
+        file.read(magic, 8);
+        if (std::string(magic, 8) != "BTRESUME") {
+            std::cerr << "Invalid resume file format (bad magic)\n";
+            return false;
+        }
+
+        // Read version
+        uint8_t version;
+        file.read(reinterpret_cast<char*>(&version), 1);
+        if (version != 1) {
+            std::cerr << "Unsupported resume file version: " << static_cast<int>(version) << "\n";
+            return false;
+        }
+
+        // Read number of pieces
+        uint32_t num_pieces_be;
+        file.read(reinterpret_cast<char*>(&num_pieces_be), 4);
+        uint32_t saved_num_pieces = ntohl(num_pieces_be);
+
+        if (saved_num_pieces != num_pieces_) {
+            std::cerr << "Resume file piece count mismatch: expected " << num_pieces_
+                      << ", got " << saved_num_pieces << "\n";
+            return false;
+        }
+
+        // Read bitfield
+        size_t bitfield_bytes = (num_pieces_ + 7) / 8;
+        std::vector<uint8_t> packed_bitfield(bitfield_bytes);
+        file.read(reinterpret_cast<char*>(packed_bitfield.data()), bitfield_bytes);
+
+        // Unpack bitfield
+        pieces_downloaded_ = 0;
+        for (size_t i = 0; i < num_pieces_; ++i) {
+            uint8_t byte = packed_bitfield[i / 8];
+            bool has_piece = (byte & (1 << (7 - (i % 8)))) != 0;
+            bitfield_[i] = has_piece;
+            if (has_piece) {
+                pieces_downloaded_++;
+            }
+        }
+
+        // Read timestamp (informational only)
+        int64_t timestamp;
+        file.read(reinterpret_cast<char*>(&timestamp), 8);
+
+        file.close();
+
+        std::cout << "Resume state loaded: " << pieces_downloaded_ << "/" << num_pieces_
+                  << " pieces completed (" << percentComplete() << "%)\n";
+
+        return true;
+
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to load resume state: " << e.what() << "\n";
+        return false;
+    }
+}
+
+void PieceManager::setBitfield(const std::vector<bool>& bitfield) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (bitfield.size() != num_pieces_) {
+        std::cerr << "Bitfield size mismatch: expected " << num_pieces_
+                  << ", got " << bitfield.size() << "\n";
+        return;
+    }
+
+    bitfield_ = bitfield;
+
+    // Recalculate pieces_downloaded_
+    pieces_downloaded_ = 0;
+    for (bool piece : bitfield_) {
+        if (piece) {
+            pieces_downloaded_++;
+        }
+    }
 }
 
 } // namespace torrent

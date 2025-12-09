@@ -84,10 +84,17 @@ private:
     void trackerLoop();
     void peerLoop(size_t peer_index);
     void coordinatorLoop();
+    void resumeLoop();  // Periodic state saving
 
     void connectToPeers();
     void updateTracker();
     void broadcastHave(uint32_t piece_index);
+
+    // Resume capability
+    std::string getResumeFilePath() const;
+    void loadResumeState();
+    void saveResumeState();
+    void verifyExistingPieces();
 
     // Multi-peer coordination
     void assignPiecesToPeers();

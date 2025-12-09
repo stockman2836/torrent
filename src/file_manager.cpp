@@ -176,4 +176,19 @@ bool FileManager::verifyExistingFiles() {
     return false;
 }
 
+bool FileManager::verifyPiece(uint32_t piece_index, const std::vector<uint8_t>& expected_hash) {
+    // Read piece from disk
+    std::vector<uint8_t> piece_data = readPiece(piece_index);
+
+    if (piece_data.empty()) {
+        return false;
+    }
+
+    // Calculate SHA1 hash
+    std::vector<uint8_t> actual_hash = utils::sha1(piece_data);
+
+    // Compare with expected hash
+    return actual_hash == expected_hash;
+}
+
 } // namespace torrent
