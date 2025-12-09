@@ -154,5 +154,150 @@ int calculateBackoffDelay(int attempt, int base_delay_ms, int max_delay_ms) {
     return delay;
 }
 
+// TokenBucket implementation
+TokenBucket::TokenBucket(int64_t rate_bytes_per_sec)
+    : rate_(rate_bytes_per_sec)
+    , tokens_(rate_bytes_per_sec)
+    , capacity_(rate_bytes_per_sec * 2)  // Allow burst up to 2 seconds worth
+    , last_update_(std::chrono::steady_clock::now()) {
+    if (rate_ <= 0) {
+        rate_ = 0;  // 0 means unlimited
+        capacity_ = 0;
+    }
+}
+
+void TokenBucket::refill() {
+    if (rate_ <= 0) return;  // Unlimited
+
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_update_).count() / 1000.0;
+
+    // Add tokens based on elapsed time
+    tokens_ += elapsed * rate_;
+
+    // Cap at capacity
+    if (tokens_ > capacity_) {
+        tokens_ = capacity_;
+    }
+
+    last_update_ = now;
+}
+
+bool TokenBucket::tryConsume(size_t bytes) {
+    if (rate_ <= 0) return true;  // Unlimited
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    refill();
+
+    if (tokens_ >= static_cast<double>(bytes)) {
+        tokens_ -= bytes;
+        return true;
+    }
+
+    return false;
+}
+
+void TokenBucket::waitAndConsume(size_t bytes) {
+    if (rate_ <= 0) return;  // Unlimited
+
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            refill();
+
+            if (tokens_ >= static_cast<double>(bytes)) {
+                tokens_ -= bytes;
+                return;
+            }
+        }
+
+        // Sleep for a short time before retry
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+void TokenBucket::setRate(int64_t rate_bytes_per_sec) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    rate_ = rate_bytes_per_sec;
+
+    if (rate_ <= 0) {
+        rate_ = 0;  // 0 means unlimited
+        capacity_ = 0;
+        tokens_ = 0;
+    } else {
+        capacity_ = rate_ * 2;
+        tokens_ = std::min(tokens_, static_cast<double>(capacity_));
+    }
+
+    last_update_ = std::chrono::steady_clock::now();
+}
+
+// SpeedTracker implementation
+SpeedTracker::SpeedTracker(int window_seconds)
+    : window_seconds_(window_seconds) {
+}
+
+void SpeedTracker::addBytes(int64_t bytes) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    Sample sample;
+    sample.timestamp = std::chrono::steady_clock::now();
+    sample.bytes = bytes;
+
+    samples_.push_back(sample);
+    removeOldSamples();
+}
+
+void SpeedTracker::removeOldSamples() {
+    auto now = std::chrono::steady_clock::now();
+    auto cutoff = now - std::chrono::seconds(window_seconds_);
+
+    while (!samples_.empty() && samples_.front().timestamp < cutoff) {
+        samples_.pop_front();
+    }
+}
+
+double SpeedTracker::getSpeed() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (samples_.empty()) {
+        return 0.0;
+    }
+
+    // Remove old samples
+    auto now = std::chrono::steady_clock::now();
+    auto cutoff = now - std::chrono::seconds(window_seconds_);
+
+    int64_t total_bytes = 0;
+    auto oldest_timestamp = now;
+
+    for (const auto& sample : samples_) {
+        if (sample.timestamp >= cutoff) {
+            total_bytes += sample.bytes;
+            if (sample.timestamp < oldest_timestamp) {
+                oldest_timestamp = sample.timestamp;
+            }
+        }
+    }
+
+    if (total_bytes == 0) {
+        return 0.0;
+    }
+
+    // Calculate elapsed time
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - oldest_timestamp).count() / 1000.0;
+
+    if (elapsed <= 0.0) {
+        return 0.0;
+    }
+
+    return total_bytes / elapsed;
+}
+
+void SpeedTracker::reset() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    samples_.clear();
+}
+
 } // namespace utils
 } // namespace torrent

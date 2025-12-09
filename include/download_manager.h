@@ -5,6 +5,7 @@
 #include "peer_connection.h"
 #include "piece_manager.h"
 #include "file_manager.h"
+#include "utils.h"
 #include <memory>
 #include <vector>
 #include <thread>
@@ -58,7 +59,9 @@ class DownloadManager {
 public:
     DownloadManager(const std::string& torrent_path,
                    const std::string& download_dir,
-                   uint16_t listen_port = 6881);
+                   uint16_t listen_port = 6881,
+                   int64_t max_download_speed = 0,  // 0 = unlimited (bytes/sec)
+                   int64_t max_upload_speed = 0);    // 0 = unlimited (bytes/sec)
 
     ~DownloadManager();
 
@@ -128,6 +131,12 @@ private:
     // Tracker state
     bool first_announce_ = true;
     int tracker_failures_ = 0;
+
+    // Speed limiting and tracking
+    utils::TokenBucket download_limiter_;
+    utils::TokenBucket upload_limiter_;
+    utils::SpeedTracker download_tracker_;
+    utils::SpeedTracker upload_tracker_;
 };
 
 } // namespace torrent

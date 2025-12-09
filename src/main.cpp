@@ -1,14 +1,23 @@
 #include "download_manager.h"
 #include <iostream>
 #include <string>
+#include <cstring>
 
 void printUsage(const char* program_name) {
-    std::cout << "Usage: " << program_name << " <torrent_file> [download_dir]\n";
+    std::cout << "Usage: " << program_name << " <torrent_file> [options]\n";
+    std::cout << "\nArguments:\n";
+    std::cout << "  torrent_file              Path to .torrent file\n";
     std::cout << "\nOptions:\n";
-    std::cout << "  torrent_file   Path to .torrent file\n";
-    std::cout << "  download_dir   Directory to save downloaded files (default: ./downloads)\n";
-    std::cout << "\nExample:\n";
-    std::cout << "  " << program_name << " example.torrent ./downloads\n";
+    std::cout << "  --download-dir <path>     Directory to save downloaded files (default: ./downloads)\n";
+    std::cout << "  --max-download <KB/s>     Maximum download speed in KB/s (default: unlimited)\n";
+    std::cout << "  --max-upload <KB/s>       Maximum upload speed in KB/s (default: unlimited)\n";
+    std::cout << "  --port <port>             Listen port (default: 6881)\n";
+    std::cout << "  --help                    Show this help message\n";
+    std::cout << "\nExamples:\n";
+    std::cout << "  " << program_name << " example.torrent\n";
+    std::cout << "  " << program_name << " example.torrent --download-dir ./downloads\n";
+    std::cout << "  " << program_name << " example.torrent --max-download 500 --max-upload 100\n";
+    std::cout << "  " << program_name << " example.torrent --max-download 1024\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -19,14 +28,66 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Check for help
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printUsage(argv[0]);
+            return 0;
+        }
+    }
+
+    // Parse arguments
     std::string torrent_file = argv[1];
-    std::string download_dir = (argc >= 3) ? argv[2] : "./downloads";
+    std::string download_dir = "./downloads";
+    int64_t max_download_speed = 0;  // 0 = unlimited (bytes/sec)
+    int64_t max_upload_speed = 0;    // 0 = unlimited (bytes/sec)
+    uint16_t listen_port = 6881;
+
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "--download-dir" && i + 1 < argc) {
+            download_dir = argv[++i];
+        }
+        else if (arg == "--max-download" && i + 1 < argc) {
+            int kb_per_sec = std::stoi(argv[++i]);
+            max_download_speed = kb_per_sec * 1024;  // Convert KB/s to bytes/sec
+        }
+        else if (arg == "--max-upload" && i + 1 < argc) {
+            int kb_per_sec = std::stoi(argv[++i]);
+            max_upload_speed = kb_per_sec * 1024;  // Convert KB/s to bytes/sec
+        }
+        else if (arg == "--port" && i + 1 < argc) {
+            listen_port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        }
+        else {
+            std::cerr << "Unknown option: " << arg << "\n";
+            printUsage(argv[0]);
+            return 1;
+        }
+    }
 
     try {
         std::cout << "Loading torrent: " << torrent_file << "\n";
-        std::cout << "Download directory: " << download_dir << "\n\n";
+        std::cout << "Download directory: " << download_dir << "\n";
+        std::cout << "Listen port: " << listen_port << "\n";
 
-        torrent::DownloadManager manager(torrent_file, download_dir);
+        if (max_download_speed > 0) {
+            std::cout << "Max download speed: " << (max_download_speed / 1024) << " KB/s\n";
+        } else {
+            std::cout << "Max download speed: unlimited\n";
+        }
+
+        if (max_upload_speed > 0) {
+            std::cout << "Max upload speed: " << (max_upload_speed / 1024) << " KB/s\n";
+        } else {
+            std::cout << "Max upload speed: unlimited\n";
+        }
+
+        std::cout << "\n";
+
+        torrent::DownloadManager manager(torrent_file, download_dir, listen_port,
+                                        max_download_speed, max_upload_speed);
 
         std::cout << "Starting download...\n";
         manager.start();

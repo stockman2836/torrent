@@ -9,7 +9,9 @@ namespace torrent {
 
 DownloadManager::DownloadManager(const std::string& torrent_path,
                                 const std::string& download_dir,
-                                uint16_t listen_port)
+                                uint16_t listen_port,
+                                int64_t max_download_speed,
+                                int64_t max_upload_speed)
     : download_dir_(download_dir)
     , peer_id_(utils::generatePeerId())
     , listen_port_(listen_port)
@@ -18,7 +20,11 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , endgame_mode_(false)
     , seeding_mode_(false)
     , total_downloaded_(0)
-    , total_uploaded_(0) {
+    , total_uploaded_(0)
+    , download_limiter_(max_download_speed)
+    , upload_limiter_(max_upload_speed)
+    , download_tracker_(20)  // 20 second window
+    , upload_tracker_(20) {
 
     // Load torrent file
     torrent_ = TorrentFile::fromFile(torrent_path);
@@ -119,23 +125,11 @@ double DownloadManager::progress() const {
 }
 
 int64_t DownloadManager::downloadSpeed() const {
-    // TODO: Calculate actual download speed
-    return 0;
+    return static_cast<int64_t>(download_tracker_.getSpeed());
 }
 
 int64_t DownloadManager::uploadSpeed() const {
-    // Calculate upload speed based on recent activity
-    // For now, use total uploaded divided by elapsed time
-    // TODO: Implement sliding window for more accurate speed calculation
-
-    static auto start_time = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
-
-    if (elapsed_seconds > 0) {
-        return total_uploaded_ / elapsed_seconds;
-    }
-    return 0;
+    return static_cast<int64_t>(upload_tracker_.getSpeed());
 }
 
 void DownloadManager::printStatus() const {
@@ -376,11 +370,15 @@ void DownloadManager::peerLoop(size_t peer_index) {
                           << " offset=" << piece_msg.offset
                           << " size=" << piece_msg.data.size() << "\n";
 
+                // Apply download rate limiting
+                download_limiter_.waitAndConsume(piece_msg.data.size());
+
                 // Add block to piece manager
                 piece_manager_->addBlock(piece_msg.piece_index, piece_msg.offset, piece_msg.data);
 
                 // Update statistics
                 total_downloaded_ += piece_msg.data.size();
+                download_tracker_.addBytes(piece_msg.data.size());
 
                 // Check if piece is complete
                 if (piece_manager_->isPieceInProgress(piece_msg.piece_index)) {
@@ -469,6 +467,9 @@ void DownloadManager::peerLoop(size_t peer_index) {
                         // Track this upload
                         conn_ptr->addPendingUpload(req_msg.piece_index, req_msg.offset, req_msg.length);
 
+                        // Apply upload rate limiting
+                        upload_limiter_.waitAndConsume(block_data.size());
+
                         // Send PIECE message
                         if (conn_ptr->sendPiece(req_msg.piece_index, req_msg.offset, block_data)) {
                             std::cout << "Uploaded block: piece=" << req_msg.piece_index
@@ -477,6 +478,7 @@ void DownloadManager::peerLoop(size_t peer_index) {
 
                             // Update upload statistics
                             total_uploaded_ += block_data.size();
+                            upload_tracker_.addBytes(block_data.size());
 
                             // Update peer statistics
                             {

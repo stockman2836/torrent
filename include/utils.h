@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <sstream>
 #include <iomanip>
+#include <chrono>
+#include <mutex>
+#include <deque>
 
 namespace torrent {
 namespace utils {
@@ -36,6 +39,62 @@ std::string formatSpeed(double bytesPerSec);
 
 // Retry helpers
 int calculateBackoffDelay(int attempt, int base_delay_ms = 1000, int max_delay_ms = 60000);
+
+// Rate limiting with token bucket algorithm
+class TokenBucket {
+public:
+    // rate_bytes_per_sec: maximum bytes per second (0 = unlimited)
+    TokenBucket(int64_t rate_bytes_per_sec);
+
+    // Try to consume tokens for sending/receiving bytes
+    // Returns true if allowed, false if rate limit exceeded
+    bool tryConsume(size_t bytes);
+
+    // Wait until tokens are available (blocks)
+    void waitAndConsume(size_t bytes);
+
+    // Get current rate limit
+    int64_t getRate() const { return rate_; }
+
+    // Update rate limit (0 = unlimited)
+    void setRate(int64_t rate_bytes_per_sec);
+
+private:
+    int64_t rate_;        // Bytes per second (0 = unlimited)
+    double tokens_;       // Available tokens
+    int64_t capacity_;    // Maximum tokens
+    std::chrono::steady_clock::time_point last_update_;
+    std::mutex mutex_;
+
+    void refill();
+};
+
+// Speed tracking with sliding window
+class SpeedTracker {
+public:
+    SpeedTracker(int window_seconds = 20);
+
+    // Record bytes transferred
+    void addBytes(int64_t bytes);
+
+    // Get current speed (bytes per second)
+    double getSpeed() const;
+
+    // Reset tracking
+    void reset();
+
+private:
+    struct Sample {
+        std::chrono::steady_clock::time_point timestamp;
+        int64_t bytes;
+    };
+
+    int window_seconds_;
+    std::deque<Sample> samples_;
+    mutable std::mutex mutex_;
+
+    void removeOldSamples();
+};
 
 } // namespace utils
 } // namespace torrent
