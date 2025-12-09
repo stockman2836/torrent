@@ -29,6 +29,7 @@ add_library(torrent_lib STATIC
     ${PROJECT_SOURCE_DIR}/src/file_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/download_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/logger.cpp
+    ${PROJECT_SOURCE_DIR}/src/config.cpp
 )
 
 target_link_libraries(torrent_lib
@@ -38,6 +39,7 @@ target_link_libraries(torrent_lib
     OpenSSL::Crypto
     CURL::libcurl
     spdlog::spdlog
+    nlohmann_json::nlohmann_json
 )
 
 if(WIN32)

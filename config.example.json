@@ -1,0 +1,73 @@
+{
+    "_comment": "BitTorrent Client Configuration Example",
+    "_note": "Copy this file to config.json and modify as needed",
+
+    "listen_port": 6881,
+    "_listen_port_comment": "Port to listen for incoming peer connections (1024-65535)",
+
+    "max_peers": 50,
+    "_max_peers_comment": "Maximum number of peers per torrent (1-1000)",
+
+    "max_connections": 100,
+    "_max_connections_comment": "Maximum total connections (1-10000)",
+
+    "max_download_speed": 0,
+    "_max_download_speed_comment": "Max download speed in bytes/sec (0 = unlimited)",
+
+    "max_upload_speed": 0,
+    "_max_upload_speed_comment": "Max upload speed in bytes/sec (0 = unlimited)",
+
+    "download_dir": "./downloads",
+    "_download_dir_comment": "Directory to save downloaded files",
+
+    "sequential_download": false,
+    "_sequential_download_comment": "Download pieces in sequential order (useful for streaming)",
+
+    "piece_timeout_seconds": 30,
+    "_piece_timeout_comment": "Timeout for piece requests in seconds",
+
+    "seed_after_download": true,
+    "_seed_after_download_comment": "Continue seeding after download completes",
+
+    "seed_ratio_limit": 2.0,
+    "_seed_ratio_limit_comment": "Stop seeding when ratio reaches this value (0 = unlimited)",
+
+    "seed_time_limit_hours": 0,
+    "_seed_time_limit_hours_comment": "Stop seeding after this many hours (0 = unlimited)",
+
+    "tracker_announce_interval": 1800,
+    "_tracker_announce_interval_comment": "Default tracker announce interval in seconds",
+
+    "tracker_timeout_seconds": 30,
+    "_tracker_timeout_comment": "Tracker request timeout in seconds",
+
+    "tracker_max_retries": 3,
+    "_tracker_max_retries_comment": "Maximum retries for tracker requests",
+
+    "log_level": "info",
+    "_log_level_comment": "Logging level: trace, debug, info, warn, error",
+
+    "log_file": "torrent_client.log",
+    "_log_file_comment": "Path to log file",
+
+    "log_max_size": 5242880,
+    "_log_max_size_comment": "Maximum log file size in bytes (5 MB = 5242880)",
+
+    "log_max_files": 3,
+    "_log_max_files_comment": "Number of rotating log files to keep",
+
+    "enable_resume": true,
+    "_enable_resume_comment": "Enable resume capability for interrupted downloads",
+
+    "resume_dir": "./resume",
+    "_resume_dir_comment": "Directory to store resume data",
+
+    "enable_dht": false,
+    "_enable_dht_comment": "Enable DHT for trackerless torrents (not yet implemented)",
+
+    "dht_port": 6881,
+    "_dht_port_comment": "Port for DHT (not yet implemented)",
+
+    "enable_pex": false,
+    "_enable_pex_comment": "Enable Peer Exchange (not yet implemented)"
+}
