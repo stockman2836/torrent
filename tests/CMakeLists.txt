@@ -24,6 +24,7 @@ add_library(torrent_lib STATIC
     ${PROJECT_SOURCE_DIR}/src/utils.cpp
     ${PROJECT_SOURCE_DIR}/src/torrent_file.cpp
     ${PROJECT_SOURCE_DIR}/src/tracker_client.cpp
+    ${PROJECT_SOURCE_DIR}/src/udp_tracker.cpp
     ${PROJECT_SOURCE_DIR}/src/peer_connection.cpp
     ${PROJECT_SOURCE_DIR}/src/piece_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/file_manager.cpp

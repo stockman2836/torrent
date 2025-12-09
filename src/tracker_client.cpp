@@ -1,4 +1,5 @@
 #include "tracker_client.h"
+#include "udp_tracker.h"
 #include "bencode.h"
 #include "utils.h"
 #include "logger.h"
@@ -98,7 +99,14 @@ TrackerClient::TrackerClient(const std::string& announce_url,
                              const std::string& peer_id)
     : announce_url_(announce_url)
     , info_hash_(info_hash)
-    , peer_id_(peer_id) {
+    , peer_id_(peer_id)
+    , is_udp_(announce_url.substr(0, 6) == "udp://") {
+
+    if (is_udp_) {
+        LOG_INFO("Tracker type: UDP");
+    } else {
+        LOG_INFO("Tracker type: HTTP");
+    }
 }
 
 std::string TrackerClient::buildAnnounceUrl(int64_t uploaded,
@@ -128,12 +136,28 @@ std::string TrackerClient::buildAnnounceUrl(int64_t uploaded,
     return url.str();
 }
 
+bool TrackerClient::isUDP() const {
+    return is_udp_;
+}
+
 TrackerResponse TrackerClient::announce(int64_t uploaded,
                                        int64_t downloaded,
                                        int64_t left,
                                        uint16_t port,
                                        const std::string& event) {
-    LOG_INFO("Announcing to tracker: uploaded={}, downloaded={}, left={}, port={}, event={}",
+    if (is_udp_) {
+        return announceUDP(uploaded, downloaded, left, port, event);
+    } else {
+        return announceHTTP(uploaded, downloaded, left, port, event);
+    }
+}
+
+TrackerResponse TrackerClient::announceHTTP(int64_t uploaded,
+                                           int64_t downloaded,
+                                           int64_t left,
+                                           uint16_t port,
+                                           const std::string& event) {
+    LOG_INFO("HTTP tracker announce: uploaded={}, downloaded={}, left={}, port={}, event={}",
              uploaded, downloaded, left, port, event);
 
     std::string url = buildAnnounceUrl(uploaded, downloaded, left, port, event);
@@ -144,7 +168,7 @@ TrackerResponse TrackerClient::announce(int64_t uploaded,
 
     // Handle HTTP errors
     if (response_body.empty()) {
-        LOG_ERROR("Tracker announce failed: {}", error_msg);
+        LOG_ERROR("HTTP tracker announce failed: {}", error_msg);
         TrackerResponse error_response;
         error_response.interval = 1800;
         error_response.complete = 0;
@@ -155,6 +179,25 @@ TrackerResponse TrackerClient::announce(int64_t uploaded,
 
     // Parse the tracker response
     return parseResponse(response_body);
+}
+
+TrackerResponse TrackerClient::announceUDP(int64_t uploaded,
+                                          int64_t downloaded,
+                                          int64_t left,
+                                          uint16_t port,
+                                          const std::string& event) {
+    try {
+        UDPTrackerClient udp_client(announce_url_, info_hash_, peer_id_);
+        return udp_client.announce(uploaded, downloaded, left, port, event);
+    } catch (const std::exception& e) {
+        LOG_ERROR("UDP tracker announce exception: {}", e.what());
+        TrackerResponse error_response;
+        error_response.interval = 1800;
+        error_response.complete = 0;
+        error_response.incomplete = 0;
+        error_response.failure_reason = std::string("UDP tracker error: ") + e.what();
+        return error_response;
+    }
 }
 
 TrackerResponse TrackerClient::parseResponse(const std::string& response) {

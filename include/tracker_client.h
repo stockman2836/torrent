@@ -13,6 +13,9 @@ struct Peer {
     Peer(const std::string& ip, uint16_t port) : ip(ip), port(port) {}
 };
 
+// Alias for consistency with UDP tracker
+using PeerInfo = Peer;
+
 class TrackerResponse {
 public:
     int32_t interval;
@@ -30,14 +33,18 @@ public:
                   const std::vector<uint8_t>& info_hash,
                   const std::string& peer_id);
 
-    // Send announce request to tracker
+    // Send announce request to tracker (automatically selects HTTP or UDP)
     TrackerResponse announce(int64_t uploaded,
                             int64_t downloaded,
                             int64_t left,
                             uint16_t port,
                             const std::string& event = "");
 
+    // Check if tracker is UDP
+    bool isUDP() const;
+
 private:
+    // HTTP tracker methods
     std::string buildAnnounceUrl(int64_t uploaded,
                                  int64_t downloaded,
                                  int64_t left,
@@ -46,9 +53,22 @@ private:
 
     TrackerResponse parseResponse(const std::string& response);
 
+    TrackerResponse announceHTTP(int64_t uploaded,
+                                int64_t downloaded,
+                                int64_t left,
+                                uint16_t port,
+                                const std::string& event);
+
+    TrackerResponse announceUDP(int64_t uploaded,
+                               int64_t downloaded,
+                               int64_t left,
+                               uint16_t port,
+                               const std::string& event);
+
     std::string announce_url_;
     std::vector<uint8_t> info_hash_;
     std::string peer_id_;
+    bool is_udp_;
 };
 
 } // namespace torrent

@@ -22,6 +22,7 @@ set(SOURCES
     src/utils.cpp
     src/torrent_file.cpp
     src/tracker_client.cpp
+    src/udp_tracker.cpp
     src/peer_connection.cpp
     src/piece_manager.cpp
     src/file_manager.cpp
@@ -35,6 +36,7 @@ set(HEADERS
     include/bencode.h
     include/torrent_file.h
     include/tracker_client.h
+    include/udp_tracker.h
     include/peer_connection.h
     include/piece_manager.h
     include/file_manager.h
