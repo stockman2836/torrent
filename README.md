@@ -5,8 +5,11 @@ A full-featured BitTorrent client in C++17 with support for core BitTorrent prot
 ## Features
 
 - .torrent file parsing (Bencode format)
+- **Magnet link support (partial)** - Parse and display magnet URIs
 - HTTP and UDP tracker communication
 - BitTorrent peer protocol
+- **Extension Protocol (BEP 10)** - Support for protocol extensions
+- **Metadata Exchange (BEP 9)** - ut_metadata for magnet links
 - **DHT (Distributed Hash Table) support** - Trackerless operation
 - Piece-based download management
 - Multithreaded architecture
@@ -92,6 +95,13 @@ The project is divided into several core components:
     - CLI argument override
     - Configurable DHT, speed limits, ports, etc.
 
+12. **Magnet Link Support** (`magnet_uri.h/cpp`, `extension_protocol.h/cpp`, `metadata_exchange.h/cpp`, `magnet_download_manager.h/cpp`)
+    - Magnet URI parser (hex and base32 info hash)
+    - Extension Protocol (BEP 10) - Extended handshake
+    - Metadata Exchange (BEP 9) - ut_metadata extension
+    - Magnet Download Manager - Coordinate metadata download
+    - Partial implementation (parsing and structure ready)
+
 ## Requirements
 
 - C++17 or higher
@@ -149,14 +159,22 @@ make -j$(nproc)
 ## Usage
 
 ```bash
-# Basic usage
+# Basic usage with .torrent file
 ./torrent_client example.torrent
 
-# With custom download directory
-./torrent_client example.torrent ./my_downloads
+# With magnet link (partial support - shows info)
+./torrent_client "magnet:?xt=urn:btih:..."
+
+# With configuration file
+./torrent_client example.torrent --config config.json
 ```
 
 ### Options:
 
-- `<torrent_file>` - Path to .torrent file (required)
-- `[download_dir]` - Directory to save files (default: ./downloads)
+- `<torrent_file|magnet_uri>` - Path to .torrent file or magnet link (required)
+- `--config <file>` - Configuration file path
+- `--download-dir <path>` - Download directory
+- `--max-download <KB/s>` - Max download speed
+- `--max-upload <KB/s>` - Max upload speed
+- `--port <port>` - Listen port
+- `--log-level <level>` - Logging level

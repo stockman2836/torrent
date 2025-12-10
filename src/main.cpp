@@ -1,4 +1,6 @@
 #include "download_manager.h"
+#include "magnet_uri.h"
+#include "magnet_download_manager.h"
 #include "logger.h"
 #include "config.h"
 #include <iostream>
@@ -7,9 +9,10 @@
 #include <optional>
 
 void printUsage(const char* program_name) {
-    std::cout << "Usage: " << program_name << " <torrent_file> [options]\n";
+    std::cout << "Usage: " << program_name << " <torrent_file|magnet_uri> [options]\n";
     std::cout << "\nArguments:\n";
     std::cout << "  torrent_file              Path to .torrent file\n";
+    std::cout << "  magnet_uri                Magnet link (magnet:?...)\n";
     std::cout << "\nOptions:\n";
     std::cout << "  --config <file>           Path to config file (default: ./config.json)\n";
     std::cout << "  --download-dir <path>     Directory to save downloaded files\n";
@@ -21,6 +24,7 @@ void printUsage(const char* program_name) {
     std::cout << "\nNote: CLI options override config file settings\n";
     std::cout << "\nExamples:\n";
     std::cout << "  " << program_name << " example.torrent\n";
+    std::cout << "  " << program_name << " \"magnet:?xt=urn:btih:...\"\n";
     std::cout << "  " << program_name << " example.torrent --config my_config.json\n";
     std::cout << "  " << program_name << " example.torrent --download-dir ./downloads\n";
     std::cout << "  " << program_name << " example.torrent --max-download 500 --max-upload 100\n";
@@ -43,7 +47,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Parse arguments
-    std::string torrent_file = argv[1];
+    std::string torrent_input = argv[1];  // Can be .torrent file or magnet URI
     std::string config_file = "./config.json";
 
     // CLI overrides (std::optional to detect if user specified them)
@@ -117,34 +121,62 @@ int main(int argc, char* argv[]) {
 
     try {
         LOG_INFO("=== BitTorrent Client Starting ===");
-        LOG_INFO("Loading torrent: {}", torrent_file);
+        LOG_INFO("Input: {}", torrent_input);
         LOG_INFO("Configuration loaded");
 
         // Print configuration summary
         config.print();
 
-        std::cout << "Loading torrent: " << torrent_file << "\n";
+        // Check if input is a magnet link or torrent file
+        if (torrent::MagnetURI::isMagnetURI(torrent_input)) {
+            std::cout << "Detected magnet link\n";
 
-        std::cout << "\n";
+            // Parse magnet URI
+            torrent::MagnetURI magnet_uri = torrent::MagnetURI::parse(torrent_input);
 
-        torrent::DownloadManager manager(torrent_file, config.download_dir, config.listen_port,
-                                        config.max_download_speed, config.max_upload_speed,
-                                        config.enable_dht);
+            if (!magnet_uri.isValid()) {
+                std::cerr << "Invalid magnet URI\n";
+                return 1;
+            }
 
-        std::cout << "Starting download...\n";
-        manager.start();
+            std::cout << "Magnet Link Info:\n";
+            std::cout << "  Info Hash: " << magnet_uri.infoHashHex() << "\n";
+            if (!magnet_uri.displayName().empty()) {
+                std::cout << "  Name: " << magnet_uri.displayName() << "\n";
+            }
+            std::cout << "  Trackers: " << magnet_uri.trackers().size() << "\n";
 
-        // Main loop - print status
-        while (manager.isRunning() && manager.progress() < 100.0) {
-            manager.printStatus();
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            // Note: Full magnet link support requires metadata download implementation
+            // For now, inform the user
+            std::cout << "\nMagnet link support is partially implemented.\n";
+            std::cout << "To use magnet links, metadata download needs to be completed.\n";
+            std::cout << "Currently only .torrent files are fully supported.\n";
+
+            return 0;
         }
+        else {
+            // Regular .torrent file
+            std::cout << "Loading torrent file: " << torrent_input << "\n\n";
 
-        if (manager.progress() >= 100.0) {
-            std::cout << "\n=== Download complete! ===\n";
+            torrent::DownloadManager manager(torrent_input, config.download_dir, config.listen_port,
+                                            config.max_download_speed, config.max_upload_speed,
+                                            config.enable_dht);
+
+            std::cout << "Starting download...\n";
+            manager.start();
+
+            // Main loop - print status
+            while (manager.isRunning() && manager.progress() < 100.0) {
+                manager.printStatus();
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+
+            if (manager.progress() >= 100.0) {
+                std::cout << "\n=== Download complete! ===\n";
+            }
+
+            manager.stop();
         }
-
-        manager.stop();
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";

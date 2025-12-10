@@ -33,6 +33,10 @@ set(SOURCES
     src/dht_krpc.cpp
     src/dht_routing_table.cpp
     src/dht_manager.cpp
+    src/magnet_uri.cpp
+    src/extension_protocol.cpp
+    src/metadata_exchange.cpp
+    src/magnet_download_manager.cpp
 )
 
 # Header files
@@ -52,6 +56,10 @@ set(HEADERS
     include/dht_krpc.h
     include/dht_routing_table.h
     include/dht_manager.h
+    include/magnet_uri.h
+    include/extension_protocol.h
+    include/metadata_exchange.h
+    include/magnet_download_manager.h
 )
 
 # Fetch external libraries
