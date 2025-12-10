@@ -6,6 +6,7 @@
 #include "piece_manager.h"
 #include "file_manager.h"
 #include "utils.h"
+#include "dht_manager.h"
 #include <memory>
 #include <vector>
 #include <thread>
@@ -61,7 +62,8 @@ public:
                    const std::string& download_dir,
                    uint16_t listen_port = 6881,
                    int64_t max_download_speed = 0,  // 0 = unlimited (bytes/sec)
-                   int64_t max_upload_speed = 0);    // 0 = unlimited (bytes/sec)
+                   int64_t max_upload_speed = 0,    // 0 = unlimited (bytes/sec)
+                   bool enable_dht = true);         // Enable DHT
 
     ~DownloadManager();
 
@@ -85,9 +87,11 @@ private:
     void peerLoop(size_t peer_index);
     void coordinatorLoop();
     void resumeLoop();  // Periodic state saving
+    void dhtLoop();     // DHT operations
 
     void connectToPeers();
     void updateTracker();
+    void updateDHT();   // Get peers from DHT
     void broadcastHave(uint32_t piece_index);
 
     // Resume capability
@@ -111,6 +115,7 @@ private:
     std::unique_ptr<PieceManager> piece_manager_;
     std::unique_ptr<FileManager> file_manager_;
     std::unique_ptr<TrackerClient> tracker_client_;
+    std::unique_ptr<dht::DHTManager> dht_manager_;
 
     std::vector<Peer> available_peers_;
     std::vector<PeerInfo> active_peers_;
@@ -124,6 +129,7 @@ private:
     std::atomic<bool> paused_;
     std::atomic<bool> endgame_mode_;
     std::atomic<bool> seeding_mode_;
+    bool enable_dht_;
 
     std::vector<std::thread> worker_threads_;
 

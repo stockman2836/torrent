@@ -41,8 +41,8 @@ struct Config {
     bool enable_resume = true;
     std::string resume_dir = "./resume";
 
-    // DHT settings (future use)
-    bool enable_dht = false;
+    // DHT settings
+    bool enable_dht = true;   // Now implemented!
     uint16_t dht_port = 6881;
 
     // PEX settings (future use)

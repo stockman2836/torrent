@@ -11,7 +11,8 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
                                 const std::string& download_dir,
                                 uint16_t listen_port,
                                 int64_t max_download_speed,
-                                int64_t max_upload_speed)
+                                int64_t max_upload_speed,
+                                bool enable_dht)
     : download_dir_(download_dir)
     , peer_id_(utils::generatePeerId())
     , listen_port_(listen_port)
@@ -19,6 +20,7 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , paused_(false)
     , endgame_mode_(false)
     , seeding_mode_(false)
+    , enable_dht_(enable_dht)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -45,6 +47,11 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
         torrent_.infoHash(),
         peer_id_
     );
+
+    // Initialize DHT if enabled
+    if (enable_dht_) {
+        dht_manager_ = std::make_unique<dht::DHTManager>(listen_port_ + 1); // DHT on port + 1
+    }
 }
 
 DownloadManager::~DownloadManager() {
@@ -71,6 +78,20 @@ void DownloadManager::start() {
     std::cout << "Contacting tracker...\n";
     updateTracker();
 
+    // Start DHT if enabled
+    if (enable_dht_ && dht_manager_) {
+        std::cout << "Starting DHT...\n";
+        dht_manager_->start();
+
+        // Bootstrap DHT
+        std::vector<dht::BootstrapNode> bootstrap_nodes = {
+            {"router.bittorrent.com", 6881},
+            {"dht.transmissionbt.com", 6881},
+            {"router.utorrent.com", 6881}
+        };
+        dht_manager_->bootstrap(bootstrap_nodes);
+    }
+
     std::cout << "Starting download...\n";
 
     // Start worker threads
@@ -78,6 +99,10 @@ void DownloadManager::start() {
     worker_threads_.emplace_back(&DownloadManager::trackerLoop, this);
     worker_threads_.emplace_back(&DownloadManager::coordinatorLoop, this);
     worker_threads_.emplace_back(&DownloadManager::resumeLoop, this);
+
+    if (enable_dht_ && dht_manager_) {
+        worker_threads_.emplace_back(&DownloadManager::dhtLoop, this);
+    }
 }
 
 void DownloadManager::stop() {
@@ -102,6 +127,12 @@ void DownloadManager::stop() {
     saveResumeState();
 
     running_ = false;
+
+    // Stop DHT
+    if (enable_dht_ && dht_manager_) {
+        std::cout << "Stopping DHT...\n";
+        dht_manager_->stop();
+    }
 
     // Wait for threads to finish
     for (auto& thread : worker_threads_) {
@@ -933,6 +964,94 @@ void DownloadManager::resumeLoop() {
     }
 
     std::cout << "Resume loop ended\n";
+}
+
+void DownloadManager::dhtLoop() {
+    if (!enable_dht_ || !dht_manager_) {
+        return;
+    }
+
+    std::cout << "DHT loop started\n";
+
+    // Wait for DHT to bootstrap
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+    // Announce ourselves in DHT
+    if (dht_manager_->getNodeCount() > 0) {
+        std::cout << "DHT: Announcing ourselves for info_hash\n";
+        dht_manager_->announcePeer(torrent_.infoHash(), listen_port_);
+    }
+
+    while (running_) {
+        std::this_thread::sleep_for(std::chrono::seconds(60));
+
+        if (!running_) {
+            break;
+        }
+
+        // Get peers from DHT if we don't have enough
+        size_t active_peer_count = 0;
+        {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            active_peer_count = active_peers_.size();
+        }
+
+        if (active_peer_count < min_peers_ && !seeding_mode_) {
+            updateDHT();
+        }
+
+        // Periodically re-announce
+        if (dht_manager_->getNodeCount() > 0) {
+            dht_manager_->announcePeer(torrent_.infoHash(), listen_port_);
+        }
+
+        // Log DHT statistics
+        auto stats = dht_manager_->getRoutingStats();
+        std::cout << "DHT: " << stats.total_nodes << " nodes in routing table ("
+                  << stats.good_nodes << " good)\n";
+    }
+
+    std::cout << "DHT loop ended\n";
+}
+
+void DownloadManager::updateDHT() {
+    if (!enable_dht_ || !dht_manager_) {
+        return;
+    }
+
+    if (dht_manager_->getNodeCount() == 0) {
+        std::cout << "DHT: No nodes in routing table yet, skipping peer lookup\n";
+        return;
+    }
+
+    std::cout << "DHT: Looking up peers for info_hash...\n";
+
+    auto dht_peers = dht_manager_->getPeers(torrent_.infoHash(), 15);
+
+    if (dht_peers.empty()) {
+        std::cout << "DHT: No peers found\n";
+        return;
+    }
+
+    std::cout << "DHT: Found " << dht_peers.size() << " peers\n";
+
+    // Add DHT peers to available peers
+    std::lock_guard<std::mutex> lock(peers_mutex_);
+    for (const auto& dht_peer : dht_peers) {
+        // Check if we already have this peer
+        bool already_have = false;
+        for (const auto& peer : available_peers_) {
+            if (peer.ip == dht_peer.ip && peer.port == dht_peer.port) {
+                already_have = true;
+                break;
+            }
+        }
+
+        if (!already_have) {
+            available_peers_.emplace_back(dht_peer.ip, dht_peer.port);
+            std::cout << "DHT: Added peer " << dht_peer.ip << ":" << dht_peer.port << "\n";
+        }
+    }
 }
 
 } // namespace torrent

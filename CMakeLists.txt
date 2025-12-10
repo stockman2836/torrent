@@ -29,6 +29,10 @@ set(SOURCES
     src/download_manager.cpp
     src/logger.cpp
     src/config.cpp
+    src/dht_node.cpp
+    src/dht_krpc.cpp
+    src/dht_routing_table.cpp
+    src/dht_manager.cpp
 )
 
 # Header files
@@ -44,6 +48,10 @@ set(HEADERS
     include/utils.h
     include/logger.h
     include/config.h
+    include/dht_node.h
+    include/dht_krpc.h
+    include/dht_routing_table.h
+    include/dht_manager.h
 )
 
 # Fetch external libraries

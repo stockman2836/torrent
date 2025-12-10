@@ -128,7 +128,8 @@ int main(int argc, char* argv[]) {
         std::cout << "\n";
 
         torrent::DownloadManager manager(torrent_file, config.download_dir, config.listen_port,
-                                        config.max_download_speed, config.max_upload_speed);
+                                        config.max_download_speed, config.max_upload_speed,
+                                        config.enable_dht);
 
         std::cout << "Starting download...\n";
         manager.start();

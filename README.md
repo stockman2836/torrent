@@ -5,12 +5,16 @@ A full-featured BitTorrent client in C++17 with support for core BitTorrent prot
 ## Features
 
 - .torrent file parsing (Bencode format)
-- HTTP tracker communication
+- HTTP and UDP tracker communication
 - BitTorrent peer protocol
+- **DHT (Distributed Hash Table) support** - Trackerless operation
 - Piece-based download management
 - Multithreaded architecture
 - Support for single-file and multi-file torrents
 - SHA1 verification of downloaded data
+- Resume capability
+- Logging system
+- JSON configuration
 - CLI interface
 
 ## Architecture
@@ -31,9 +35,9 @@ The project is divided into several core components:
    - Metadata extraction (announce URL, file sizes, info hash)
    - Support for single-file and multi-file modes
 
-3. **Tracker Client** (`tracker_client.h/cpp`)
+3. **Tracker Client** (`tracker_client.h/cpp`, `udp_tracker.h/cpp`)
 
-   - HTTP requests to trackers
+   - HTTP and UDP tracker support
    - Peer list retrieval
    - Tracker response parsing (compact/dictionary format)
 
@@ -68,6 +72,25 @@ The project is divided into several core components:
    - Hex conversion
    - Peer ID generation
    - Output formatting
+
+9. **DHT Manager** (`dht_manager.h/cpp`, `dht_node.h/cpp`, `dht_krpc.h/cpp`, `dht_routing_table.h/cpp`)
+
+   - Kademlia-based DHT implementation (BEP 5)
+   - KRPC protocol (ping, find_node, get_peers, announce_peer)
+   - K-bucket routing table
+   - Bootstrap from well-known nodes
+   - Peer discovery without trackers
+   - Token-based announce_peer validation
+
+10. **Logger** (`logger.h/cpp`)
+    - Multi-level logging (trace, debug, info, warn, error)
+    - File and console output
+    - Log rotation
+
+11. **Config** (`config.h/cpp`)
+    - JSON-based configuration
+    - CLI argument override
+    - Configurable DHT, speed limits, ports, etc.
 
 ## Requirements
 
