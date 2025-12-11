@@ -693,6 +693,29 @@ void DownloadManager::connectToPeers() {
             continue;
         }
 
+        // If peer supports Fast Extension, send optimized messages
+        if (connection->peerSupportsFastExtension()) {
+            // Check if we're a seeder or have no pieces
+            bool is_seeder = piece_manager_->isComplete();
+            size_t pieces_have = 0;
+            for (bool have : our_bitfield) {
+                if (have) pieces_have++;
+            }
+
+            if (is_seeder) {
+                // Send HAVE_ALL instead of bitfield
+                LOG_INFO("Sending HAVE_ALL to peer (Fast Extension)");
+                connection->sendHaveAll();
+            } else if (pieces_have == 0) {
+                // Send HAVE_NONE instead of empty bitfield
+                LOG_INFO("Sending HAVE_NONE to peer (Fast Extension)");
+                connection->sendHaveNone();
+            }
+
+            // Generate and send allowed fast set
+            connection->generateAllowedFastSet(torrent_.numPieces(), 10);
+        }
+
         // Enable PEX if configured
         if (enable_pex_) {
             connection->enablePex();

@@ -56,7 +56,9 @@ PeerConnection::PeerConnection(const std::string& ip,
     , am_choking_(false)  // Start unchoked - allow uploads
     , am_interested_(false)
     , peer_choking_(true)
-    , peer_interested_(false) {
+    , peer_interested_(false)
+    , supports_fast_extension_(true)
+    , peer_supports_fast_extension_(false) {
 }
 
 PeerConnection::~PeerConnection() {
@@ -198,11 +200,15 @@ bool PeerConnection::performHandshake() {
     std::string protocol = "BitTorrent protocol";
     handshake.insert(handshake.end(), protocol.begin(), protocol.end());
 
-    // Reserved bytes (8 bytes, all zeros for now)
-    // Can be used for protocol extensions in the future
-    for (int i = 0; i < 8; ++i) {
-        handshake.push_back(0);
+    // Reserved bytes (8 bytes)
+    // Byte 7, bit 0x04: Fast Extension (BEP 6)
+    // Byte 5, bit 0x10: Extension Protocol (BEP 10)
+    std::vector<uint8_t> reserved(8, 0);
+    if (supports_fast_extension_) {
+        reserved[7] |= 0x04;  // Fast Extension support
     }
+    reserved[5] |= 0x10;  // Extension Protocol support
+    handshake.insert(handshake.end(), reserved.begin(), reserved.end());
 
     // Info hash (20 bytes)
     if (info_hash_.size() != 20) {
@@ -258,9 +264,20 @@ bool PeerConnection::performHandshake() {
         return false;
     }
 
-    // Extract reserved bytes (bytes 20-27) for future extension support
+    // Extract reserved bytes (bytes 20-27) and check for extension support
     std::vector<uint8_t> reserved_bytes(response.begin() + 20, response.begin() + 28);
-    // Currently we don't validate these, but they could indicate protocol extensions
+
+    // Check if peer supports Fast Extension (BEP 6)
+    // Byte 7, bit 0x04
+    if (reserved_bytes[7] & 0x04) {
+        peer_supports_fast_extension_ = true;
+        LOG_INFO("Peer supports Fast Extension (BEP 6)");
+    }
+
+    // Check if peer supports Extension Protocol (BEP 10)
+    if (reserved_bytes[5] & 0x10) {
+        LOG_DEBUG("Peer supports Extension Protocol (BEP 10)");
+    }
 
     // Verify info_hash matches (bytes 28-47)
     std::vector<uint8_t> received_info_hash(response.begin() + 28, response.begin() + 48);
@@ -490,6 +507,47 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
         case MessageType::CANCEL:
             std::cout << "Received CANCEL message\n";
             break;
+        case MessageType::SUGGEST_PIECE: {
+            LOG_DEBUG("Received SUGGEST_PIECE message");
+            SuggestPieceMessage suggest_msg;
+            if (parseSuggestPiece(*message, suggest_msg)) {
+                suggested_pieces_.push_back(suggest_msg.piece_index);
+                LOG_INFO("Peer suggests downloading piece {}", suggest_msg.piece_index);
+            }
+            break;
+        }
+        case MessageType::HAVE_ALL:
+            LOG_INFO("Received HAVE_ALL message - peer is a seeder");
+            // Mark all pieces as available
+            for (size_t i = 0; i < peer_bitfield_.size(); ++i) {
+                peer_bitfield_[i] = true;
+            }
+            break;
+        case MessageType::HAVE_NONE:
+            LOG_INFO("Received HAVE_NONE message - peer has no pieces");
+            // Mark all pieces as unavailable
+            for (size_t i = 0; i < peer_bitfield_.size(); ++i) {
+                peer_bitfield_[i] = false;
+            }
+            break;
+        case MessageType::REJECT_REQUEST: {
+            RejectRequestMessage reject_msg;
+            if (parseRejectRequest(*message, reject_msg)) {
+                LOG_WARN("Request rejected: piece {} offset {} length {}",
+                         reject_msg.piece_index, reject_msg.offset, reject_msg.length);
+                // Remove from pending requests
+                removeRequest(reject_msg.piece_index, reject_msg.offset);
+            }
+            break;
+        }
+        case MessageType::ALLOWED_FAST: {
+            AllowedFastMessage allowed_msg;
+            if (parseAllowedFast(*message, allowed_msg)) {
+                allowed_fast_set_.insert(allowed_msg.piece_index);
+                LOG_INFO("Peer allows fast access to piece {}", allowed_msg.piece_index);
+            }
+            break;
+        }
         case MessageType::EXTENDED: {
             LOG_DEBUG("Received EXTENDED message ({} bytes payload)", message->payload.size());
             if (extension_protocol_ && !message->payload.empty()) {
@@ -645,6 +703,97 @@ bool PeerConnection::sendCancel(uint32_t piece_index, uint32_t offset, uint32_t 
     payload[11] = length & 0xFF;
 
     PeerMessage msg{MessageType::CANCEL, payload};
+    return sendMessage(msg);
+}
+
+// ============================================================================
+// Fast Extension (BEP 6) Messages
+// ============================================================================
+
+bool PeerConnection::sendHaveAll() {
+    if (!peer_supports_fast_extension_) {
+        LOG_WARN("Cannot send HAVE_ALL: peer doesn't support Fast Extension");
+        return false;
+    }
+
+    PeerMessage msg{MessageType::HAVE_ALL, {}};
+    LOG_DEBUG("Sending HAVE_ALL message");
+    return sendMessage(msg);
+}
+
+bool PeerConnection::sendHaveNone() {
+    if (!peer_supports_fast_extension_) {
+        LOG_WARN("Cannot send HAVE_NONE: peer doesn't support Fast Extension");
+        return false;
+    }
+
+    PeerMessage msg{MessageType::HAVE_NONE, {}};
+    LOG_DEBUG("Sending HAVE_NONE message");
+    return sendMessage(msg);
+}
+
+bool PeerConnection::sendSuggestPiece(uint32_t piece_index) {
+    if (!peer_supports_fast_extension_) {
+        LOG_WARN("Cannot send SUGGEST_PIECE: peer doesn't support Fast Extension");
+        return false;
+    }
+
+    std::vector<uint8_t> payload(4);
+    payload[0] = (piece_index >> 24) & 0xFF;
+    payload[1] = (piece_index >> 16) & 0xFF;
+    payload[2] = (piece_index >> 8) & 0xFF;
+    payload[3] = piece_index & 0xFF;
+
+    PeerMessage msg{MessageType::SUGGEST_PIECE, payload};
+    LOG_DEBUG("Sending SUGGEST_PIECE: piece {}", piece_index);
+    return sendMessage(msg);
+}
+
+bool PeerConnection::sendRejectRequest(uint32_t piece_index, uint32_t offset, uint32_t length) {
+    if (!peer_supports_fast_extension_) {
+        LOG_WARN("Cannot send REJECT_REQUEST: peer doesn't support Fast Extension");
+        return false;
+    }
+
+    std::vector<uint8_t> payload(12);
+
+    // Piece index
+    payload[0] = (piece_index >> 24) & 0xFF;
+    payload[1] = (piece_index >> 16) & 0xFF;
+    payload[2] = (piece_index >> 8) & 0xFF;
+    payload[3] = piece_index & 0xFF;
+
+    // Offset
+    payload[4] = (offset >> 24) & 0xFF;
+    payload[5] = (offset >> 16) & 0xFF;
+    payload[6] = (offset >> 8) & 0xFF;
+    payload[7] = offset & 0xFF;
+
+    // Length
+    payload[8] = (length >> 24) & 0xFF;
+    payload[9] = (length >> 16) & 0xFF;
+    payload[10] = (length >> 8) & 0xFF;
+    payload[11] = length & 0xFF;
+
+    PeerMessage msg{MessageType::REJECT_REQUEST, payload};
+    LOG_DEBUG("Sending REJECT_REQUEST: piece {} offset {} length {}", piece_index, offset, length);
+    return sendMessage(msg);
+}
+
+bool PeerConnection::sendAllowedFast(uint32_t piece_index) {
+    if (!peer_supports_fast_extension_) {
+        LOG_WARN("Cannot send ALLOWED_FAST: peer doesn't support Fast Extension");
+        return false;
+    }
+
+    std::vector<uint8_t> payload(4);
+    payload[0] = (piece_index >> 24) & 0xFF;
+    payload[1] = (piece_index >> 16) & 0xFF;
+    payload[2] = (piece_index >> 8) & 0xFF;
+    payload[3] = piece_index & 0xFF;
+
+    PeerMessage msg{MessageType::ALLOWED_FAST, payload};
+    LOG_DEBUG("Sending ALLOWED_FAST: piece {}", piece_index);
     return sendMessage(msg);
 }
 
@@ -994,6 +1143,86 @@ bool PeerConnection::parseCancel(const PeerMessage& message, CancelMessage& resu
     return true;
 }
 
+// ============================================================================
+// Fast Extension Message Parsing (BEP 6)
+// ============================================================================
+
+bool PeerConnection::parseSuggestPiece(const PeerMessage& message, SuggestPieceMessage& result) {
+    if (message.type != MessageType::SUGGEST_PIECE) {
+        LOG_ERROR("Message is not a SUGGEST_PIECE message");
+        return false;
+    }
+
+    if (message.payload.size() != 4) {
+        LOG_ERROR("SUGGEST_PIECE message payload must be 4 bytes, got {}", message.payload.size());
+        return false;
+    }
+
+    // Parse piece index (big-endian)
+    result.piece_index = (static_cast<uint32_t>(message.payload[0]) << 24) |
+                         (static_cast<uint32_t>(message.payload[1]) << 16) |
+                         (static_cast<uint32_t>(message.payload[2]) << 8) |
+                         static_cast<uint32_t>(message.payload[3]);
+
+    LOG_DEBUG("Parsed SUGGEST_PIECE message: piece_index={}", result.piece_index);
+    return true;
+}
+
+bool PeerConnection::parseRejectRequest(const PeerMessage& message, RejectRequestMessage& result) {
+    if (message.type != MessageType::REJECT_REQUEST) {
+        LOG_ERROR("Message is not a REJECT_REQUEST message");
+        return false;
+    }
+
+    if (message.payload.size() != 12) {
+        LOG_ERROR("REJECT_REQUEST message payload must be 12 bytes, got {}", message.payload.size());
+        return false;
+    }
+
+    // Parse piece index (big-endian, bytes 0-3)
+    result.piece_index = (static_cast<uint32_t>(message.payload[0]) << 24) |
+                         (static_cast<uint32_t>(message.payload[1]) << 16) |
+                         (static_cast<uint32_t>(message.payload[2]) << 8) |
+                         static_cast<uint32_t>(message.payload[3]);
+
+    // Parse offset (big-endian, bytes 4-7)
+    result.offset = (static_cast<uint32_t>(message.payload[4]) << 24) |
+                    (static_cast<uint32_t>(message.payload[5]) << 16) |
+                    (static_cast<uint32_t>(message.payload[6]) << 8) |
+                    static_cast<uint32_t>(message.payload[7]);
+
+    // Parse length (big-endian, bytes 8-11)
+    result.length = (static_cast<uint32_t>(message.payload[8]) << 24) |
+                    (static_cast<uint32_t>(message.payload[9]) << 16) |
+                    (static_cast<uint32_t>(message.payload[10]) << 8) |
+                    static_cast<uint32_t>(message.payload[11]);
+
+    LOG_DEBUG("Parsed REJECT_REQUEST message: piece_index={}, offset={}, length={}",
+              result.piece_index, result.offset, result.length);
+    return true;
+}
+
+bool PeerConnection::parseAllowedFast(const PeerMessage& message, AllowedFastMessage& result) {
+    if (message.type != MessageType::ALLOWED_FAST) {
+        LOG_ERROR("Message is not an ALLOWED_FAST message");
+        return false;
+    }
+
+    if (message.payload.size() != 4) {
+        LOG_ERROR("ALLOWED_FAST message payload must be 4 bytes, got {}", message.payload.size());
+        return false;
+    }
+
+    // Parse piece index (big-endian)
+    result.piece_index = (static_cast<uint32_t>(message.payload[0]) << 24) |
+                         (static_cast<uint32_t>(message.payload[1]) << 16) |
+                         (static_cast<uint32_t>(message.payload[2]) << 8) |
+                         static_cast<uint32_t>(message.payload[3]);
+
+    LOG_DEBUG("Parsed ALLOWED_FAST message: piece_index={}", result.piece_index);
+    return true;
+}
+
 // Bitfield management methods
 
 void PeerConnection::initializePeerBitfield(size_t num_pieces) {
@@ -1062,7 +1291,14 @@ bool PeerConnection::requestPiece(uint32_t piece_index, const std::vector<Block>
 }
 
 bool PeerConnection::requestBlock(uint32_t piece_index, uint32_t offset, uint32_t length) {
-    if (!isReadyForRequests()) {
+    // With Fast Extension, we can request even when choked if piece is in allowed_fast_set
+    bool can_request = isReadyForRequests();
+    if (!can_request && peer_supports_fast_extension_ && isAllowedFast(piece_index)) {
+        can_request = true;
+        LOG_DEBUG("Requesting allowed fast piece {} even though choked", piece_index);
+    }
+
+    if (!can_request) {
         std::cerr << "Cannot request block: not ready for requests\n";
         return false;
     }
@@ -1307,6 +1543,57 @@ bool PeerConnection::sendPexMessage() {
     pex_manager_->markUpdateSent();
     LOG_DEBUG("Sent PEX message to {}:{}", ip_, port_);
     return true;
+}
+
+// ============================================================================
+// Fast Extension Support Methods
+// ============================================================================
+
+bool PeerConnection::isAllowedFast(uint32_t piece_index) const {
+    return allowed_fast_set_.find(piece_index) != allowed_fast_set_.end();
+}
+
+void PeerConnection::generateAllowedFastSet(size_t num_pieces, size_t k) {
+    if (!supports_fast_extension_) {
+        return;
+    }
+
+    // BEP 6 specifies generating allowed fast set using a hash function
+    // For simplicity, we'll use a deterministic random selection based on IP and info_hash
+
+    // Clear existing set
+    allowed_fast_set_.clear();
+
+    if (num_pieces == 0 || k == 0) {
+        return;
+    }
+
+    // Limit k to reasonable value
+    k = std::min(k, std::min(num_pieces, size_t(10)));
+
+    // Generate k random piece indices
+    // In a full implementation, this should use the algorithm from BEP 6
+    // which uses SHA1(IP || info_hash) to generate deterministic allowed pieces
+    // For now, we'll use a simple approach
+
+    std::hash<std::string> hasher;
+    size_t seed = hasher(ip_ + std::to_string(port_));
+
+    for (size_t i = 0; i < k && allowed_fast_set_.size() < k; ++i) {
+        // Simple pseudo-random piece selection
+        uint32_t piece = (seed + i * 37) % num_pieces;
+        allowed_fast_set_.insert(piece);
+    }
+
+    LOG_INFO("Generated allowed fast set with {} pieces for peer {}:{}",
+             allowed_fast_set_.size(), ip_, port_);
+
+    // Send ALLOWED_FAST messages to peer if they support it
+    if (peer_supports_fast_extension_) {
+        for (uint32_t piece : allowed_fast_set_) {
+            sendAllowedFast(piece);
+        }
+    }
 }
 
 } // namespace torrent

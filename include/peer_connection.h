@@ -30,7 +30,14 @@ enum class MessageType : uint8_t {
     PIECE = 7,
     CANCEL = 8,
     PORT = 9,
-    EXTENDED = 20,     // Extension protocol (BEP 10)
+    // Fast Extension (BEP 6)
+    SUGGEST_PIECE = 13,
+    HAVE_ALL = 14,
+    HAVE_NONE = 15,
+    REJECT_REQUEST = 16,
+    ALLOWED_FAST = 17,
+    // Extension protocol (BEP 10)
+    EXTENDED = 20,
     KEEP_ALIVE = 255  // Special type for keep-alive messages
 };
 
@@ -64,6 +71,21 @@ struct CancelMessage {
     uint32_t piece_index;
     uint32_t offset;
     uint32_t length;
+};
+
+// Fast Extension messages (BEP 6)
+struct SuggestPieceMessage {
+    uint32_t piece_index;
+};
+
+struct RejectRequestMessage {
+    uint32_t piece_index;
+    uint32_t offset;
+    uint32_t length;
+};
+
+struct AllowedFastMessage {
+    uint32_t piece_index;
 };
 
 // Structure to track pending uploads to peer
@@ -120,6 +142,13 @@ public:
     bool sendPiece(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data);
     bool sendCancel(uint32_t piece_index, uint32_t offset, uint32_t length);
 
+    // Fast Extension messages (BEP 6)
+    bool sendHaveAll();
+    bool sendHaveNone();
+    bool sendSuggestPiece(uint32_t piece_index);
+    bool sendRejectRequest(uint32_t piece_index, uint32_t offset, uint32_t length);
+    bool sendAllowedFast(uint32_t piece_index);
+
     // Extension protocol support
     bool sendExtendedMessage(uint8_t ext_id, const std::vector<uint8_t>& payload);
     bool sendExtendedHandshake();
@@ -139,6 +168,11 @@ public:
     bool parsePiece(const PeerMessage& message, PieceMessage& result);
     bool parseRequest(const PeerMessage& message, RequestMessage& result);
     bool parseCancel(const PeerMessage& message, CancelMessage& result);
+
+    // Parse Fast Extension messages
+    bool parseSuggestPiece(const PeerMessage& message, SuggestPieceMessage& result);
+    bool parseRejectRequest(const PeerMessage& message, RejectRequestMessage& result);
+    bool parseAllowedFast(const PeerMessage& message, AllowedFastMessage& result);
 
     // State
     bool amChoking() const { return am_choking_; }
@@ -195,6 +229,13 @@ public:
     const PexManager* pexManager() const { return pex_manager_.get(); }
     bool sendPexMessage();  // Send PEX update to this peer
 
+    // Fast Extension (BEP 6) support
+    bool supportsFastExtension() const { return supports_fast_extension_; }
+    bool peerSupportsFastExtension() const { return peer_supports_fast_extension_; }
+    const std::set<uint32_t>& getAllowedFastSet() const { return allowed_fast_set_; }
+    bool isAllowedFast(uint32_t piece_index) const;
+    void generateAllowedFastSet(size_t num_pieces, size_t k = 10);
+
 private:
     // Friend class for MSE handshake access to low-level methods
     friend class MSEHandshake;
@@ -243,6 +284,12 @@ private:
 
     // PEX support (optional, for peer discovery)
     std::unique_ptr<PexManager> pex_manager_;
+
+    // Fast Extension support (BEP 6)
+    bool supports_fast_extension_;        // We support Fast Extension
+    bool peer_supports_fast_extension_;   // Peer supports Fast Extension
+    std::set<uint32_t> allowed_fast_set_; // Pieces allowed even when choked
+    std::vector<uint32_t> suggested_pieces_; // Pieces suggested by peer
 };
 
 } // namespace torrent
