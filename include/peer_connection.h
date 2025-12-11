@@ -14,6 +14,8 @@ namespace torrent {
 // Forward declarations
 struct Block;
 class ExtensionProtocol;
+class MSEHandshake;
+class EncryptedStream;
 
 // BitTorrent protocol message types
 enum class MessageType : uint8_t {
@@ -180,7 +182,14 @@ public:
     const ExtensionProtocol* extensionProtocol() const { return extension_protocol_.get(); }
     bool supportsExtensions() const { return extension_protocol_ != nullptr; }
 
+    // Encryption support (MSE/PE)
+    bool performMSEHandshake(bool is_initiator, const std::vector<uint8_t>& info_hash);
+    bool isEncrypted() const;
+    EncryptedStream* encryptedStream() { return encrypted_stream_.get(); }
+
 private:
+    // Friend class for MSE handshake access to low-level methods
+    friend class MSEHandshake;
     bool sendMessage(const PeerMessage& message);
     std::vector<uint8_t> serializeMessage(const PeerMessage& message);
 
@@ -220,6 +229,9 @@ private:
 
     // Extension protocol support (optional, for magnet links)
     std::unique_ptr<ExtensionProtocol> extension_protocol_;
+
+    // Encryption support (optional, for MSE/PE)
+    std::unique_ptr<EncryptedStream> encrypted_stream_;
 };
 
 } // namespace torrent

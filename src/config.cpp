@@ -82,6 +82,11 @@ bool Config::loadFromFile(const std::string& filepath) {
         // PEX settings
         if (j.contains("enable_pex")) enable_pex = j["enable_pex"].get<bool>();
 
+        // Encryption settings
+        if (j.contains("enable_encryption")) enable_encryption = j["enable_encryption"].get<bool>();
+        if (j.contains("encryption_mode")) encryption_mode = j["encryption_mode"].get<std::string>();
+        if (j.contains("allow_legacy_peers")) allow_legacy_peers = j["allow_legacy_peers"].get<bool>();
+
         LOG_INFO("Configuration loaded successfully");
         return true;
 
@@ -138,6 +143,11 @@ bool Config::saveToFile(const std::string& filepath) const {
 
         // PEX settings
         j["enable_pex"] = enable_pex;
+
+        // Encryption settings
+        j["enable_encryption"] = enable_encryption;
+        j["encryption_mode"] = encryption_mode;
+        j["allow_legacy_peers"] = allow_legacy_peers;
 
         std::ofstream file(filepath);
         if (!file.is_open()) {
@@ -291,6 +301,11 @@ void Config::print() const {
     std::cout << "  Resume enabled: " << (enable_resume ? "yes" : "no") << "\n";
     std::cout << "  DHT enabled: " << (enable_dht ? "yes" : "no") << "\n";
     std::cout << "  PEX enabled: " << (enable_pex ? "yes" : "no") << "\n";
+
+    std::cout << "\nEncryption (MSE/PE):\n";
+    std::cout << "  Encryption enabled: " << (enable_encryption ? "yes" : "no") << "\n";
+    std::cout << "  Encryption mode: " << encryption_mode << "\n";
+    std::cout << "  Allow legacy peers: " << (allow_legacy_peers ? "yes" : "no") << "\n";
     std::cout << "====================\n\n";
 }
 

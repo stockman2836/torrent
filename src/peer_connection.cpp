@@ -3,6 +3,7 @@
 #include "utils.h"
 #include "logger.h"
 #include "extension_protocol.h"
+#include "mse_handshake.h"
 #include <cstring>
 #include <iostream>
 #include <chrono>
@@ -1173,6 +1174,46 @@ bool PeerConnection::isPendingUpload(uint32_t piece_index, uint32_t offset) cons
     std::stringstream key;
     key << piece_index << ":" << offset;
     return pending_uploads_.find(key.str()) != pending_uploads_.end();
+}
+
+// ============================================================================
+// MSE/PE Encryption Support
+// ============================================================================
+
+bool PeerConnection::performMSEHandshake(bool is_initiator, const std::vector<uint8_t>& info_hash) {
+    LOG_INFO("PeerConnection: Starting MSE handshake (initiator={})", is_initiator);
+
+    // Default to prefer encrypted
+    MSEHandshake mse(MSEHandshake::Mode::PREFER_ENCRYPTED, info_hash);
+
+    MSEHandshake::Result result;
+    if (is_initiator) {
+        result = mse.performHandshakeInitiator(*this);
+    } else {
+        result = mse.performHandshakeResponder(*this);
+    }
+
+    if (!result.success) {
+        LOG_ERROR("PeerConnection: MSE handshake failed: {}", result.error_message);
+        return false;
+    }
+
+    // Create encrypted stream
+    encrypted_stream_ = std::make_unique<EncryptedStream>();
+    encrypted_stream_->init(
+        result.selected_method,
+        std::move(mse.outgoing_cipher_),
+        std::move(mse.incoming_cipher_)
+    );
+
+    LOG_INFO("PeerConnection: MSE handshake successful, method: {}",
+            result.selected_method == MSEHandshake::CryptoMethod::RC4 ? "RC4" : "plaintext");
+
+    return true;
+}
+
+bool PeerConnection::isEncrypted() const {
+    return encrypted_stream_ && encrypted_stream_->isEncrypted();
 }
 
 } // namespace torrent

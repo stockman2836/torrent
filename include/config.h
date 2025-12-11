@@ -48,6 +48,11 @@ struct Config {
     // PEX settings (future use)
     bool enable_pex = false;
 
+    // Encryption settings (MSE/PE - BEP 8)
+    bool enable_encryption = true;       // Enable MSE/PE support
+    std::string encryption_mode = "prefer_encrypted";  // prefer_plaintext, prefer_encrypted, require_encrypted
+    bool allow_legacy_peers = true;      // Allow connections without encryption
+
     // Load configuration from JSON file
     // Returns true if file loaded successfully, false otherwise
     bool loadFromFile(const std::string& filepath);
