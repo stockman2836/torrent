@@ -53,6 +53,10 @@ struct Config {
     std::string encryption_mode = "prefer_encrypted";  // prefer_plaintext, prefer_encrypted, require_encrypted
     bool allow_legacy_peers = true;      // Allow connections without encryption
 
+    // IPv6 settings (BEP 7)
+    bool enable_ipv6 = true;             // Enable IPv6 support
+    std::string ip_version = "dual";     // ipv4, ipv6, dual (prefer ipv4), dual_v6 (prefer ipv6)
+
     // Load configuration from JSON file
     // Returns true if file loaded successfully, false otherwise
     bool loadFromFile(const std::string& filepath);

@@ -37,6 +37,26 @@ uint16_t ntohs(uint16_t netshort);
 std::string formatBytes(int64_t bytes);
 std::string formatSpeed(double bytesPerSec);
 
+// IPv6 support (BEP 7)
+enum class IPVersion {
+    IPv4,
+    IPv6,
+    Unknown
+};
+
+IPVersion detectIPVersion(const std::string& ip);
+bool isValidIPv4(const std::string& ip);
+bool isValidIPv6(const std::string& ip);
+
+// Convert IPv6 string to compact binary format (16 bytes)
+std::vector<uint8_t> ipv6ToCompact(const std::string& ipv6);
+
+// Convert compact binary format to IPv6 string
+std::string compactToIPv6(const uint8_t* data);
+
+// Normalize IPv6 address (expand :: notation)
+std::string normalizeIPv6(const std::string& ipv6);
+
 // Retry helpers
 int calculateBackoffDelay(int attempt, int base_delay_ms = 1000, int max_delay_ms = 60000);
 

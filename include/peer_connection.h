@@ -258,6 +258,7 @@ private:
     int socket_fd_;
     bool connected_;
     bool handshake_completed_;
+    bool is_ipv6_;  // True if this connection uses IPv6
 
     // Peer state
     bool am_choking_;

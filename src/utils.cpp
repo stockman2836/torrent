@@ -4,11 +4,15 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
+#include <cstring>
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #endif
 
 namespace torrent {
@@ -297,6 +301,80 @@ double SpeedTracker::getSpeed() const {
 void SpeedTracker::reset() {
     std::lock_guard<std::mutex> lock(mutex_);
     samples_.clear();
+}
+
+// ============================================================================
+// IPv6 Support Functions (BEP 7)
+// ============================================================================
+
+IPVersion detectIPVersion(const std::string& ip) {
+    // Quick check for IPv6 (contains ':')
+    if (ip.find(':') != std::string::npos) {
+        return isValidIPv6(ip) ? IPVersion::IPv6 : IPVersion::Unknown;
+    }
+
+    // Check for IPv4 (contains '.')
+    if (ip.find('.') != std::string::npos) {
+        return isValidIPv4(ip) ? IPVersion::IPv4 : IPVersion::Unknown;
+    }
+
+    return IPVersion::Unknown;
+}
+
+bool isValidIPv4(const std::string& ip) {
+    struct in_addr addr;
+    return inet_pton(AF_INET, ip.c_str(), &addr) == 1;
+}
+
+bool isValidIPv6(const std::string& ipv6) {
+    struct in6_addr addr;
+    return inet_pton(AF_INET6, ipv6.c_str(), &addr) == 1;
+}
+
+std::vector<uint8_t> ipv6ToCompact(const std::string& ipv6) {
+    std::vector<uint8_t> result(16);
+
+    struct in6_addr addr;
+    if (inet_pton(AF_INET6, ipv6.c_str(), &addr) != 1) {
+        // Invalid IPv6 address
+        return {};
+    }
+
+    // Copy the 16 bytes
+    std::memcpy(result.data(), &addr, 16);
+
+    return result;
+}
+
+std::string compactToIPv6(const uint8_t* data) {
+    if (!data) {
+        return "";
+    }
+
+    struct in6_addr addr;
+    std::memcpy(&addr, data, 16);
+
+    char ipv6_str[INET6_ADDRSTRLEN];
+    if (inet_ntop(AF_INET6, &addr, ipv6_str, INET6_ADDRSTRLEN) == nullptr) {
+        return "";
+    }
+
+    return std::string(ipv6_str);
+}
+
+std::string normalizeIPv6(const std::string& ipv6) {
+    // Convert to binary and back to get canonical form
+    struct in6_addr addr;
+    if (inet_pton(AF_INET6, ipv6.c_str(), &addr) != 1) {
+        return ipv6;  // Return original if invalid
+    }
+
+    char normalized[INET6_ADDRSTRLEN];
+    if (inet_ntop(AF_INET6, &addr, normalized, INET6_ADDRSTRLEN) == nullptr) {
+        return ipv6;  // Return original if conversion fails
+    }
+
+    return std::string(normalized);
 }
 
 } // namespace utils

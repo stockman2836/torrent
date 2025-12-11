@@ -57,6 +57,7 @@ PeerConnection::PeerConnection(const std::string& ip,
     , am_interested_(false)
     , peer_choking_(true)
     , peer_interested_(false)
+    , is_ipv6_(utils::detectIPVersion(ip) == utils::IPVersion::IPv6)
     , supports_fast_extension_(true)
     , peer_supports_fast_extension_(false) {
 }
@@ -75,34 +76,62 @@ bool PeerConnection::connect() {
         return true;
     }
 
-    LOG_INFO("Connecting to peer {}:{}", ip_, port_);
+    LOG_INFO("Connecting to peer {}:{} ({})", ip_, port_, is_ipv6_ ? "IPv6" : "IPv4");
 
-    // Create socket
-    socket_fd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    // Create socket with appropriate address family
+    int address_family = is_ipv6_ ? AF_INET6 : AF_INET;
+    socket_fd_ = socket(address_family, SOCK_STREAM, IPPROTO_TCP);
     if (socket_fd_ == INVALID_SOCKET) {
         LOG_ERROR("Failed to create socket for {}:{}", ip_, port_);
         return false;
     }
 
     // Prepare address structure
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port_);
+    struct sockaddr_storage server_addr_storage;
+    memset(&server_addr_storage, 0, sizeof(server_addr_storage));
 
-    // Convert IP address
-    if (inet_pton(AF_INET, ip_.c_str(), &server_addr.sin_addr) <= 0) {
-        LOG_ERROR("Invalid IP address: {}", ip_);
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
-        return false;
+    struct sockaddr* server_addr_ptr;
+    socklen_t server_addr_len;
+
+    if (is_ipv6_) {
+        // IPv6 address
+        struct sockaddr_in6* addr6 = (struct sockaddr_in6*)&server_addr_storage;
+        addr6->sin6_family = AF_INET6;
+        addr6->sin6_port = htons(port_);
+
+        // Convert IPv6 address
+        if (inet_pton(AF_INET6, ip_.c_str(), &addr6->sin6_addr) <= 0) {
+            LOG_ERROR("Invalid IPv6 address: {}", ip_);
+            closesocket(socket_fd_);
+            socket_fd_ = INVALID_SOCKET;
+            return false;
+        }
+
+        server_addr_ptr = (struct sockaddr*)addr6;
+        server_addr_len = sizeof(struct sockaddr_in6);
+    } else {
+        // IPv4 address
+        struct sockaddr_in* addr4 = (struct sockaddr_in*)&server_addr_storage;
+        addr4->sin_family = AF_INET;
+        addr4->sin_port = htons(port_);
+
+        // Convert IPv4 address
+        if (inet_pton(AF_INET, ip_.c_str(), &addr4->sin_addr) <= 0) {
+            LOG_ERROR("Invalid IPv4 address: {}", ip_);
+            closesocket(socket_fd_);
+            socket_fd_ = INVALID_SOCKET;
+            return false;
+        }
+
+        server_addr_ptr = (struct sockaddr*)addr4;
+        server_addr_len = sizeof(struct sockaddr_in);
     }
 
     // Set socket to non-blocking for timeout control
     setNonBlocking(true);
 
     // Attempt connection
-    int result = ::connect(socket_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    int result = ::connect(socket_fd_, server_addr_ptr, server_addr_len);
 
 #ifdef _WIN32
     if (result == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK) {

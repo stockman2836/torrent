@@ -22,6 +22,71 @@
 
 namespace torrent {
 
+// ============================================================================
+// Peer Implementation (IPv4/IPv6 Support)
+// ============================================================================
+
+Peer Peer::fromCompactIPv4(const uint8_t* data) {
+    // IPv4 compact format: 4 bytes IP + 2 bytes port
+    struct in_addr addr;
+    std::memcpy(&addr.s_addr, data, 4);
+
+    char ip_str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &addr, ip_str, INET_ADDRSTRLEN);
+
+    uint16_t port = (static_cast<uint16_t>(data[4]) << 8) |
+                     static_cast<uint16_t>(data[5]);
+
+    return Peer(ip_str, port);
+}
+
+Peer Peer::fromCompactIPv6(const uint8_t* data) {
+    // IPv6 compact format: 16 bytes IP + 2 bytes port
+    std::string ipv6 = utils::compactToIPv6(data);
+
+    uint16_t port = (static_cast<uint16_t>(data[16]) << 8) |
+                     static_cast<uint16_t>(data[17]);
+
+    return Peer(ipv6, port);
+}
+
+std::vector<uint8_t> Peer::toCompact() const {
+    if (is_ipv6) {
+        // IPv6: 16 bytes IP + 2 bytes port = 18 bytes total
+        std::vector<uint8_t> compact = utils::ipv6ToCompact(ip);
+        if (compact.empty()) {
+            return {};  // Invalid IPv6
+        }
+
+        // Append port (big-endian)
+        compact.push_back((port >> 8) & 0xFF);
+        compact.push_back(port & 0xFF);
+
+        return compact;
+    } else {
+        // IPv4: 4 bytes IP + 2 bytes port = 6 bytes total
+        std::vector<uint8_t> compact(6);
+
+        struct in_addr addr;
+        if (inet_pton(AF_INET, ip.c_str(), &addr) != 1) {
+            return {};  // Invalid IPv4
+        }
+
+        // Copy IP address
+        std::memcpy(compact.data(), &addr.s_addr, 4);
+
+        // Add port (big-endian)
+        compact[4] = (port >> 8) & 0xFF;
+        compact[5] = port & 0xFF;
+
+        return compact;
+    }
+}
+
+// ============================================================================
+// TrackerClient Implementation
+// ============================================================================
+
 // Callback function for libcurl to write response data
 static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total_size = size * nmemb;

@@ -87,6 +87,10 @@ bool Config::loadFromFile(const std::string& filepath) {
         if (j.contains("encryption_mode")) encryption_mode = j["encryption_mode"].get<std::string>();
         if (j.contains("allow_legacy_peers")) allow_legacy_peers = j["allow_legacy_peers"].get<bool>();
 
+        // IPv6 settings
+        if (j.contains("enable_ipv6")) enable_ipv6 = j["enable_ipv6"].get<bool>();
+        if (j.contains("ip_version")) ip_version = j["ip_version"].get<std::string>();
+
         LOG_INFO("Configuration loaded successfully");
         return true;
 
@@ -148,6 +152,10 @@ bool Config::saveToFile(const std::string& filepath) const {
         j["enable_encryption"] = enable_encryption;
         j["encryption_mode"] = encryption_mode;
         j["allow_legacy_peers"] = allow_legacy_peers;
+
+        // IPv6 settings
+        j["enable_ipv6"] = enable_ipv6;
+        j["ip_version"] = ip_version;
 
         std::ofstream file(filepath);
         if (!file.is_open()) {
@@ -306,6 +314,10 @@ void Config::print() const {
     std::cout << "  Encryption enabled: " << (enable_encryption ? "yes" : "no") << "\n";
     std::cout << "  Encryption mode: " << encryption_mode << "\n";
     std::cout << "  Allow legacy peers: " << (allow_legacy_peers ? "yes" : "no") << "\n";
+
+    std::cout << "\nIPv6 Support:\n";
+    std::cout << "  IPv6 enabled: " << (enable_ipv6 ? "yes" : "no") << "\n";
+    std::cout << "  IP version preference: " << ip_version << "\n";
     std::cout << "====================\n\n";
 }
 

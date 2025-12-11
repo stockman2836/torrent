@@ -3,14 +3,25 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "utils.h"
 
 namespace torrent {
 
 struct Peer {
     std::string ip;
     uint16_t port;
+    bool is_ipv6;
 
-    Peer(const std::string& ip, uint16_t port) : ip(ip), port(port) {}
+    Peer(const std::string& ip_, uint16_t port_)
+        : ip(ip_), port(port_),
+          is_ipv6(utils::detectIPVersion(ip_) == utils::IPVersion::IPv6) {}
+
+    // Static factory methods
+    static Peer fromCompactIPv4(const uint8_t* data);
+    static Peer fromCompactIPv6(const uint8_t* data);
+
+    // Convert to compact format
+    std::vector<uint8_t> toCompact() const;
 };
 
 // Alias for consistency with UDP tracker
