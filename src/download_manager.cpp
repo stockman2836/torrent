@@ -1,5 +1,6 @@
 #include "download_manager.h"
 #include "utils.h"
+#include "pex_manager.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -12,7 +13,8 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
                                 uint16_t listen_port,
                                 int64_t max_download_speed,
                                 int64_t max_upload_speed,
-                                bool enable_dht)
+                                bool enable_dht,
+                                bool enable_pex)
     : download_dir_(download_dir)
     , peer_id_(utils::generatePeerId())
     , listen_port_(listen_port)
@@ -21,6 +23,7 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , endgame_mode_(false)
     , seeding_mode_(false)
     , enable_dht_(enable_dht)
+    , enable_pex_(enable_pex)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -60,6 +63,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
                                 int64_t max_download_speed,
                                 int64_t max_upload_speed,
                                 bool enable_dht,
+                                bool enable_pex,
                                 std::unique_ptr<dht::DHTManager> existing_dht)
     : torrent_(torrent_file)
     , download_dir_(download_dir)
@@ -70,6 +74,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
     , endgame_mode_(false)
     , seeding_mode_(false)
     , enable_dht_(enable_dht)
+    , enable_pex_(enable_pex)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -151,6 +156,10 @@ void DownloadManager::start() {
 
     if (enable_dht_ && dht_manager_) {
         worker_threads_.emplace_back(&DownloadManager::dhtLoop, this);
+    }
+
+    if (enable_pex_) {
+        worker_threads_.emplace_back(&DownloadManager::pexLoop, this);
     }
 }
 
@@ -684,6 +693,12 @@ void DownloadManager::connectToPeers() {
             continue;
         }
 
+        // Enable PEX if configured
+        if (enable_pex_) {
+            connection->enablePex();
+            connection->sendExtendedHandshake();
+        }
+
         // Add to active peers
         active_peers_.emplace_back(std::move(connection), peer);
         size_t peer_idx = active_peers_.size() - 1;
@@ -1100,6 +1115,120 @@ void DownloadManager::updateDHT() {
             available_peers_.emplace_back(dht_peer.ip, dht_peer.port);
             std::cout << "DHT: Added peer " << dht_peer.ip << ":" << dht_peer.port << "\n";
         }
+    }
+}
+
+void DownloadManager::pexLoop() {
+    if (!enable_pex_) {
+        return;
+    }
+
+    std::cout << "PEX loop started\n";
+
+    // Wait a bit before starting PEX
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+
+    while (running_) {
+        std::this_thread::sleep_for(std::chrono::seconds(60));
+
+        if (!running_) {
+            break;
+        }
+
+        // Send PEX messages and collect new peers
+        updatePEX();
+    }
+
+    std::cout << "PEX loop ended\n";
+}
+
+void DownloadManager::updatePEX() {
+    if (!enable_pex_) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(peers_mutex_);
+
+    // Collect all peers to share via PEX
+    std::vector<Peer> all_peers;
+
+    // Add active peers
+    for (const auto& peer_info : active_peers_) {
+        all_peers.push_back(peer_info.peer_data);
+    }
+
+    // Add available peers
+    for (const auto& peer : available_peers_) {
+        all_peers.push_back(peer);
+    }
+
+    int new_peers_count = 0;
+
+    // Process each active peer
+    for (auto& peer_info : active_peers_) {
+        if (!peer_info.connection || !peer_info.connection->isPexEnabled()) {
+            continue;
+        }
+
+        auto* pex_manager = peer_info.connection->pexManager();
+        if (!pex_manager) {
+            continue;
+        }
+
+        // Add all known peers to this peer's PEX manager
+        for (const auto& peer : all_peers) {
+            // Don't share the peer with itself
+            if (peer.ip == peer_info.peer_data.ip && peer.port == peer_info.peer_data.port) {
+                continue;
+            }
+
+            // Determine flags
+            uint8_t flags = 0;
+            if (seeding_mode_) {
+                flags |= PEX_SEED;
+            }
+
+            pex_manager->addPeer(peer.ip, peer.port, flags);
+        }
+
+        // Send PEX message if needed
+        if (pex_manager->shouldSendUpdate()) {
+            if (peer_info.connection->sendPexMessage()) {
+                std::cout << "PEX: Sent update to " << peer_info.peer_data.ip
+                          << ":" << peer_info.peer_data.port << "\n";
+            }
+        }
+
+        // Collect new peers discovered via PEX
+        const auto& known_peers = pex_manager->getKnownPeers();
+        for (const auto& pex_peer : known_peers) {
+            // Check if we already have this peer
+            bool already_have = false;
+            for (const auto& peer : available_peers_) {
+                if (peer.ip == pex_peer.ip && peer.port == pex_peer.port) {
+                    already_have = true;
+                    break;
+                }
+            }
+            for (const auto& peer_info2 : active_peers_) {
+                if (peer_info2.peer_data.ip == pex_peer.ip &&
+                    peer_info2.peer_data.port == pex_peer.port) {
+                    already_have = true;
+                    break;
+                }
+            }
+
+            if (!already_have) {
+                available_peers_.emplace_back(pex_peer.ip, pex_peer.port);
+                std::cout << "PEX: Discovered new peer " << pex_peer.ip
+                          << ":" << pex_peer.port << "\n";
+                new_peers_count++;
+            }
+        }
+    }
+
+    if (new_peers_count > 0) {
+        std::cout << "PEX: Discovered " << new_peers_count << " new peers total\n";
     }
 }
 

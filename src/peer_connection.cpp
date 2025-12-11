@@ -4,6 +4,7 @@
 #include "logger.h"
 #include "extension_protocol.h"
 #include "mse_handshake.h"
+#include "pex_manager.h"
 #include <cstring>
 #include <iostream>
 #include <chrono>
@@ -499,6 +500,11 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
                     // Extended handshake
                     LOG_INFO("Received extended handshake from peer");
                     extension_protocol_->parseExtendedHandshake(ext_payload);
+
+                    // After extended handshake, send initial PEX message if enabled
+                    if (pex_manager_ && extension_protocol_->peerSupportsExtension(EXT_NAME_PEX)) {
+                        LOG_INFO("Peer supports PEX, will exchange peers");
+                    }
                 } else {
                     // Regular extension message
                     extension_protocol_->handleExtensionMessage(ext_id, ext_payload);
@@ -1214,6 +1220,93 @@ bool PeerConnection::performMSEHandshake(bool is_initiator, const std::vector<ui
 
 bool PeerConnection::isEncrypted() const {
     return encrypted_stream_ && encrypted_stream_->isEncrypted();
+}
+
+// ============================================================================
+// PEX (Peer Exchange) Support
+// ============================================================================
+
+void PeerConnection::enablePex() {
+    if (pex_manager_) {
+        LOG_DEBUG("PEX already enabled for peer {}:{}", ip_, port_);
+        return;
+    }
+
+    // Create PEX manager
+    pex_manager_ = std::make_unique<PexManager>();
+
+    // Ensure extension protocol is initialized
+    if (!extension_protocol_) {
+        extension_protocol_ = std::make_unique<ExtensionProtocol>();
+    }
+
+    // Register PEX extension handler
+    extension_protocol_->registerExtension(
+        EXT_NAME_PEX,
+        [this](uint8_t ext_id, const std::vector<uint8_t>& payload) {
+            // Parse incoming PEX message
+            if (!pex_manager_) {
+                LOG_WARN("Received PEX message but PEX manager not initialized");
+                return;
+            }
+
+            try {
+                bencode::BencodeValue data = bencode::decode(payload);
+                std::vector<PexPeer> new_peers;
+                int count = pex_manager_->parsePexMessage(data, new_peers);
+
+                if (count > 0) {
+                    LOG_INFO("PEX: Discovered {} new peers from {}:{}", count, ip_, port_);
+                    // New peers will be available via pex_manager_->getKnownPeers()
+                }
+            } catch (const std::exception& e) {
+                LOG_ERROR("Failed to parse PEX message: {}", e.what());
+            }
+        }
+    );
+
+    LOG_INFO("PEX enabled for peer {}:{}", ip_, port_);
+}
+
+bool PeerConnection::sendPexMessage() {
+    if (!pex_manager_) {
+        LOG_WARN("Cannot send PEX message: PEX not enabled");
+        return false;
+    }
+
+    if (!extension_protocol_) {
+        LOG_WARN("Cannot send PEX message: extension protocol not initialized");
+        return false;
+    }
+
+    if (!extension_protocol_->peerSupportsExtension(EXT_NAME_PEX)) {
+        LOG_DEBUG("Cannot send PEX message: peer doesn't support PEX");
+        return false;
+    }
+
+    // Build PEX message
+    bencode::BencodeValue pex_data = pex_manager_->buildPexMessage();
+
+    // Send via extension protocol
+    std::vector<uint8_t> message = extension_protocol_->buildExtensionMessage(
+        EXT_NAME_PEX,
+        pex_data
+    );
+
+    if (message.empty()) {
+        LOG_WARN("Failed to build PEX extension message");
+        return false;
+    }
+
+    // Send the message
+    if (!sendData(message.data(), message.size())) {
+        LOG_ERROR("Failed to send PEX message to {}:{}", ip_, port_);
+        return false;
+    }
+
+    pex_manager_->markUpdateSent();
+    LOG_DEBUG("Sent PEX message to {}:{}", ip_, port_);
+    return true;
 }
 
 } // namespace torrent

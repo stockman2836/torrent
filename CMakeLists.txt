@@ -37,6 +37,9 @@ set(SOURCES
     src/extension_protocol.cpp
     src/metadata_exchange.cpp
     src/magnet_download_manager.cpp
+    src/pex_manager.cpp
+    src/crypto.cpp
+    src/mse_handshake.cpp
 )
 
 # Header files
@@ -60,6 +63,9 @@ set(HEADERS
     include/extension_protocol.h
     include/metadata_exchange.h
     include/magnet_download_manager.h
+    include/pex_manager.h
+    include/crypto.h
+    include/mse_handshake.h
 )
 
 # Fetch external libraries

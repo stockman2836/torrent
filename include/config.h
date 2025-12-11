@@ -45,8 +45,8 @@ struct Config {
     bool enable_dht = true;   // Now implemented!
     uint16_t dht_port = 6881;
 
-    // PEX settings (future use)
-    bool enable_pex = false;
+    // PEX settings (BEP 11)
+    bool enable_pex = true;   // Now implemented!
 
     // Encryption settings (MSE/PE - BEP 8)
     bool enable_encryption = true;       // Enable MSE/PE support

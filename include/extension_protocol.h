@@ -15,6 +15,10 @@ namespace torrent {
 constexpr uint8_t MSG_EXTENDED = 20;  // Extension protocol message ID
 constexpr uint8_t EXT_HANDSHAKE = 0;  // Extended handshake
 
+// Well-known extension names
+constexpr const char* EXT_NAME_METADATA = "ut_metadata";  // BEP 9
+constexpr const char* EXT_NAME_PEX = "ut_pex";            // BEP 11
+
 // Extension message handler callback
 // Parameters: extension_id, payload
 using ExtensionHandler = std::function<void(uint8_t, const std::vector<uint8_t>&)>;

@@ -64,7 +64,8 @@ public:
                    uint16_t listen_port = 6881,
                    int64_t max_download_speed = 0,  // 0 = unlimited (bytes/sec)
                    int64_t max_upload_speed = 0,    // 0 = unlimited (bytes/sec)
-                   bool enable_dht = true);         // Enable DHT
+                   bool enable_dht = true,          // Enable DHT
+                   bool enable_pex = true);         // Enable PEX
 
     // Constructor from TorrentFile (for magnet links)
     DownloadManager(const TorrentFile& torrent_file,
@@ -73,6 +74,7 @@ public:
                    int64_t max_download_speed = 0,
                    int64_t max_upload_speed = 0,
                    bool enable_dht = true,
+                   bool enable_pex = true,
                    std::unique_ptr<dht::DHTManager> existing_dht = nullptr);
 
     ~DownloadManager();
@@ -98,10 +100,12 @@ private:
     void coordinatorLoop();
     void resumeLoop();  // Periodic state saving
     void dhtLoop();     // DHT operations
+    void pexLoop();     // PEX operations
 
     void connectToPeers();
     void updateTracker();
     void updateDHT();   // Get peers from DHT
+    void updatePEX();   // Exchange peers via PEX
     void broadcastHave(uint32_t piece_index);
 
     // Resume capability
@@ -140,6 +144,7 @@ private:
     std::atomic<bool> endgame_mode_;
     std::atomic<bool> seeding_mode_;
     bool enable_dht_;
+    bool enable_pex_;
 
     std::vector<std::thread> worker_threads_;
 

@@ -16,6 +16,7 @@ struct Block;
 class ExtensionProtocol;
 class MSEHandshake;
 class EncryptedStream;
+class PexManager;
 
 // BitTorrent protocol message types
 enum class MessageType : uint8_t {
@@ -187,6 +188,13 @@ public:
     bool isEncrypted() const;
     EncryptedStream* encryptedStream() { return encrypted_stream_.get(); }
 
+    // PEX (Peer Exchange) support
+    void enablePex();
+    bool isPexEnabled() const { return pex_manager_ != nullptr; }
+    PexManager* pexManager() { return pex_manager_.get(); }
+    const PexManager* pexManager() const { return pex_manager_.get(); }
+    bool sendPexMessage();  // Send PEX update to this peer
+
 private:
     // Friend class for MSE handshake access to low-level methods
     friend class MSEHandshake;
@@ -232,6 +240,9 @@ private:
 
     // Encryption support (optional, for MSE/PE)
     std::unique_ptr<EncryptedStream> encrypted_stream_;
+
+    // PEX support (optional, for peer discovery)
+    std::unique_ptr<PexManager> pex_manager_;
 };
 
 } // namespace torrent
