@@ -11,8 +11,9 @@
 
 namespace torrent {
 
-// Forward declaration
+// Forward declarations
 struct Block;
+class ExtensionProtocol;
 
 // BitTorrent protocol message types
 enum class MessageType : uint8_t {
@@ -26,6 +27,7 @@ enum class MessageType : uint8_t {
     PIECE = 7,
     CANCEL = 8,
     PORT = 9,
+    EXTENDED = 20,     // Extension protocol (BEP 10)
     KEEP_ALIVE = 255  // Special type for keep-alive messages
 };
 
@@ -115,6 +117,10 @@ public:
     bool sendPiece(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data);
     bool sendCancel(uint32_t piece_index, uint32_t offset, uint32_t length);
 
+    // Extension protocol support
+    bool sendExtendedMessage(uint8_t ext_id, const std::vector<uint8_t>& payload);
+    bool sendExtendedHandshake();
+
     // Message receiving
     std::unique_ptr<PeerMessage> receiveMessage();
 
@@ -169,6 +175,11 @@ public:
     bool canDownload() const { return !peer_choking_ && am_interested_; }
     bool isReadyForRequests() const { return handshake_completed_ && !peer_choking_ && am_interested_; }
 
+    // Extension protocol access
+    ExtensionProtocol* extensionProtocol() { return extension_protocol_.get(); }
+    const ExtensionProtocol* extensionProtocol() const { return extension_protocol_.get(); }
+    bool supportsExtensions() const { return extension_protocol_ != nullptr; }
+
 private:
     bool sendMessage(const PeerMessage& message);
     std::vector<uint8_t> serializeMessage(const PeerMessage& message);
@@ -206,6 +217,9 @@ private:
 
     // Pending upload tracking (key: "piece_index:offset")
     std::map<std::string, PendingUpload> pending_uploads_;
+
+    // Extension protocol support (optional, for magnet links)
+    std::unique_ptr<ExtensionProtocol> extension_protocol_;
 };
 
 } // namespace torrent

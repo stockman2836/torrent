@@ -54,6 +54,55 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     }
 }
 
+DownloadManager::DownloadManager(const TorrentFile& torrent_file,
+                                const std::string& download_dir,
+                                uint16_t listen_port,
+                                int64_t max_download_speed,
+                                int64_t max_upload_speed,
+                                bool enable_dht,
+                                std::unique_ptr<dht::DHTManager> existing_dht)
+    : torrent_(torrent_file)
+    , download_dir_(download_dir)
+    , peer_id_(utils::generatePeerId())
+    , listen_port_(listen_port)
+    , running_(false)
+    , paused_(false)
+    , endgame_mode_(false)
+    , seeding_mode_(false)
+    , enable_dht_(enable_dht)
+    , total_downloaded_(0)
+    , total_uploaded_(0)
+    , download_limiter_(max_download_speed)
+    , upload_limiter_(max_upload_speed)
+    , download_tracker_(20)  // 20 second window
+    , upload_tracker_(20) {
+
+    torrent_.printInfo();
+
+    // Initialize managers
+    piece_manager_ = std::make_unique<PieceManager>(
+        torrent_.numPieces(),
+        torrent_.pieceLength(),
+        torrent_.totalLength(),
+        torrent_.pieces()
+    );
+
+    file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_);
+
+    tracker_client_ = std::make_unique<TrackerClient>(
+        torrent_.announce(),
+        torrent_.infoHash(),
+        peer_id_
+    );
+
+    // Use existing DHT or create new one
+    if (existing_dht) {
+        dht_manager_ = std::move(existing_dht);
+    } else if (enable_dht_) {
+        dht_manager_ = std::make_unique<dht::DHTManager>(listen_port_ + 1); // DHT on port + 1
+    }
+}
+
 DownloadManager::~DownloadManager() {
     stop();
 }

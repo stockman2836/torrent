@@ -144,15 +144,91 @@ int main(int argc, char* argv[]) {
             if (!magnet_uri.displayName().empty()) {
                 std::cout << "  Name: " << magnet_uri.displayName() << "\n";
             }
-            std::cout << "  Trackers: " << magnet_uri.trackers().size() << "\n";
+            std::cout << "  Trackers: " << magnet_uri.trackers().size() << "\n\n";
 
-            // Note: Full magnet link support requires metadata download implementation
-            // For now, inform the user
-            std::cout << "\nMagnet link support is partially implemented.\n";
-            std::cout << "To use magnet links, metadata download needs to be completed.\n";
-            std::cout << "Currently only .torrent files are fully supported.\n";
+            // Initialize DHT if enabled
+            std::unique_ptr<torrent::dht::DHTManager> dht_manager;
+            if (config.enable_dht) {
+                std::cout << "Initializing DHT...\n";
+                dht_manager = std::make_unique<torrent::dht::DHTManager>(
+                    config.listen_port,
+                    torrent::utils::generatePeerId()
+                );
+                dht_manager->start();
+                LOG_INFO("DHT initialized with {} bootstrap nodes", dht_manager->getNodeCount());
 
-            return 0;
+                // Give DHT some time to bootstrap
+                std::cout << "Bootstrapping DHT (waiting 5 seconds)...\n";
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+            }
+
+            // Download metadata using MagnetDownloadManager
+            std::cout << "Starting metadata download...\n";
+            torrent::MagnetDownloadManager magnet_manager(
+                magnet_uri,
+                dht_manager.get(),
+                config.listen_port
+            );
+
+            // Flag to track if metadata was downloaded
+            std::atomic<bool> metadata_ready(false);
+            torrent::TorrentFile downloaded_torrent;
+
+            // Start metadata download
+            magnet_manager.start([&](const torrent::TorrentFile& torrent_file) {
+                downloaded_torrent = torrent_file;
+                metadata_ready = true;
+                std::cout << "\n=== Metadata Downloaded Successfully ===\n";
+                downloaded_torrent.printInfo();
+                std::cout << "\n";
+            });
+
+            // Wait for metadata download (with timeout)
+            auto start_time = std::chrono::steady_clock::now();
+            constexpr int timeout_seconds = 60;
+
+            while (magnet_manager.isRunning()) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - start_time
+                ).count();
+
+                if (elapsed > timeout_seconds) {
+                    std::cerr << "Timeout: Failed to download metadata within " << timeout_seconds << " seconds\n";
+                    magnet_manager.stop();
+                    return 1;
+                }
+
+                if (metadata_ready) {
+                    break;
+                }
+            }
+
+            if (!metadata_ready) {
+                std::cerr << "Failed to download metadata\n";
+                return 1;
+            }
+
+            // Now transition to regular download with the downloaded TorrentFile
+            std::cout << "Starting piece download...\n";
+            torrent::DownloadManager manager(downloaded_torrent, config.download_dir, config.listen_port,
+                                            config.max_download_speed, config.max_upload_speed,
+                                            config.enable_dht, std::move(dht_manager));
+
+            manager.start();
+
+            // Main loop - print status
+            while (manager.isRunning() && manager.progress() < 100.0) {
+                manager.printStatus();
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+
+            if (manager.progress() >= 100.0) {
+                std::cout << "\n=== Download complete! ===\n";
+            }
+
+            manager.stop();
         }
         else {
             // Regular .torrent file

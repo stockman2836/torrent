@@ -58,12 +58,22 @@ struct PeerInfo {
 
 class DownloadManager {
 public:
+    // Constructor from .torrent file
     DownloadManager(const std::string& torrent_path,
                    const std::string& download_dir,
                    uint16_t listen_port = 6881,
                    int64_t max_download_speed = 0,  // 0 = unlimited (bytes/sec)
                    int64_t max_upload_speed = 0,    // 0 = unlimited (bytes/sec)
                    bool enable_dht = true);         // Enable DHT
+
+    // Constructor from TorrentFile (for magnet links)
+    DownloadManager(const TorrentFile& torrent_file,
+                   const std::string& download_dir,
+                   uint16_t listen_port = 6881,
+                   int64_t max_download_speed = 0,
+                   int64_t max_upload_speed = 0,
+                   bool enable_dht = true,
+                   std::unique_ptr<dht::DHTManager> existing_dht = nullptr);
 
     ~DownloadManager();
 

@@ -41,6 +41,44 @@ TorrentFile TorrentFile::fromData(const std::vector<uint8_t>& data) {
     return torrent;
 }
 
+TorrentFile TorrentFile::fromMetadata(const std::vector<uint8_t>& info_hash,
+                                     const std::vector<uint8_t>& metadata,
+                                     const std::vector<std::string>& trackers) {
+    TorrentFile torrent;
+
+    // Verify info_hash size
+    if (info_hash.size() != 20) {
+        throw std::runtime_error("Invalid info_hash size (must be 20 bytes)");
+    }
+
+    // Parse metadata as bencode dictionary (it's the info dict)
+    BencodeValue info_dict = BencodeParser::parse(metadata);
+    if (!info_dict.isDictionary()) {
+        throw std::runtime_error("Metadata must be a dictionary");
+    }
+
+    // Verify info hash matches
+    std::string metadata_str(metadata.begin(), metadata.end());
+    auto calculated_hash = utils::sha1(metadata_str);
+    if (calculated_hash != info_hash) {
+        throw std::runtime_error("Info hash mismatch: metadata verification failed");
+    }
+
+    // Parse the info dictionary
+    torrent.parseInfo(info_dict);
+
+    // Set info hash
+    torrent.info_hash_ = info_hash;
+
+    // Set trackers from magnet link
+    if (!trackers.empty()) {
+        torrent.announce_ = trackers[0];
+        torrent.announce_list_ = trackers;
+    }
+
+    return torrent;
+}
+
 void TorrentFile::parse(const BencodeValue& root) {
     const auto& dict = root.getDictionary();
 

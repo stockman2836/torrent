@@ -2,9 +2,9 @@
 
 ## Overview
 
-This BitTorrent client has **partial support** for magnet links (BEP 9). The infrastructure for parsing magnet URIs, extension protocol, and metadata exchange is implemented, but full integration with the peer connection system requires additional work.
+This BitTorrent client has **full support** for magnet links (BEP 9). The complete infrastructure for parsing magnet URIs, extension protocol, metadata exchange, and peer connection is implemented and integrated.
 
-## Status: Partially Implemented
+## Status: ✅ Fully Implemented
 
 ### ✅ Completed Components
 
@@ -32,12 +32,13 @@ This BitTorrent client has **partial support** for magnet links (BEP 9). The inf
    - DHT and tracker peer discovery
    - Metadata download workflow structure
 
-### ⚠️ Requires Further Work
+### ✅ Recently Completed
 
-- **PeerConnection Integration**: Extension protocol needs to be integrated with existing `PeerConnection` class
-- **Metadata Download Loop**: Complete the peer connection and metadata piece request/response cycle
-- **TorrentFile Creation**: Create TorrentFile from downloaded metadata
-- **Transition to Regular Download**: Seamlessly switch from metadata download to piece download
+- **PeerConnection Integration**: Extension protocol fully integrated with `PeerConnection` class
+- **Metadata Download Loop**: Complete peer connection and metadata piece request/response cycle implemented
+- **TorrentFile Creation**: `TorrentFile::fromMetadata()` method for creating TorrentFile from downloaded metadata
+- **Transition to Regular Download**: Seamless switch from metadata download to piece download via new `DownloadManager` constructor
+- **DHT Integration**: Reuse existing DHT instance from metadata download phase
 
 ## Magnet URI Format
 
@@ -90,7 +91,7 @@ magnet:?xt=urn:btih:ABCDEFGHIJKLMNOPQRSTUVWXYZ234567
 ### Current Functionality
 
 ```bash
-# Parse and display magnet link information
+# Download from magnet link
 ./torrent_client "magnet:?xt=urn:btih:a1b2c3d4..."
 ```
 
@@ -102,9 +103,28 @@ Magnet Link Info:
   Name: Ubuntu 20.04 ISO
   Trackers: 2
 
-Magnet link support is partially implemented.
-To use magnet links, metadata download needs to be completed.
-Currently only .torrent files are fully supported.
+Initializing DHT...
+Bootstrapping DHT (waiting 5 seconds)...
+Starting metadata download...
+Magnet: Looking for peers...
+Magnet: Found 15 potential peers
+Magnet: Connecting to peers and requesting metadata...
+Magnet: Trying peer 192.168.1.10:6881
+Magnet: Handshake successful with 192.168.1.10:6881
+Magnet: Peer supports ut_metadata, metadata size: 16384 bytes
+Magnet: Requesting metadata piece 0
+Magnet: Requesting metadata piece 1
+Magnet: Metadata received (16384 bytes)
+Magnet: Successfully created TorrentFile from metadata
+
+=== Metadata Downloaded Successfully ===
+=== Torrent Information ===
+Name: Ubuntu 20.04 ISO
+...
+
+Starting piece download...
+Starting download...
+[Download progress continues...]
 ```
 
 ## Implementation Details
@@ -260,15 +280,16 @@ double progress = metadata.progress();  // 0-100%
 }
 ```
 
-## Next Steps for Full Implementation
+## Implementation Summary
 
-To complete magnet link support:
+The magnet link support has been fully implemented with the following components:
 
-### 1. Integrate Extension Protocol with PeerConnection
+### 1. ✅ Extension Protocol Integration with PeerConnection
 
-- Modify `PeerConnection` to support extended messages
-- Add extended handshake to connection initialization
-- Handle message ID 20 (extended messages)
+- `PeerConnection` now supports extended messages (MSG_EXTENDED = 20)
+- Extended handshake implemented via `sendExtendedHandshake()`
+- Extension messages handled in `receiveMessage()` switch statement
+- Optional `ExtensionProtocol` member for peers that support extensions
 
 ```cpp
 // In peer_connection.h
@@ -276,39 +297,43 @@ class PeerConnection {
     // ...
     std::unique_ptr<ExtensionProtocol> extension_protocol_;
 
-    void sendExtendedHandshake();
-    void handleExtendedMessage(const std::vector<uint8_t>& payload);
+    bool sendExtendedHandshake();
+    bool sendExtendedMessage(uint8_t ext_id, const std::vector<uint8_t>& payload);
+    ExtensionProtocol* extensionProtocol();
 };
 ```
 
-### 2. Implement Metadata Download in MagnetDownloadManager
+### 2. ✅ Metadata Download in MagnetDownloadManager
 
-- Create peer connections with extension support
-- Coordinate metadata piece requests across multiple peers
-- Handle timeouts and retries
-- Assemble and validate complete metadata
+- Creates peer connections with extension support
+- Sends extended handshake to negotiate ut_metadata support
+- Coordinates metadata piece requests from peers
+- Handles timeouts and tries multiple peers
+- Assembles and validates complete metadata via `MetadataExchange`
 
-### 3. Create TorrentFile from Metadata
+### 3. ✅ TorrentFile from Metadata
 
-- Add constructor to `TorrentFile` that accepts info dict
-- Validate metadata against info_hash
-- Create TorrentFile object for download
+- New static method `TorrentFile::fromMetadata()` implemented
+- Validates metadata against info_hash
+- Parses info dictionary and creates complete TorrentFile object
+- Includes tracker URLs from magnet link
 
 ```cpp
 // In torrent_file.h
 class TorrentFile {
 public:
-    // New constructor
     static TorrentFile fromMetadata(const std::vector<uint8_t>& info_hash,
-                                   const std::vector<uint8_t>& metadata);
+                                   const std::vector<uint8_t>& metadata,
+                                   const std::vector<std::string>& trackers = {});
 };
 ```
 
-### 4. Transition to Regular Download
+### 4. ✅ Transition to Regular Download
 
-- Pass created TorrentFile to DownloadManager
-- Continue with normal piece-based download
-- Announce to DHT/trackers
+- New `DownloadManager` constructor accepts `TorrentFile` directly
+- Reuses DHT instance from metadata download phase
+- Seamless transition from metadata to piece download
+- Full integration in `main.cpp` with proper flow control
 
 ## BEP References
 
@@ -333,16 +358,18 @@ Once fully implemented, test with:
 
 ## Current Limitations
 
-1. **No Live Download**: Can parse magnet links but cannot download metadata yet
-2. **PeerConnection Integration**: Extension protocol not integrated with existing peer system
-3. **No Metadata Persistence**: Downloaded metadata not saved to disk
-4. **Single-Threaded Metadata Download**: No parallel requests to multiple peers
+1. ✅ **Live Download**: Fully functional - can download metadata and files
+2. ✅ **PeerConnection Integration**: Extension protocol fully integrated
+3. **No Metadata Persistence**: Downloaded metadata not saved to disk (future enhancement)
+4. **Sequential Peer Attempts**: Tries up to 5 peers sequentially (parallel requests could be added)
 
 ## Future Enhancements
 
-- [ ] Complete PeerConnection integration
+- [x] Complete PeerConnection integration - **DONE**
 - [ ] Parallel metadata download from multiple peers
-- [ ] Metadata caching (save downloaded metadata)
+- [ ] Metadata caching (save downloaded metadata to .torrent file)
 - [ ] Resume metadata download
 - [ ] Fast resume with partial metadata
 - [ ] Support for hybrid torrents (metadata + pieces)
+- [ ] Better error handling and retry logic
+- [ ] Progress reporting during metadata download

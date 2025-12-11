@@ -20,6 +20,14 @@ public:
     static TorrentFile fromFile(const std::string& filepath);
     static TorrentFile fromData(const std::vector<uint8_t>& data);
 
+    // Create from magnet link metadata (info dict only)
+    // info_hash: expected SHA1 hash of the metadata
+    // metadata: bencode-encoded info dictionary
+    // trackers: optional list of tracker URLs from magnet link
+    static TorrentFile fromMetadata(const std::vector<uint8_t>& info_hash,
+                                   const std::vector<uint8_t>& metadata,
+                                   const std::vector<std::string>& trackers = {});
+
     // Getters
     const std::string& announce() const { return announce_; }
     const std::vector<std::string>& announceList() const { return announce_list_; }

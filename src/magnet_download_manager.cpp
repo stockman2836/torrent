@@ -1,8 +1,10 @@
 #include "magnet_download_manager.h"
+#include "peer_connection.h"
 #include "logger.h"
 #include "utils.h"
 #include <chrono>
 #include <thread>
+#include <algorithm>
 
 namespace torrent {
 
@@ -91,20 +93,16 @@ void MagnetDownloadManager::metadataDownloadLoop() {
     }
 
     // Step 2: Connect to peers and request metadata
-    // Note: Full implementation would need to integrate with PeerConnection
-    // and handle extension protocol handshakes
+    LOG_INFO("Magnet: Connecting to peers and requesting metadata...");
 
-    LOG_INFO("Magnet: Metadata download would proceed here");
-    LOG_INFO("Magnet: (Full integration with PeerConnection needed)");
+    connectToPeers();
 
-    // For now, this is a placeholder
-    // In a full implementation:
-    // 1. Connect to peers using PeerConnection
-    // 2. Send extended handshake with ut_metadata support
-    // 3. Request metadata pieces
-    // 4. Assemble metadata
-    // 5. Create TorrentFile
-    // 6. Call on_metadata_ready_ callback
+    // Check if metadata was successfully downloaded
+    if (metadata_complete_) {
+        LOG_INFO("Magnet: Metadata download complete!");
+    } else {
+        LOG_ERROR("Magnet: Failed to download metadata");
+    }
 
     running_ = false;
 }
@@ -161,35 +159,175 @@ void MagnetDownloadManager::findPeersViaTrackers() {
 }
 
 void MagnetDownloadManager::connectToPeers() {
-    // Placeholder for peer connection logic
-    // Full implementation would:
-    // 1. Create PeerConnection instances
-    // 2. Add extension protocol support
-    // 3. Handshake with peers
-    // 4. Request metadata via ut_metadata
+    std::vector<Peer> peers_to_try;
+    {
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        peers_to_try = available_peers_;
+    }
+
+    // Try up to 5 peers
+    size_t max_peers = std::min<size_t>(5, peers_to_try.size());
+
+    for (size_t i = 0; i < max_peers && running_ && !metadata_complete_; ++i) {
+        const auto& peer = peers_to_try[i];
+
+        LOG_INFO("Magnet: Trying peer {}:{}", peer.ip, peer.port);
+
+        try {
+            // Create peer connection
+            PeerConnection conn(peer.ip, peer.port, magnet_uri_.infoHash(), peer_id_);
+
+            // Connect
+            if (!conn.connect()) {
+                LOG_WARN("Magnet: Failed to connect to {}:{}", peer.ip, peer.port);
+                continue;
+            }
+
+            // Perform handshake
+            if (!conn.performHandshake()) {
+                LOG_WARN("Magnet: Handshake failed with {}:{}", peer.ip, peer.port);
+                conn.disconnect();
+                continue;
+            }
+
+            LOG_INFO("Magnet: Handshake successful with {}:{}", peer.ip, peer.port);
+
+            // Send extended handshake
+            if (!conn.sendExtendedHandshake()) {
+                LOG_WARN("Magnet: Failed to send extended handshake to {}:{}", peer.ip, peer.port);
+                conn.disconnect();
+                continue;
+            }
+
+            // Wait for peer's extended handshake
+            LOG_INFO("Magnet: Waiting for peer's extended handshake...");
+            auto start_time = std::chrono::steady_clock::now();
+            bool got_handshake = false;
+
+            while (running_ && !got_handshake) {
+                auto msg = conn.receiveMessage();
+                if (msg && msg->type == MessageType::EXTENDED) {
+                    got_handshake = true;
+                    break;
+                }
+
+                // Timeout after 10 seconds
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - start_time
+                ).count();
+                if (elapsed > 10) {
+                    LOG_WARN("Magnet: Timeout waiting for extended handshake from {}:{}", peer.ip, peer.port);
+                    break;
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+
+            if (!got_handshake) {
+                conn.disconnect();
+                continue;
+            }
+
+            // Check if peer supports ut_metadata
+            auto* ext_proto = conn.extensionProtocol();
+            if (!ext_proto || !ext_proto->peerSupportsExtension("ut_metadata")) {
+                LOG_WARN("Magnet: Peer {}:{} doesn't support ut_metadata", peer.ip, peer.port);
+                conn.disconnect();
+                continue;
+            }
+
+            int64_t metadata_size = ext_proto->getPeerMetadataSize();
+            if (metadata_size <= 0) {
+                LOG_WARN("Magnet: Peer {}:{} didn't provide metadata size", peer.ip, peer.port);
+                conn.disconnect();
+                continue;
+            }
+
+            LOG_INFO("Magnet: Peer supports ut_metadata, metadata size: {} bytes", metadata_size);
+
+            // Initialize metadata exchange
+            metadata_exchange_ = std::make_unique<MetadataExchange>(
+                metadata_size,
+                [this](const std::vector<uint8_t>& metadata) {
+                    this->onMetadataComplete(metadata);
+                }
+            );
+
+            // Request metadata pieces
+            while (running_ && !metadata_complete_) {
+                int piece_to_request = metadata_exchange_->getNextPieceToRequest();
+
+                if (piece_to_request < 0) {
+                    // All pieces requested, wait for completion
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                    // Check for incoming messages
+                    auto msg = conn.receiveMessage();
+                    if (msg && msg->type == MessageType::EXTENDED) {
+                        // Message already handled in receiveMessage
+                    }
+
+                    continue;
+                }
+
+                // Build and send request
+                LOG_DEBUG("Magnet: Requesting metadata piece {}", piece_to_request);
+                auto request_dict = metadata_exchange_->buildRequestMessage(piece_to_request);
+                auto request_payload = ext_proto->buildExtensionMessage("ut_metadata", request_dict);
+
+                if (!conn.sendExtendedMessage(ext_proto->getPeerExtensionId("ut_metadata"), request_payload)) {
+                    LOG_ERROR("Magnet: Failed to send metadata request");
+                    break;
+                }
+
+                metadata_exchange_->markPieceRequested(piece_to_request);
+
+                // Wait for response
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+
+            conn.disconnect();
+
+            if (metadata_complete_) {
+                LOG_INFO("Magnet: Successfully downloaded metadata from {}:{}", peer.ip, peer.port);
+                break;
+            }
+
+        } catch (const std::exception& e) {
+            LOG_ERROR("Magnet: Error with peer {}:{}: {}", peer.ip, peer.port, e.what());
+        }
+    }
+
+    if (!metadata_complete_) {
+        LOG_ERROR("Magnet: Failed to download metadata from any peer");
+    }
 }
 
 void MagnetDownloadManager::onMetadataComplete(const std::vector<uint8_t>& metadata) {
     LOG_INFO("Magnet: Metadata received ({} bytes)", metadata.size());
 
     try {
-        // Parse metadata as bencode (it's a torrent info dict)
-        bencode::BencodeValue value = bencode::decode(metadata);
-
         // Create TorrentFile from metadata
-        // This would need a new constructor in TorrentFile class
-        // For now, we'll log success
+        TorrentFile torrent_file = TorrentFile::fromMetadata(
+            magnet_uri_.infoHash(),
+            metadata,
+            magnet_uri_.trackers()
+        );
 
-        LOG_INFO("Magnet: Metadata parsed successfully");
+        LOG_INFO("Magnet: Successfully created TorrentFile from metadata");
+        LOG_INFO("Magnet: Torrent name: {}", torrent_file.name());
+        LOG_INFO("Magnet: Total size: {}", torrent_file.totalLength());
+        LOG_INFO("Magnet: Number of pieces: {}", torrent_file.numPieces());
+
         metadata_complete_ = true;
 
         // Call callback with TorrentFile
-        // if (on_metadata_ready_) {
-        //     on_metadata_ready_(torrent_file);
-        // }
+        if (on_metadata_ready_) {
+            on_metadata_ready_(torrent_file);
+        }
 
     } catch (const std::exception& e) {
-        LOG_ERROR("Magnet: Failed to parse metadata: {}", e.what());
+        LOG_ERROR("Magnet: Failed to create TorrentFile from metadata: {}", e.what());
     }
 }
 

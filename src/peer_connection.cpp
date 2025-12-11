@@ -2,6 +2,7 @@
 #include "piece_manager.h"
 #include "utils.h"
 #include "logger.h"
+#include "extension_protocol.h"
 #include <cstring>
 #include <iostream>
 #include <chrono>
@@ -487,6 +488,23 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
         case MessageType::CANCEL:
             std::cout << "Received CANCEL message\n";
             break;
+        case MessageType::EXTENDED: {
+            LOG_DEBUG("Received EXTENDED message ({} bytes payload)", message->payload.size());
+            if (extension_protocol_ && !message->payload.empty()) {
+                uint8_t ext_id = message->payload[0];
+                std::vector<uint8_t> ext_payload(message->payload.begin() + 1, message->payload.end());
+
+                if (ext_id == 0) {
+                    // Extended handshake
+                    LOG_INFO("Received extended handshake from peer");
+                    extension_protocol_->parseExtendedHandshake(ext_payload);
+                } else {
+                    // Regular extension message
+                    extension_protocol_->handleExtensionMessage(ext_id, ext_payload);
+                }
+            }
+            break;
+        }
         default:
             std::cout << "Received unknown message type: " << static_cast<int>(message->type) << "\n";
             break;
@@ -621,6 +639,31 @@ bool PeerConnection::sendCancel(uint32_t piece_index, uint32_t offset, uint32_t 
 
     PeerMessage msg{MessageType::CANCEL, payload};
     return sendMessage(msg);
+}
+
+bool PeerConnection::sendExtendedMessage(uint8_t ext_id, const std::vector<uint8_t>& payload) {
+    if (!extension_protocol_) {
+        LOG_WARN("Cannot send extended message: extension protocol not initialized");
+        return false;
+    }
+
+    // Extended message format: <msg_id=20><ext_id><payload>
+    std::vector<uint8_t> full_payload;
+    full_payload.push_back(ext_id);
+    full_payload.insert(full_payload.end(), payload.begin(), payload.end());
+
+    PeerMessage msg{MessageType::EXTENDED, full_payload};
+    return sendMessage(msg);
+}
+
+bool PeerConnection::sendExtendedHandshake() {
+    if (!extension_protocol_) {
+        // Initialize extension protocol if not already done
+        extension_protocol_ = std::make_unique<ExtensionProtocol>();
+    }
+
+    auto handshake_payload = extension_protocol_->buildExtendedHandshake();
+    return sendExtendedMessage(0, handshake_payload); // ext_id=0 for handshake
 }
 
 // Helper functions implementation
