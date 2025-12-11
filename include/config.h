@@ -57,6 +57,9 @@ struct Config {
     bool enable_ipv6 = true;             // Enable IPv6 support
     std::string ip_version = "dual";     // ipv4, ipv6, dual (prefer ipv4), dual_v6 (prefer ipv6)
 
+    // LSD settings (BEP 14)
+    bool enable_lsd = true;              // Enable Local Service Discovery
+
     // Load configuration from JSON file
     // Returns true if file loaded successfully, false otherwise
     bool loadFromFile(const std::string& filepath);

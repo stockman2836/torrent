@@ -40,6 +40,7 @@ set(SOURCES
     src/pex_manager.cpp
     src/crypto.cpp
     src/mse_handshake.cpp
+    src/lsd.cpp
 )
 
 # Header files
@@ -66,6 +67,7 @@ set(HEADERS
     include/pex_manager.h
     include/crypto.h
     include/mse_handshake.h
+    include/lsd.h
 )
 
 # Fetch external libraries

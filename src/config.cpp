@@ -91,6 +91,9 @@ bool Config::loadFromFile(const std::string& filepath) {
         if (j.contains("enable_ipv6")) enable_ipv6 = j["enable_ipv6"].get<bool>();
         if (j.contains("ip_version")) ip_version = j["ip_version"].get<std::string>();
 
+        // LSD settings
+        if (j.contains("enable_lsd")) enable_lsd = j["enable_lsd"].get<bool>();
+
         LOG_INFO("Configuration loaded successfully");
         return true;
 
@@ -156,6 +159,9 @@ bool Config::saveToFile(const std::string& filepath) const {
         // IPv6 settings
         j["enable_ipv6"] = enable_ipv6;
         j["ip_version"] = ip_version;
+
+        // LSD settings
+        j["enable_lsd"] = enable_lsd;
 
         std::ofstream file(filepath);
         if (!file.is_open()) {
@@ -309,6 +315,7 @@ void Config::print() const {
     std::cout << "  Resume enabled: " << (enable_resume ? "yes" : "no") << "\n";
     std::cout << "  DHT enabled: " << (enable_dht ? "yes" : "no") << "\n";
     std::cout << "  PEX enabled: " << (enable_pex ? "yes" : "no") << "\n";
+    std::cout << "  LSD enabled: " << (enable_lsd ? "yes" : "no") << "\n";
 
     std::cout << "\nEncryption (MSE/PE):\n";
     std::cout << "  Encryption enabled: " << (enable_encryption ? "yes" : "no") << "\n";

@@ -14,7 +14,8 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
                                 int64_t max_download_speed,
                                 int64_t max_upload_speed,
                                 bool enable_dht,
-                                bool enable_pex)
+                                bool enable_pex,
+                                bool enable_lsd)
     : download_dir_(download_dir)
     , peer_id_(utils::generatePeerId())
     , listen_port_(listen_port)
@@ -24,6 +25,7 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , seeding_mode_(false)
     , enable_dht_(enable_dht)
     , enable_pex_(enable_pex)
+    , enable_lsd_(enable_lsd)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -55,6 +57,11 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     if (enable_dht_) {
         dht_manager_ = std::make_unique<dht::DHTManager>(listen_port_ + 1); // DHT on port + 1
     }
+
+    // Initialize LSD if enabled
+    if (enable_lsd_) {
+        lsd_manager_ = std::make_unique<LSD>(listen_port_, false);  // IPv4 for now
+    }
 }
 
 DownloadManager::DownloadManager(const TorrentFile& torrent_file,
@@ -64,6 +71,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
                                 int64_t max_upload_speed,
                                 bool enable_dht,
                                 bool enable_pex,
+                                bool enable_lsd,
                                 std::unique_ptr<dht::DHTManager> existing_dht)
     : torrent_(torrent_file)
     , download_dir_(download_dir)
@@ -75,6 +83,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
     , seeding_mode_(false)
     , enable_dht_(enable_dht)
     , enable_pex_(enable_pex)
+    , enable_lsd_(enable_lsd)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -105,6 +114,11 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
         dht_manager_ = std::move(existing_dht);
     } else if (enable_dht_) {
         dht_manager_ = std::make_unique<dht::DHTManager>(listen_port_ + 1); // DHT on port + 1
+    }
+
+    // Initialize LSD if enabled
+    if (enable_lsd_) {
+        lsd_manager_ = std::make_unique<LSD>(listen_port_, false);  // IPv4 for now
     }
 }
 
@@ -146,6 +160,22 @@ void DownloadManager::start() {
         dht_manager_->bootstrap(bootstrap_nodes);
     }
 
+    // Start LSD if enabled
+    if (enable_lsd_ && lsd_manager_) {
+        std::cout << "Starting LSD...\n";
+        lsd_manager_->start();
+        // Set callback for discovered peers
+        lsd_manager_->setPeerCallback([this](const std::vector<LSDPeer>& peers) {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            for (const auto& lsd_peer : peers) {
+                Peer peer(lsd_peer.ip, lsd_peer.port);
+                available_peers_.push_back(peer);
+            }
+        });
+        // Announce our torrent
+        lsd_manager_->announce(torrent_.infoHash());
+    }
+
     std::cout << "Starting download...\n";
 
     // Start worker threads
@@ -160,6 +190,10 @@ void DownloadManager::start() {
 
     if (enable_pex_) {
         worker_threads_.emplace_back(&DownloadManager::pexLoop, this);
+    }
+
+    if (enable_lsd_ && lsd_manager_) {
+        worker_threads_.emplace_back(&DownloadManager::lsdLoop, this);
     }
 }
 
@@ -190,6 +224,12 @@ void DownloadManager::stop() {
     if (enable_dht_ && dht_manager_) {
         std::cout << "Stopping DHT...\n";
         dht_manager_->stop();
+    }
+
+    // Stop LSD
+    if (enable_lsd_ && lsd_manager_) {
+        std::cout << "Stopping LSD...\n";
+        lsd_manager_->stop();
     }
 
     // Wait for threads to finish
@@ -1253,6 +1293,45 @@ void DownloadManager::updatePEX() {
     if (new_peers_count > 0) {
         std::cout << "PEX: Discovered " << new_peers_count << " new peers total\n";
     }
+}
+
+void DownloadManager::lsdLoop() {
+    if (!enable_lsd_ || !lsd_manager_) {
+        return;
+    }
+
+    std::cout << "LSD loop started\n";
+
+    // LSD announcements are handled automatically by the LSD class
+    // This loop just monitors discovered peers
+    while (running_) {
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+
+        if (!running_) {
+            break;
+        }
+
+        // Log LSD statistics
+        size_t announced = lsd_manager_->getAnnouncedTorrentsCount();
+        size_t discovered = lsd_manager_->getDiscoveredPeersCount();
+
+        if (announced > 0 || discovered > 0) {
+            std::cout << "LSD: Announcing " << announced << " torrents, "
+                      << "discovered " << discovered << " peers total\n";
+        }
+    }
+
+    std::cout << "LSD loop ended\n";
+}
+
+void DownloadManager::updateLSD() {
+    if (!enable_lsd_ || !lsd_manager_) {
+        return;
+    }
+
+    // LSD discovers peers automatically via multicast
+    // Peers are added to available_peers_ via the callback set in start()
+    // This method can be used for additional LSD operations if needed
 }
 
 } // namespace torrent

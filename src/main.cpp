@@ -214,7 +214,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Starting piece download...\n";
             torrent::DownloadManager manager(downloaded_torrent, config.download_dir, config.listen_port,
                                             config.max_download_speed, config.max_upload_speed,
-                                            config.enable_dht, config.enable_pex, std::move(dht_manager));
+                                            config.enable_dht, config.enable_pex, config.enable_lsd, std::move(dht_manager));
 
             manager.start();
 
@@ -236,7 +236,7 @@ int main(int argc, char* argv[]) {
 
             torrent::DownloadManager manager(torrent_input, config.download_dir, config.listen_port,
                                             config.max_download_speed, config.max_upload_speed,
-                                            config.enable_dht, config.enable_pex);
+                                            config.enable_dht, config.enable_pex, config.enable_lsd);
 
             std::cout << "Starting download...\n";
             manager.start();
