@@ -63,6 +63,10 @@ struct Config {
     // Web Seeding settings (BEP 19)
     bool enable_webseeds = true;         // Enable HTTP/FTP web seeding
 
+    // uTP settings (BEP 29)
+    bool enable_utp = true;              // Enable uTP (Micro Transport Protocol)
+    bool prefer_utp = false;             // Prefer uTP over TCP when both available
+
     // Load configuration from JSON file
     // Returns true if file loaded successfully, false otherwise
     bool loadFromFile(const std::string& filepath);

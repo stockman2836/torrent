@@ -50,7 +50,9 @@ PeerConnection::PeerConnection(const std::string& ip,
     , info_hash_(info_hash)
     , peer_id_(peer_id)
     , remote_peer_id_()
+    , transport_type_(TransportType::TCP)  // Default to TCP
     , socket_fd_(INVALID_SOCKET)
+    , utp_socket_(nullptr)
     , connected_(false)
     , handshake_completed_(false)
     , am_choking_(false)  // Start unchoked - allow uploads
@@ -184,16 +186,40 @@ bool PeerConnection::connect() {
 }
 
 void PeerConnection::disconnect() {
-    if (socket_fd_ != INVALID_SOCKET) {
-        LOG_DEBUG("Disconnecting from peer {}:{}", ip_, port_);
+    if (transport_type_ == TransportType::TCP && socket_fd_ != INVALID_SOCKET) {
+        LOG_DEBUG("Disconnecting from peer {}:{} (TCP)", ip_, port_);
         closesocket(socket_fd_);
         socket_fd_ = INVALID_SOCKET;
+    } else if (transport_type_ == TransportType::UTP && utp_socket_) {
+        LOG_DEBUG("Disconnecting from peer {}:{} (uTP)", ip_, port_);
+        utp_socket_->close();
+        utp_socket_ = nullptr;
     }
     connected_ = false;
     handshake_completed_ = false;
     remote_peer_id_.clear();
     clearPendingRequests();
     clearPendingUploads();
+}
+
+void PeerConnection::setUtpSocket(std::shared_ptr<utp::UtpSocket> utp_socket) {
+    if (!utp_socket) {
+        LOG_ERROR("Attempted to set null uTP socket");
+        return;
+    }
+
+    // Close existing TCP connection if any
+    if (socket_fd_ != INVALID_SOCKET) {
+        closesocket(socket_fd_);
+        socket_fd_ = INVALID_SOCKET;
+    }
+
+    // Set uTP transport
+    transport_type_ = TransportType::UTP;
+    utp_socket_ = utp_socket;
+    connected_ = utp_socket_->isConnected();
+
+    LOG_INFO("Peer connection {}:{} now using uTP", ip_, port_);
 }
 
 bool PeerConnection::performHandshake() {
@@ -907,8 +933,29 @@ bool PeerConnection::setSocketTimeout(int timeout_ms) {
 }
 
 bool PeerConnection::sendData(const void* data, size_t length) {
-    if (!connected_ || socket_fd_ == INVALID_SOCKET) {
+    if (!connected_) {
         std::cerr << "Cannot send: not connected\n";
+        return false;
+    }
+
+    // Handle uTP transport
+    if (transport_type_ == TransportType::UTP) {
+        if (!utp_socket_ || !utp_socket_->isConnected()) {
+            std::cerr << "Cannot send: uTP not connected\n";
+            return false;
+        }
+
+        ssize_t sent = utp_socket_->send(static_cast<const uint8_t*>(data), length);
+        if (sent < 0 || static_cast<size_t>(sent) != length) {
+            std::cerr << "uTP send failed\n";
+            return false;
+        }
+        return true;
+    }
+
+    // Handle TCP transport
+    if (socket_fd_ == INVALID_SOCKET) {
+        std::cerr << "Cannot send: TCP socket invalid\n";
         return false;
     }
 
@@ -948,8 +995,23 @@ bool PeerConnection::sendData(const void* data, size_t length) {
 }
 
 bool PeerConnection::receiveData(void* buffer, size_t length) {
-    if (!connected_ || socket_fd_ == INVALID_SOCKET) {
+    if (!connected_) {
         std::cerr << "Cannot receive: not connected\n";
+        return false;
+    }
+
+    // Handle uTP transport
+    // Note: uTP uses callbacks for receiving data. For now, synchronous receive
+    // is not supported with uTP. Applications should use TCP for connections
+    // that require synchronous I/O, or implement buffering in UtpSocket.
+    if (transport_type_ == TransportType::UTP) {
+        std::cerr << "Synchronous receive not supported with uTP (use callbacks)\n";
+        return false;
+    }
+
+    // Handle TCP transport
+    if (socket_fd_ == INVALID_SOCKET) {
+        std::cerr << "Cannot receive: TCP socket invalid\n";
         return false;
     }
 

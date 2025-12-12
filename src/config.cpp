@@ -97,6 +97,10 @@ bool Config::loadFromFile(const std::string& filepath) {
         // Web Seeding settings
         if (j.contains("enable_webseeds")) enable_webseeds = j["enable_webseeds"].get<bool>();
 
+        // uTP settings
+        if (j.contains("enable_utp")) enable_utp = j["enable_utp"].get<bool>();
+        if (j.contains("prefer_utp")) prefer_utp = j["prefer_utp"].get<bool>();
+
         LOG_INFO("Configuration loaded successfully");
         return true;
 
@@ -168,6 +172,10 @@ bool Config::saveToFile(const std::string& filepath) const {
 
         // Web Seeding settings
         j["enable_webseeds"] = enable_webseeds;
+
+        // uTP settings
+        j["enable_utp"] = enable_utp;
+        j["prefer_utp"] = prefer_utp;
 
         std::ofstream file(filepath);
         if (!file.is_open()) {
@@ -323,6 +331,10 @@ void Config::print() const {
     std::cout << "  PEX enabled: " << (enable_pex ? "yes" : "no") << "\n";
     std::cout << "  LSD enabled: " << (enable_lsd ? "yes" : "no") << "\n";
     std::cout << "  Web Seeding enabled: " << (enable_webseeds ? "yes" : "no") << "\n";
+    std::cout << "  uTP enabled: " << (enable_utp ? "yes" : "no") << "\n";
+    if (enable_utp) {
+        std::cout << "  Prefer uTP: " << (prefer_utp ? "yes" : "no") << "\n";
+    }
 
     std::cout << "\nEncryption (MSE/PE):\n";
     std::cout << "  Encryption enabled: " << (enable_encryption ? "yes" : "no") << "\n";

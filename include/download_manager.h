@@ -9,6 +9,7 @@
 #include "dht_manager.h"
 #include "lsd.h"
 #include "web_seed.h"
+#include "utp_socket.h"
 #include <memory>
 #include <vector>
 #include <thread>
@@ -69,7 +70,8 @@ public:
                    bool enable_dht = true,          // Enable DHT
                    bool enable_pex = true,          // Enable PEX
                    bool enable_lsd = true,          // Enable LSD
-                   bool enable_webseeds = true);    // Enable Web Seeding
+                   bool enable_webseeds = true,     // Enable Web Seeding
+                   bool enable_utp = true);         // Enable uTP
 
     // Constructor from TorrentFile (for magnet links)
     DownloadManager(const TorrentFile& torrent_file,
@@ -81,6 +83,7 @@ public:
                    bool enable_pex = true,
                    bool enable_lsd = true,
                    bool enable_webseeds = true,
+                   bool enable_utp = true,
                    std::unique_ptr<dht::DHTManager> existing_dht = nullptr);
 
     ~DownloadManager();
@@ -109,6 +112,7 @@ private:
     void pexLoop();     // PEX operations
     void lsdLoop();     // LSD operations
     void webseedLoop(); // Web seeding operations
+    void utpLoop();     // uTP operations
 
     void connectToPeers();
     void updateTracker();
@@ -142,6 +146,7 @@ private:
     std::unique_ptr<dht::DHTManager> dht_manager_;
     std::unique_ptr<LSD> lsd_manager_;
     std::unique_ptr<WebSeedManager> webseed_manager_;
+    std::unique_ptr<utp::UtpManager> utp_manager_;
 
     std::vector<Peer> available_peers_;
     std::vector<PeerInfo> active_peers_;
@@ -159,6 +164,7 @@ private:
     bool enable_pex_;
     bool enable_lsd_;
     bool enable_webseeds_;
+    bool enable_utp_;
 
     std::vector<std::thread> worker_threads_;
 

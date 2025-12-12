@@ -16,7 +16,8 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
                                 bool enable_dht,
                                 bool enable_pex,
                                 bool enable_lsd,
-                                bool enable_webseeds)
+                                bool enable_webseeds,
+                                bool enable_utp)
     : download_dir_(download_dir)
     , peer_id_(utils::generatePeerId())
     , listen_port_(listen_port)
@@ -28,6 +29,7 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , enable_pex_(enable_pex)
     , enable_lsd_(enable_lsd)
     , enable_webseeds_(enable_webseeds)
+    , enable_utp_(enable_utp)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -78,6 +80,14 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
             webseed_manager_->addWebSeed(url);
         }
     }
+
+    // Initialize uTP Manager if enabled
+    if (enable_utp_ && utp::UtpManager::isAvailable()) {
+        utp_manager_ = std::make_unique<utp::UtpManager>(listen_port_);
+        std::cout << "uTP: Initialized on port " << listen_port_ << "\n";
+    } else if (enable_utp_) {
+        std::cout << "uTP: Requested but libutp not available\n";
+    }
 }
 
 DownloadManager::DownloadManager(const TorrentFile& torrent_file,
@@ -89,6 +99,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
                                 bool enable_pex,
                                 bool enable_lsd,
                                 bool enable_webseeds,
+                                bool enable_utp,
                                 std::unique_ptr<dht::DHTManager> existing_dht)
     : torrent_(torrent_file)
     , download_dir_(download_dir)
@@ -102,6 +113,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
     , enable_pex_(enable_pex)
     , enable_lsd_(enable_lsd)
     , enable_webseeds_(enable_webseeds)
+    , enable_utp_(enable_utp)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -151,6 +163,14 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
         for (const auto& url : torrent_.webSeeds()) {
             webseed_manager_->addWebSeed(url);
         }
+    }
+
+    // Initialize uTP Manager if enabled
+    if (enable_utp_ && utp::UtpManager::isAvailable()) {
+        utp_manager_ = std::make_unique<utp::UtpManager>(listen_port_);
+        std::cout << "uTP: Initialized on port " << listen_port_ << "\n";
+    } else if (enable_utp_) {
+        std::cout << "uTP: Requested but libutp not available\n";
     }
 }
 
@@ -230,6 +250,12 @@ void DownloadManager::start() {
         });
     }
 
+    // Start uTP if enabled
+    if (enable_utp_ && utp_manager_) {
+        std::cout << "Starting uTP on port " << listen_port_ << "...\n";
+        utp_manager_->startListening(listen_port_);
+    }
+
     std::cout << "Starting download...\n";
 
     // Start worker threads
@@ -252,6 +278,10 @@ void DownloadManager::start() {
 
     if (enable_webseeds_ && webseed_manager_) {
         worker_threads_.emplace_back(&DownloadManager::webseedLoop, this);
+    }
+
+    if (enable_utp_ && utp_manager_) {
+        worker_threads_.emplace_back(&DownloadManager::utpLoop, this);
     }
 }
 
@@ -294,6 +324,12 @@ void DownloadManager::stop() {
     if (enable_webseeds_ && webseed_manager_) {
         std::cout << "Stopping Web Seeding...\n";
         webseed_manager_->stop();
+    }
+
+    // Stop uTP
+    if (enable_utp_ && utp_manager_) {
+        std::cout << "Stopping uTP...\n";
+        utp_manager_->stopListening();
     }
 
     // Wait for threads to finish
@@ -1493,6 +1529,30 @@ void DownloadManager::updateWebSeeds() {
             }
         }
     }
+}
+
+void DownloadManager::utpLoop() {
+    if (!enable_utp_ || !utp_manager_) {
+        return;
+    }
+
+    std::cout << "uTP loop started\n";
+
+    // Process uTP events regularly
+    while (running_) {
+        // Call tick() to process UDP packets and handle timeouts
+        utp_manager_->tick();
+
+        // Sleep for a short time (10ms) to allow other threads to run
+        // uTP requires frequent ticking for good performance
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        if (!running_) {
+            break;
+        }
+    }
+
+    std::cout << "uTP loop ended\n";
 }
 
 } // namespace torrent

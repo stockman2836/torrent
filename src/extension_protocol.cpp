@@ -38,6 +38,12 @@ std::vector<uint8_t> ExtensionProtocol::buildExtendedHandshake() const {
     // Add client version
     dict["v"] = bencode::BencodeValue(our_client_name_);
 
+    // Add uTP port if enabled (BEP 29)
+    if (our_utp_port_ > 0) {
+        dict["p"] = bencode::BencodeValue(static_cast<int64_t>(our_utp_port_));
+        LOG_DEBUG("Advertising uTP support on port {}", our_utp_port_);
+    }
+
     // Encode
     bencode::BencodeValue value(dict);
     std::vector<uint8_t> encoded = bencode::encode(value);
@@ -85,6 +91,12 @@ void ExtensionProtocol::parseExtendedHandshake(const std::vector<uint8_t>& paylo
         if (dict.find("v") != dict.end() && dict.at("v").isString()) {
             peer_client_name_ = dict.at("v").asString();
             LOG_DEBUG("Peer client: {}", peer_client_name_);
+        }
+
+        // Parse uTP port (BEP 29)
+        if (dict.find("p") != dict.end() && dict.at("p").isInt()) {
+            peer_utp_port_ = static_cast<uint16_t>(dict.at("p").asInt());
+            LOG_INFO("Peer supports uTP on port {}", peer_utp_port_);
         }
 
     } catch (const std::exception& e) {

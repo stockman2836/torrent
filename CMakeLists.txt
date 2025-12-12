@@ -42,6 +42,7 @@ set(SOURCES
     src/mse_handshake.cpp
     src/lsd.cpp
     src/web_seed.cpp
+    src/utp_socket.cpp
 )
 
 # Header files
@@ -70,6 +71,7 @@ set(HEADERS
     include/mse_handshake.h
     include/lsd.h
     include/web_seed.h
+    include/utp_socket.h
 )
 
 # Fetch external libraries
@@ -96,6 +98,44 @@ find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
 
+# Optional: libutp for uTP support (BEP 29)
+option(ENABLE_UTP "Enable uTP support (requires libutp)" OFF)
+
+if(ENABLE_UTP)
+    # Try to find libutp
+    find_path(LIBUTP_INCLUDE_DIR utp.h
+        HINTS
+        ${CMAKE_SOURCE_DIR}/external/libutp
+        /usr/include
+        /usr/local/include
+    )
+
+    find_library(LIBUTP_LIBRARY
+        NAMES utp libutp
+        HINTS
+        ${CMAKE_SOURCE_DIR}/external/libutp
+        /usr/lib
+        /usr/local/lib
+    )
+
+    if(LIBUTP_INCLUDE_DIR AND LIBUTP_LIBRARY)
+        message(STATUS "Found libutp: ${LIBUTP_LIBRARY}")
+        add_definitions(-DHAVE_LIBUTP)
+        include_directories(${LIBUTP_INCLUDE_DIR})
+        set(UTP_LIBRARIES ${LIBUTP_LIBRARY})
+    else()
+        message(WARNING "libutp not found - uTP support will be disabled")
+        message(WARNING "To enable uTP:")
+        message(WARNING "  1. Clone libutp: git clone https://github.com/bittorrent/libutp.git external/libutp")
+        message(WARNING "  2. Build libutp")
+        message(WARNING "  3. Reconfigure CMake with -DENABLE_UTP=ON")
+        set(UTP_LIBRARIES "")
+    endif()
+else()
+    message(STATUS "uTP support disabled (use -DENABLE_UTP=ON to enable)")
+    set(UTP_LIBRARIES "")
+endif()
+
 # Executable
 add_executable(torrent_client ${SOURCES} ${HEADERS})
 
@@ -108,6 +148,7 @@ target_link_libraries(torrent_client
     CURL::libcurl
     spdlog::spdlog
     nlohmann_json::nlohmann_json
+    ${UTP_LIBRARIES}
 )
 
 # Platform-specific libraries

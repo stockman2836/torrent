@@ -54,10 +54,13 @@ public:
     // Get peer metadata
     int64_t getPeerMetadataSize() const { return peer_metadata_size_; }
     std::string getPeerClientName() const { return peer_client_name_; }
+    uint16_t getPeerUtpPort() const { return peer_utp_port_; }
+    bool peerSupportsUtp() const { return peer_utp_port_ > 0; }
 
     // Set our metadata
     void setMetadataSize(int64_t size) { our_metadata_size_ = size; }
     void setClientName(const std::string& name) { our_client_name_ = name; }
+    void setUtpPort(uint16_t port) { our_utp_port_ = port; }
 
 private:
     // Our extensions: name -> (local_id, handler)
@@ -72,9 +75,11 @@ private:
     // Metadata
     int64_t our_metadata_size_ = 0;
     std::string our_client_name_ = "BitTorrent Client 1.0";
+    uint16_t our_utp_port_ = 0;  // 0 means uTP disabled
 
     int64_t peer_metadata_size_ = 0;
     std::string peer_client_name_;
+    uint16_t peer_utp_port_ = 0;  // 0 means peer doesn't support uTP
 
     uint8_t next_extension_id_ = 1; // Start from 1 (0 is handshake)
 };

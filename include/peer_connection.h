@@ -8,6 +8,7 @@
 #include <queue>
 #include <chrono>
 #include <map>
+#include "utp_socket.h"
 
 namespace torrent {
 
@@ -17,6 +18,12 @@ class ExtensionProtocol;
 class MSEHandshake;
 class EncryptedStream;
 class PexManager;
+
+// Transport type for peer connections
+enum class TransportType {
+    TCP,  // Traditional TCP connection
+    UTP   // uTP (Micro Transport Protocol) over UDP
+};
 
 // BitTorrent protocol message types
 enum class MessageType : uint8_t {
@@ -125,6 +132,11 @@ public:
     bool connect();
     void disconnect();
     bool isConnected() const { return connected_; }
+
+    // uTP support
+    void setUtpSocket(std::shared_ptr<utp::UtpSocket> utp_socket);
+    TransportType getTransportType() const { return transport_type_; }
+    bool isUsingUtp() const { return transport_type_ == TransportType::UTP; }
 
     // Handshake
     bool performHandshake();
@@ -255,7 +267,10 @@ private:
     std::string peer_id_;
     std::string remote_peer_id_;  // Peer ID received during handshake
 
-    int socket_fd_;
+    // Transport layer
+    TransportType transport_type_;
+    int socket_fd_;                                    // TCP socket
+    std::shared_ptr<utp::UtpSocket> utp_socket_;      // uTP socket
     bool connected_;
     bool handshake_completed_;
     bool is_ipv6_;  // True if this connection uses IPv6
