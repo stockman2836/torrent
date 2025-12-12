@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "dht_manager.h"
 #include "lsd.h"
+#include "web_seed.h"
 #include <memory>
 #include <vector>
 #include <thread>
@@ -67,7 +68,8 @@ public:
                    int64_t max_upload_speed = 0,    // 0 = unlimited (bytes/sec)
                    bool enable_dht = true,          // Enable DHT
                    bool enable_pex = true,          // Enable PEX
-                   bool enable_lsd = true);         // Enable LSD
+                   bool enable_lsd = true,          // Enable LSD
+                   bool enable_webseeds = true);    // Enable Web Seeding
 
     // Constructor from TorrentFile (for magnet links)
     DownloadManager(const TorrentFile& torrent_file,
@@ -78,6 +80,7 @@ public:
                    bool enable_dht = true,
                    bool enable_pex = true,
                    bool enable_lsd = true,
+                   bool enable_webseeds = true,
                    std::unique_ptr<dht::DHTManager> existing_dht = nullptr);
 
     ~DownloadManager();
@@ -105,12 +108,14 @@ private:
     void dhtLoop();     // DHT operations
     void pexLoop();     // PEX operations
     void lsdLoop();     // LSD operations
+    void webseedLoop(); // Web seeding operations
 
     void connectToPeers();
     void updateTracker();
     void updateDHT();   // Get peers from DHT
     void updatePEX();   // Exchange peers via PEX
     void updateLSD();   // Discover peers via LSD
+    void updateWebSeeds();  // Download from web seeds
     void broadcastHave(uint32_t piece_index);
 
     // Resume capability
@@ -136,6 +141,7 @@ private:
     std::unique_ptr<TrackerClient> tracker_client_;
     std::unique_ptr<dht::DHTManager> dht_manager_;
     std::unique_ptr<LSD> lsd_manager_;
+    std::unique_ptr<WebSeedManager> webseed_manager_;
 
     std::vector<Peer> available_peers_;
     std::vector<PeerInfo> active_peers_;
@@ -152,6 +158,7 @@ private:
     bool enable_dht_;
     bool enable_pex_;
     bool enable_lsd_;
+    bool enable_webseeds_;
 
     std::vector<std::thread> worker_threads_;
 

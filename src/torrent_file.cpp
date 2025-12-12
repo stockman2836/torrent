@@ -122,6 +122,22 @@ void TorrentFile::parse(const BencodeValue& root) {
         creation_date_ = 0;
     }
 
+    // Web seeds (BEP 19) - url-list (optional)
+    it = dict.find("url-list");
+    if (it != dict.end()) {
+        if (it->second.isList()) {
+            // url-list is a list of URLs
+            for (const auto& url : it->second.getList()) {
+                if (url.isString()) {
+                    web_seeds_.push_back(url.getString());
+                }
+            }
+        } else if (it->second.isString()) {
+            // Single URL (some clients use string instead of list)
+            web_seeds_.push_back(it->second.getString());
+        }
+    }
+
     // Info dictionary (required)
     it = dict.find("info");
     if (it == dict.end() || !it->second.isDictionary()) {
@@ -222,6 +238,13 @@ void TorrentFile::printInfo() const {
     if (!announce_list_.empty()) {
         std::cout << "Announce list:\n";
         for (const auto& url : announce_list_) {
+            std::cout << "  - " << url << "\n";
+        }
+    }
+
+    if (!web_seeds_.empty()) {
+        std::cout << "Web seeds (BEP 19):\n";
+        for (const auto& url : web_seeds_) {
             std::cout << "  - " << url << "\n";
         }
     }

@@ -15,7 +15,8 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
                                 int64_t max_upload_speed,
                                 bool enable_dht,
                                 bool enable_pex,
-                                bool enable_lsd)
+                                bool enable_lsd,
+                                bool enable_webseeds)
     : download_dir_(download_dir)
     , peer_id_(utils::generatePeerId())
     , listen_port_(listen_port)
@@ -26,6 +27,7 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     , enable_dht_(enable_dht)
     , enable_pex_(enable_pex)
     , enable_lsd_(enable_lsd)
+    , enable_webseeds_(enable_webseeds)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -62,6 +64,20 @@ DownloadManager::DownloadManager(const std::string& torrent_path,
     if (enable_lsd_) {
         lsd_manager_ = std::make_unique<LSD>(listen_port_, false);  // IPv4 for now
     }
+
+    // Initialize Web Seed Manager if enabled and torrent has web seeds
+    if (enable_webseeds_ && torrent_.hasWebSeeds()) {
+        webseed_manager_ = std::make_unique<WebSeedManager>(
+            torrent_,
+            torrent_.pieceLength(),
+            torrent_.totalLength()
+        );
+
+        // Add all web seed URLs
+        for (const auto& url : torrent_.webSeeds()) {
+            webseed_manager_->addWebSeed(url);
+        }
+    }
 }
 
 DownloadManager::DownloadManager(const TorrentFile& torrent_file,
@@ -72,6 +88,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
                                 bool enable_dht,
                                 bool enable_pex,
                                 bool enable_lsd,
+                                bool enable_webseeds,
                                 std::unique_ptr<dht::DHTManager> existing_dht)
     : torrent_(torrent_file)
     , download_dir_(download_dir)
@@ -84,6 +101,7 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
     , enable_dht_(enable_dht)
     , enable_pex_(enable_pex)
     , enable_lsd_(enable_lsd)
+    , enable_webseeds_(enable_webseeds)
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(max_download_speed)
@@ -119,6 +137,20 @@ DownloadManager::DownloadManager(const TorrentFile& torrent_file,
     // Initialize LSD if enabled
     if (enable_lsd_) {
         lsd_manager_ = std::make_unique<LSD>(listen_port_, false);  // IPv4 for now
+    }
+
+    // Initialize Web Seed Manager if enabled and torrent has web seeds
+    if (enable_webseeds_ && torrent_.hasWebSeeds()) {
+        webseed_manager_ = std::make_unique<WebSeedManager>(
+            torrent_,
+            torrent_.pieceLength(),
+            torrent_.totalLength()
+        );
+
+        // Add all web seed URLs
+        for (const auto& url : torrent_.webSeeds()) {
+            webseed_manager_->addWebSeed(url);
+        }
     }
 }
 
@@ -176,6 +208,28 @@ void DownloadManager::start() {
         lsd_manager_->announce(torrent_.infoHash());
     }
 
+    // Start Web Seeding if enabled
+    if (enable_webseeds_ && webseed_manager_) {
+        std::cout << "Starting Web Seeding (" << webseed_manager_->getTotalWebSeeds() << " seeds)...\n";
+        webseed_manager_->start();
+
+        // Set callback for piece downloads
+        webseed_manager_->setCallback([this](const WebSeedDownload& download) {
+            if (download.success) {
+                // Add downloaded block to piece manager
+                piece_manager_->addBlock(download.piece_index, download.offset, download.data);
+
+                // Check if piece is complete
+                if (piece_manager_->isPieceInProgress(download.piece_index)) {
+                    auto* piece = piece_manager_->getPieceInProgress(download.piece_index);
+                    if (piece && piece->isComplete()) {
+                        piece_manager_->completePiece(download.piece_index, file_manager_.get());
+                    }
+                }
+            }
+        });
+    }
+
     std::cout << "Starting download...\n";
 
     // Start worker threads
@@ -194,6 +248,10 @@ void DownloadManager::start() {
 
     if (enable_lsd_ && lsd_manager_) {
         worker_threads_.emplace_back(&DownloadManager::lsdLoop, this);
+    }
+
+    if (enable_webseeds_ && webseed_manager_) {
+        worker_threads_.emplace_back(&DownloadManager::webseedLoop, this);
     }
 }
 
@@ -230,6 +288,12 @@ void DownloadManager::stop() {
     if (enable_lsd_ && lsd_manager_) {
         std::cout << "Stopping LSD...\n";
         lsd_manager_->stop();
+    }
+
+    // Stop Web Seeding
+    if (enable_webseeds_ && webseed_manager_) {
+        std::cout << "Stopping Web Seeding...\n";
+        webseed_manager_->stop();
     }
 
     // Wait for threads to finish
@@ -1332,6 +1396,103 @@ void DownloadManager::updateLSD() {
     // LSD discovers peers automatically via multicast
     // Peers are added to available_peers_ via the callback set in start()
     // This method can be used for additional LSD operations if needed
+}
+
+void DownloadManager::webseedLoop() {
+    if (!enable_webseeds_ || !webseed_manager_) {
+        return;
+    }
+
+    std::cout << "Web Seed loop started\n";
+
+    // Web seed downloads are handled automatically via callbacks
+    // This loop monitors and requests pieces from web seeds
+    while (running_) {
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+
+        if (!running_ || seeding_mode_) {
+            break;
+        }
+
+        // Request pieces from web seeds
+        updateWebSeeds();
+
+        // Log statistics every 30 seconds
+        static int counter = 0;
+        if (++counter >= 3) {
+            counter = 0;
+
+            size_t active_webseeds = webseed_manager_->getActiveWebSeeds();
+            int64_t bytes_downloaded = webseed_manager_->getTotalBytesDownloaded();
+
+            if (active_webseeds > 0 || bytes_downloaded > 0) {
+                std::cout << "WebSeed: " << active_webseeds << " active seeds, "
+                          << utils::formatBytes(bytes_downloaded) << " downloaded\n";
+            }
+        }
+    }
+
+    std::cout << "Web Seed loop ended\n";
+}
+
+void DownloadManager::updateWebSeeds() {
+    if (!enable_webseeds_ || !webseed_manager_ || !webseed_manager_->hasWebSeeds()) {
+        return;
+    }
+
+    // Find pieces that need to be downloaded
+    // Prefer sequential gaps for web seeds (BEP 19 optimization)
+    std::lock_guard<std::mutex> lock(pieces_mutex_);
+
+    // Get bitfield to see what pieces we need
+    auto bitfield = piece_manager_->getBitfield();
+    size_t num_pieces = bitfield.size();
+
+    // Look for gaps (consecutive missing pieces) to download from web seeds
+    // This optimizes HTTP range requests
+    uint32_t gap_start = UINT32_MAX;
+    uint32_t gap_length = 0;
+
+    for (size_t i = 0; i < num_pieces; ++i) {
+        if (!bitfield[i] && pieces_in_download_.find(i) == pieces_in_download_.end()) {
+            // Found a missing piece not being downloaded
+            if (gap_start == UINT32_MAX) {
+                gap_start = i;
+                gap_length = 1;
+            } else {
+                gap_length++;
+            }
+
+            // If gap is large enough (4+ pieces), start downloading from web seed
+            if (gap_length >= 4) {
+                // Download from gap_start
+                if (webseed_manager_->downloadFullPiece(gap_start)) {
+                    pieces_in_download_.insert(gap_start);
+                    LOG_DEBUG("WebSeed: Requested piece {} from web seed", gap_start);
+                }
+                gap_start++;
+                gap_length--;
+            }
+        } else {
+            // Reset gap
+            gap_start = UINT32_MAX;
+            gap_length = 0;
+        }
+    }
+
+    // Also download random missing pieces if no gaps found
+    // This helps with the last few pieces
+    if (gap_start == UINT32_MAX) {
+        for (size_t i = 0; i < num_pieces; ++i) {
+            if (!bitfield[i] && pieces_in_download_.find(i) == pieces_in_download_.end()) {
+                if (webseed_manager_->downloadFullPiece(i)) {
+                    pieces_in_download_.insert(i);
+                    LOG_DEBUG("WebSeed: Requested piece {} from web seed", i);
+                    break;  // Only request one piece at a time
+                }
+            }
+        }
+    }
 }
 
 } // namespace torrent

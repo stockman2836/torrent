@@ -41,6 +41,7 @@ set(SOURCES
     src/crypto.cpp
     src/mse_handshake.cpp
     src/lsd.cpp
+    src/web_seed.cpp
 )
 
 # Header files
@@ -68,6 +69,7 @@ set(HEADERS
     include/crypto.h
     include/mse_handshake.h
     include/lsd.h
+    include/web_seed.h
 )
 
 # Fetch external libraries

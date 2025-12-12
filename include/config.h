@@ -60,6 +60,9 @@ struct Config {
     // LSD settings (BEP 14)
     bool enable_lsd = true;              // Enable Local Service Discovery
 
+    // Web Seeding settings (BEP 19)
+    bool enable_webseeds = true;         // Enable HTTP/FTP web seeding
+
     // Load configuration from JSON file
     // Returns true if file loaded successfully, false otherwise
     bool loadFromFile(const std::string& filepath);

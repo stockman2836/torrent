@@ -94,6 +94,9 @@ bool Config::loadFromFile(const std::string& filepath) {
         // LSD settings
         if (j.contains("enable_lsd")) enable_lsd = j["enable_lsd"].get<bool>();
 
+        // Web Seeding settings
+        if (j.contains("enable_webseeds")) enable_webseeds = j["enable_webseeds"].get<bool>();
+
         LOG_INFO("Configuration loaded successfully");
         return true;
 
@@ -162,6 +165,9 @@ bool Config::saveToFile(const std::string& filepath) const {
 
         // LSD settings
         j["enable_lsd"] = enable_lsd;
+
+        // Web Seeding settings
+        j["enable_webseeds"] = enable_webseeds;
 
         std::ofstream file(filepath);
         if (!file.is_open()) {
@@ -316,6 +322,7 @@ void Config::print() const {
     std::cout << "  DHT enabled: " << (enable_dht ? "yes" : "no") << "\n";
     std::cout << "  PEX enabled: " << (enable_pex ? "yes" : "no") << "\n";
     std::cout << "  LSD enabled: " << (enable_lsd ? "yes" : "no") << "\n";
+    std::cout << "  Web Seeding enabled: " << (enable_webseeds ? "yes" : "no") << "\n";
 
     std::cout << "\nEncryption (MSE/PE):\n";
     std::cout << "  Encryption enabled: " << (enable_encryption ? "yes" : "no") << "\n";
