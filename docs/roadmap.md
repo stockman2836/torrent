@@ -17,14 +17,16 @@ This document tracks the development roadmap for the BitTorrent client.
 - [x] Recover from a peer disconnecting during a piece.
 - [x] Verify writes across multi-file piece boundaries.
 - [x] Cancel idle TCP receive waits during shutdown.
+- [x] Tracker-based magnet metadata exchange followed by piece downloading.
+- [x] Verify metadata hash and fall back after rejects, bad hashes and idle peers.
+- [x] Fall back from an unavailable magnet tracker.
 
-Verification: five unit suites and six offline integration scenarios pass.
+Verification: seven unit suites and twelve offline integration scenarios pass.
 The historical completed-feature checklist below describes implementation scope,
 not comprehensive interoperability coverage for every extension.
 
-Next: offline magnet metadata exchange and transition into piece downloading,
-then redundant endgame requests with CANCEL. Public swarm checks and
-UPnP/NAT-PMP remain later milestones.
+Next: redundant endgame requests with CANCEL. DHT-only magnet coverage, public
+swarm checks and UPnP/NAT-PMP remain later milestones.
 
 ### Completed Features 
 

@@ -229,6 +229,7 @@ public:
 
     // Extension protocol access
     ExtensionProtocol* extensionProtocol() { return extension_protocol_.get(); }
+    ExtensionProtocol& extensions();
     const ExtensionProtocol* extensionProtocol() const { return extension_protocol_.get(); }
     bool supportsExtensions() const { return extension_protocol_ != nullptr; }
 

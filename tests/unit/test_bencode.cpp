@@ -293,6 +293,22 @@ TEST_F(BencodeParserTest, TypeCheckersWork) {
 
 // ==================== Main ====================
 
+TEST(BencodePrefix, SeparatesDictionaryFromBinarySuffix) {
+    const auto header = BencodeParser::encode(BencodeValue::Dictionary{{"x", std::string("ded:i123e:")}});
+    std::vector<uint8_t> payload(header.begin(), header.end());
+    payload.insert(payload.end(), {0, 255, 'd', 'e'});
+    const auto parsed = BencodeParser::parsePrefix(payload);
+    EXPECT_EQ(parsed.second, header.size());
+    EXPECT_EQ(parsed.first.getDictionary().at("x").getString(), "ded:i123e:");
+    EXPECT_THROW(BencodeParser::parse(payload), BencodeError);
+}
+
+TEST(BencodePrefix, RejectsMalformedAndOverflowingLengths) {
+    for (const auto* value : {"-1:x", "1a:x", "18446744073709551615:x"}) {
+        EXPECT_THROW(BencodeParser::parse(value), BencodeError) << value;
+    }
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

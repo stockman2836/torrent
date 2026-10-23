@@ -7,13 +7,21 @@ namespace torrent {
 // Parse from string
 BencodeValue BencodeParser::parse(const std::string& data) {
     BencodeParser parser(data);
-    return parser.parseValue();
+    auto value = parser.parseValue();
+    if (parser.hasMore()) throw BencodeError("Unexpected trailing data");
+    return value;
 }
 
 // Parse from binary data
 BencodeValue BencodeParser::parse(const std::vector<uint8_t>& data) {
     std::string str(data.begin(), data.end());
     return parse(str);
+}
+
+std::pair<BencodeValue, size_t> BencodeParser::parsePrefix(const std::vector<uint8_t>& data) {
+    BencodeParser parser(std::string(data.begin(), data.end()));
+    auto value = parser.parseValue();
+    return {std::move(value), parser.pos_};
 }
 
 char BencodeParser::peek() const {
@@ -38,7 +46,7 @@ BencodeValue BencodeParser::parseValue() {
         return parseList();
     } else if (c == 'd') {
         return parseDictionary();
-    } else if (std::isdigit(c)) {
+    } else if (c >= '0' && c <= '9') {
         return parseString();
     } else {
         throw BencodeError(std::string("Unexpected character: ") + c);
@@ -81,6 +89,7 @@ BencodeValue BencodeParser::parseInteger() {
 BencodeValue BencodeParser::parseString() {
     std::string length_str;
     while (peek() != ':') {
+        if (peek() < '0' || peek() > '9') throw BencodeError("Invalid string length");
         length_str += consume();
     }
     consume(); // ':'
@@ -92,7 +101,7 @@ BencodeValue BencodeParser::parseString() {
         throw BencodeError("Invalid string length: " + length_str);
     }
 
-    if (pos_ + length > data_.size()) {
+    if (length > data_.size() - pos_) {
         throw BencodeError("String length exceeds available data");
     }
 

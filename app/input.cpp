@@ -34,7 +34,8 @@ ResolvedInput resolveInput(const std::string& input, const Config& config) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     metadata.stop();
-    if (!ready) throw std::runtime_error("Failed to download magnet metadata within 60 seconds");
+    if (!ready) throw std::runtime_error(std::chrono::steady_clock::now() >= deadline
+        ? "Magnet metadata download timed out" : "Failed to download verified magnet metadata");
     return result;
 }
 

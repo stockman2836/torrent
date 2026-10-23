@@ -142,7 +142,7 @@ bool PeerConnection::sendPexMessage() {
     }
 
     // Send the message
-    if (!sendData(message.data(), message.size())) {
+    if (!sendExtendedMessage(extension_protocol_->getPeerExtensionId(EXT_NAME_PEX), message)) {
         LOG_ERROR("Failed to send PEX message to {}:{}", ip_, port_);
         return false;
     }

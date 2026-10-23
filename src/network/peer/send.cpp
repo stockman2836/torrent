@@ -269,4 +269,9 @@ bool PeerConnection::sendExtendedHandshake() {
     return sendExtendedMessage(0, handshake_payload); // ext_id=0 for handshake
 }
 
+ExtensionProtocol& PeerConnection::extensions() {
+    if (!extension_protocol_) extension_protocol_ = std::make_unique<ExtensionProtocol>();
+    return *extension_protocol_;
+}
+
 } // namespace torrent

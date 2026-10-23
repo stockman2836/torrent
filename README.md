@@ -103,8 +103,9 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R test_download --output-on-failure
 ```
 
-Five unit-test executables cover metadata parsing, piece management, file I/O
-and CLI parsing. With Node.js installed, six integration scenarios run against
+Seven unit-test executables cover metadata parsing, piece management, file I/O,
+CLI parsing, extension dispatch and metadata exchange. With Node.js installed,
+twelve integration scenarios run against
 local trackers and TCP seeds: basic download, multiple peers, partial download
 followed by restart, corrupted saved data, peer disconnect and multi-file piece
 boundaries. The multi-peer check rejects duplicate block requests. Each result
@@ -114,5 +115,11 @@ Integration artifacts stay under `build/tests/download-test-*` and
 `build/tests/transfer-*`. The partial-download helper exercises the public
 session stop API, then resume checks restart the ordinary CLI. The tests also
 check shutdown with idle peers and the resumed announce's remaining byte count.
+
+Magnet scenarios cover two-block metadata, different local/remote extension IDs,
+metadata hash verification, rejection or timeout of one peer, tracker fallback,
+and transition into ordinary file downloading. Unverified metadata cannot create
+download files. The fixtures use tracker-discovered loopback peers; they do not
+establish public-swarm or DHT-only interoperability.
 
 See [test documentation](tests/README.md) for details and limitations.

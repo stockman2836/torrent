@@ -57,11 +57,9 @@ private:
     uint16_t listen_port_;
     std::string peer_id_;
 
-    std::unique_ptr<MetadataExchange> metadata_exchange_;
-    std::unique_ptr<TrackerClient> tracker_client_;
-
     std::vector<Peer> available_peers_;
-    std::mutex peers_mutex_;
+    std::string working_tracker_;
+    std::atomic<double> progress_{0.0};
 
     std::atomic<bool> running_;
     std::atomic<bool> metadata_complete_;

@@ -14,6 +14,7 @@ namespace torrent {
 // Allows downloading .torrent metadata via ut_metadata extension
 
 constexpr size_t METADATA_PIECE_SIZE = 16384; // 16 KB
+constexpr int64_t MAX_METADATA_SIZE = 4 * 1024 * 1024;
 
 enum class MetadataMessageType : int {
     REQUEST = 0,
@@ -32,6 +33,7 @@ public:
 
     // Check if metadata is complete
     bool isComplete() const;
+    bool hasFailed() const;
 
     // Get completion percentage
     double progress() const;
@@ -73,9 +75,6 @@ private:
     // Handle reject message
     void handleReject(const BencodeValue::Dictionary& dict);
 
-    // Check if all pieces are received and assemble metadata
-    void checkCompletion();
-
     int64_t metadata_size_;
     size_t num_pieces_;
 
@@ -88,6 +87,7 @@ private:
     MetadataCompleteCallback on_complete_;
     mutable std::mutex mutex_;
     bool complete_;
+    bool failed_ = false;
 };
 
 } // namespace torrent

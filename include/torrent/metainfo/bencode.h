@@ -6,6 +6,7 @@
 #include <memory>
 #include <variant>
 #include <stdexcept>
+#include <utility>
 
 namespace torrent {
 
@@ -54,6 +55,8 @@ class BencodeParser {
 public:
     static BencodeValue parse(const std::string& data);
     static BencodeValue parse(const std::vector<uint8_t>& data);
+    // Parse one value followed by arbitrary binary data (BEP 9 message bodies).
+    static std::pair<BencodeValue, size_t> parsePrefix(const std::vector<uint8_t>& data);
 
     static std::string encode(const BencodeValue& value);
 

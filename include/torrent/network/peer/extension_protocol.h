@@ -31,13 +31,13 @@ public:
     // Returns local extension ID
     uint8_t registerExtension(const std::string& name, ExtensionHandler handler);
 
-    // Build extended handshake message
+    // Build Bencode payloads; PeerConnection owns the wire headers.
     std::vector<uint8_t> buildExtendedHandshake() const;
 
     // Parse extended handshake from peer
     void parseExtendedHandshake(const std::vector<uint8_t>& payload);
 
-    // Build extension message
+    // Build an extension payload for a supported remote extension.
     std::vector<uint8_t> buildExtensionMessage(const std::string& ext_name,
                                                const BencodeValue& data) const;
 

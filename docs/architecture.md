@@ -38,6 +38,19 @@ loads configuration, resolves either input form to a `TorrentFile`, and starts
 one `DownloadManager`. Magnet resolution transfers its existing DHT instance
 into the download session. Both input forms use the same download lifecycle.
 
+Magnet acquisition registers a local `ut_metadata` handler before sending the
+extension handshake. Outgoing requests use the remote ID; incoming responses
+use the advertised local ID. `PeerConnection` owns wire headers while
+`ExtensionProtocol` builds Bencode bodies, so framing is applied once.
+
+Metadata responses contain a parsed Bencode header followed by binary bytes.
+`MetadataExchange` validates sizes, indices and exact block lengths, then calls
+completion handlers outside its mutex. The magnet manager verifies the raw
+metadata hash before publishing a `TorrentFile`. Each peer attempt owns its
+exchange state, while progress is exposed atomically. Rejected, corrupt or idle
+attempts can fall back to another peer; the working tracker is retained for the
+subsequent download session.
+
 `DownloadManager` takes metadata and a `Config`, avoiding positional boolean
 arguments and duplicate initialization. The configuration remains a plain value
 type; no factories, dependency-injection containers or abstract service layers

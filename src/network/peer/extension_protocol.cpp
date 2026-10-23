@@ -48,13 +48,7 @@ std::vector<uint8_t> ExtensionProtocol::buildExtendedHandshake() const {
     BencodeValue value(dict);
     const std::string encoded = BencodeParser::encode(value);
 
-    // Build message: [msg_id=20][ext_id=0][bencoded_dict]
-    std::vector<uint8_t> message;
-    message.push_back(MSG_EXTENDED);
-    message.push_back(EXT_HANDSHAKE);
-    message.insert(message.end(), encoded.begin(), encoded.end());
-
-    return message;
+    return std::vector<uint8_t>(encoded.begin(), encoded.end());
 }
 
 void ExtensionProtocol::parseExtendedHandshake(const std::vector<uint8_t>& payload) {
@@ -73,9 +67,10 @@ void ExtensionProtocol::parseExtendedHandshake(const std::vector<uint8_t>& paylo
             const auto& extensions = dict.at("m").getDictionary();
 
             for (const auto& [name, id_val] : extensions) {
-                if (id_val.isInteger()) {
+                if (id_val.isInteger() && id_val.getInteger() >= 0 && id_val.getInteger() <= 255) {
                     uint8_t peer_id = static_cast<uint8_t>(id_val.getInteger());
-                    peer_extensions_[name] = peer_id;
+                    if (peer_id == 0) peer_extensions_.erase(name);
+                    else peer_extensions_[name] = peer_id;
                     LOG_DEBUG("Peer supports extension '{}' with ID {}", name, peer_id);
                 }
             }
@@ -115,18 +110,10 @@ std::vector<uint8_t> ExtensionProtocol::buildExtensionMessage(
         return {};
     }
 
-    uint8_t peer_ext_id = it->second;
-
     // Encode data
     const std::string encoded = BencodeParser::encode(data);
 
-    // Build message: [msg_id=20][peer_ext_id][bencoded_data]
-    std::vector<uint8_t> message;
-    message.push_back(MSG_EXTENDED);
-    message.push_back(peer_ext_id);
-    message.insert(message.end(), encoded.begin(), encoded.end());
-
-    return message;
+    return std::vector<uint8_t>(encoded.begin(), encoded.end());
 }
 
 void ExtensionProtocol::handleExtensionMessage(uint8_t msg_id,
@@ -135,20 +122,17 @@ void ExtensionProtocol::handleExtensionMessage(uint8_t msg_id,
         return;
     }
 
-    uint8_t ext_id = payload[0];
-    std::vector<uint8_t> data(payload.begin() + 1, payload.end());
-
-    if (ext_id == EXT_HANDSHAKE) {
-        parseExtendedHandshake(data);
+    if (msg_id == EXT_HANDSHAKE) {
+        parseExtendedHandshake(payload);
         return;
     }
 
     // Find handler for this extension ID
-    auto it = id_to_handler_.find(ext_id);
+    auto it = id_to_handler_.find(msg_id);
     if (it != id_to_handler_.end()) {
-        it->second(ext_id, data);
+        it->second(msg_id, payload);
     } else {
-        LOG_DEBUG("Received extension message for unknown ID: {}", ext_id);
+        LOG_DEBUG("Received extension message for unknown ID: {}", msg_id);
     }
 }
 
