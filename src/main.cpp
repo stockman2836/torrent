@@ -151,8 +151,7 @@ int main(int argc, char* argv[]) {
             if (config.enable_dht) {
                 std::cout << "Initializing DHT...\n";
                 dht_manager = std::make_unique<torrent::dht::DHTManager>(
-                    config.listen_port,
-                    torrent::utils::generatePeerId()
+                    config.dht_port
                 );
                 dht_manager->start();
                 LOG_INFO("DHT initialized with {} bootstrap nodes", dht_manager->getNodeCount());
@@ -214,7 +213,8 @@ int main(int argc, char* argv[]) {
             std::cout << "Starting piece download...\n";
             torrent::DownloadManager manager(downloaded_torrent, config.download_dir, config.listen_port,
                                             config.max_download_speed, config.max_upload_speed,
-                                            config.enable_dht, config.enable_pex, config.enable_lsd, std::move(dht_manager));
+                                            config.enable_dht, config.enable_pex, config.enable_lsd,
+                                            config.enable_webseeds, config.enable_utp, std::move(dht_manager));
 
             manager.start();
 
@@ -236,7 +236,8 @@ int main(int argc, char* argv[]) {
 
             torrent::DownloadManager manager(torrent_input, config.download_dir, config.listen_port,
                                             config.max_download_speed, config.max_upload_speed,
-                                            config.enable_dht, config.enable_pex, config.enable_lsd);
+                                            config.enable_dht, config.enable_pex, config.enable_lsd,
+                                            config.enable_webseeds, config.enable_utp);
 
             std::cout << "Starting download...\n";
             manager.start();

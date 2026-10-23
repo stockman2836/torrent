@@ -1,4 +1,5 @@
 #include "file_manager.h"
+#include "utils.h"
 #include "logger.h"
 #include <filesystem>
 #include <iostream>
@@ -71,6 +72,9 @@ void FileManager::openFiles() {
         if (!handle.stream.is_open()) {
             throw std::runtime_error("Failed to open file: " + handle.path);
         }
+        if (fs::file_size(handle.path) < static_cast<uintmax_t>(handle.length)) {
+            fs::resize_file(handle.path, handle.length);
+        }
     }
 }
 
@@ -85,6 +89,11 @@ void FileManager::closeFiles() {
 bool FileManager::writePiece(uint32_t piece_index, const std::vector<uint8_t>& data) {
     std::lock_guard<std::mutex> lock(mutex_);
 
+    if (piece_index >= torrent_.numPieces()) return false;
+    const auto expected_size = std::min<int64_t>(torrent_.pieceLength(),
+        torrent_.totalLength() - static_cast<int64_t>(piece_index) * torrent_.pieceLength());
+    if (data.size() != static_cast<size_t>(expected_size)) return false;
+
     try {
         int64_t piece_offset = static_cast<int64_t>(piece_index) * torrent_.pieceLength();
         int64_t remaining = data.size();
@@ -96,7 +105,7 @@ bool FileManager::writePiece(uint32_t piece_index, const std::vector<uint8_t>& d
                 continue;  // This piece starts after this file
             }
 
-            if (piece_offset + remaining <= handle.offset) {
+            if (piece_offset + static_cast<int64_t>(data.size()) <= handle.offset) {
                 break;  // This piece ends before this file
             }
 
@@ -108,15 +117,18 @@ bool FileManager::writePiece(uint32_t piece_index, const std::vector<uint8_t>& d
             int64_t write_size = write_end - write_start;
 
             if (write_size > 0) {
+                handle.stream.clear();
                 handle.stream.seekp(file_write_offset);
                 handle.stream.write(reinterpret_cast<const char*>(data.data() + data_offset),
                                   write_size);
+                handle.stream.flush();
+                if (!handle.stream) return false;
                 data_offset += write_size;
                 remaining -= write_size;
             }
         }
 
-        return true;
+        return remaining == 0;
 
     } catch (const std::exception& e) {
         std::cerr << "Failed to write piece " << piece_index << ": " << e.what() << "\n";
@@ -126,6 +138,8 @@ bool FileManager::writePiece(uint32_t piece_index, const std::vector<uint8_t>& d
 
 std::vector<uint8_t> FileManager::readPiece(uint32_t piece_index) {
     std::lock_guard<std::mutex> lock(mutex_);
+
+    if (piece_index >= torrent_.numPieces()) return {};
 
     try {
         int64_t piece_offset = static_cast<int64_t>(piece_index) * torrent_.pieceLength();
@@ -160,15 +174,17 @@ std::vector<uint8_t> FileManager::readPiece(uint32_t piece_index) {
             int64_t read_size = read_end - read_start;
 
             if (read_size > 0) {
+                handle.stream.clear();
                 handle.stream.seekg(file_read_offset);
                 handle.stream.read(reinterpret_cast<char*>(data.data() + data_offset),
                                  read_size);
+                if (!handle.stream) return {};
                 data_offset += read_size;
                 remaining -= read_size;
             }
         }
 
-        return data;
+        return remaining == 0 ? data : std::vector<uint8_t>{};
 
     } catch (const std::exception& e) {
         std::cerr << "Failed to read piece " << piece_index << ": " << e.what() << "\n";

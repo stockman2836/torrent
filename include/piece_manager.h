@@ -86,7 +86,7 @@ public:
     // Progress
     size_t numPiecesDownloaded() const { return pieces_downloaded_; }
     double percentComplete() const;
-    std::vector<bool> getBitfield() const { return bitfield_; }
+    std::vector<bool> getBitfield() const;
     size_t numPiecesInProgress() const;
 
     // Resume capability

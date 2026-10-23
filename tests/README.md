@@ -53,6 +53,7 @@ We use **Google Test** (gtest) as the testing framework. It's automatically down
 - OpenSSL
 - libcurl
 - Internet connection (first build only, to download Google Test)
+- Node.js (optional, enables the local end-to-end download test)
 
 ### Build Commands
 
@@ -185,9 +186,22 @@ Tests are designed to run in CI/CD environments. Example GitHub Actions workflow
 - **Thread Safety**: Test concurrent access where applicable
 - **Clean Up**: Use SetUp/TearDown for resource management
 
+## Download Regression Test
+
+With Node.js installed, `test_download` starts a tracker and TCP seed on loopback
+addresses, runs the actual CLI, and checks the resulting 50,003-byte binary file.
+It exercises the handshake, bitfield, block requests, piece assembly, SHA1
+verification, disk writes and successful client shutdown without Internet access.
+Run it with `ctest --test-dir build -R test_download --output-on-failure`.
+
+Piece manager regression tests also check successful assembly and resume-state
+restoration, plus rejection of corrupt data. Each CTest entry has a timeout so a
+deadlock produces a failed test rather than hanging the suite.
+
 ## Current Test Statistics
 
 - **Total Test Files**: 4
+- **Integration Tests**: 1 when Node.js is available
 - **Coverage Target**: > 80%
 - **All Tests**: Should pass ✓
 

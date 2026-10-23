@@ -8,24 +8,24 @@ namespace dht {
 
 // KRPCQuery implementation
 
-bencode::BencodeValue KRPCQuery::toBencode() const {
-    bencode::BencodeDict dict;
+BencodeValue KRPCQuery::toBencode() const {
+    BencodeValue::Dictionary dict;
 
     // Transaction ID
-    dict["t"] = bencode::BencodeValue(transaction_id);
+    dict["t"] = BencodeValue(transaction_id);
 
     // Message type
-    dict["y"] = bencode::BencodeValue(std::string("q"));
+    dict["y"] = BencodeValue(std::string("q"));
 
     // Query method
-    dict["q"] = bencode::BencodeValue(getQueryName());
+    dict["q"] = BencodeValue(getQueryName());
 
     // Arguments
-    bencode::BencodeDict args;
+    BencodeValue::Dictionary args;
 
     // Sender ID (required for all queries)
     std::string id_str(sender_id.begin(), sender_id.end());
-    args["id"] = bencode::BencodeValue(id_str);
+    args["id"] = BencodeValue(id_str);
 
     // Query-specific arguments
     switch (query_type) {
@@ -36,56 +36,56 @@ bencode::BencodeValue KRPCQuery::toBencode() const {
         case QueryType::FIND_NODE:
             if (target.has_value()) {
                 std::string target_str(target->begin(), target->end());
-                args["target"] = bencode::BencodeValue(target_str);
+                args["target"] = BencodeValue(target_str);
             }
             break;
 
         case QueryType::GET_PEERS:
             if (info_hash.has_value()) {
                 std::string hash_str(info_hash->begin(), info_hash->end());
-                args["info_hash"] = bencode::BencodeValue(hash_str);
+                args["info_hash"] = BencodeValue(hash_str);
             }
             break;
 
         case QueryType::ANNOUNCE_PEER:
             if (info_hash.has_value()) {
                 std::string hash_str(info_hash->begin(), info_hash->end());
-                args["info_hash"] = bencode::BencodeValue(hash_str);
+                args["info_hash"] = BencodeValue(hash_str);
             }
             if (port.has_value()) {
-                args["port"] = bencode::BencodeValue(static_cast<int64_t>(port.value()));
+                args["port"] = BencodeValue(static_cast<int64_t>(port.value()));
             }
             if (token.has_value()) {
-                args["token"] = bencode::BencodeValue(token.value());
+                args["token"] = BencodeValue(token.value());
             }
             if (implied_port.has_value()) {
-                args["implied_port"] = bencode::BencodeValue(static_cast<int64_t>(implied_port.value()));
+                args["implied_port"] = BencodeValue(static_cast<int64_t>(implied_port.value()));
             }
             break;
     }
 
-    dict["a"] = bencode::BencodeValue(args);
+    dict["a"] = BencodeValue(args);
 
-    return bencode::BencodeValue(dict);
+    return BencodeValue(dict);
 }
 
-KRPCQuery KRPCQuery::fromBencode(const bencode::BencodeValue& value) {
+KRPCQuery KRPCQuery::fromBencode(const BencodeValue& value) {
     KRPCQuery query;
 
-    if (!value.isDict()) {
+    if (!value.isDictionary()) {
         throw std::runtime_error("KRPC query must be a dictionary");
     }
 
-    const auto& dict = value.asDict();
+    const auto& dict = value.getDictionary();
 
     // Parse transaction ID
     if (dict.find("t") != dict.end() && dict.at("t").isString()) {
-        query.transaction_id = dict.at("t").asString();
+        query.transaction_id = dict.at("t").getString();
     }
 
     // Parse query method
     if (dict.find("q") != dict.end() && dict.at("q").isString()) {
-        std::string method = dict.at("q").asString();
+        std::string method = dict.at("q").getString();
         if (method == "ping") query.query_type = QueryType::PING;
         else if (method == "find_node") query.query_type = QueryType::FIND_NODE;
         else if (method == "get_peers") query.query_type = QueryType::GET_PEERS;
@@ -93,12 +93,12 @@ KRPCQuery KRPCQuery::fromBencode(const bencode::BencodeValue& value) {
     }
 
     // Parse arguments
-    if (dict.find("a") != dict.end() && dict.at("a").isDict()) {
-        const auto& args = dict.at("a").asDict();
+    if (dict.find("a") != dict.end() && dict.at("a").isDictionary()) {
+        const auto& args = dict.at("a").getDictionary();
 
         // Sender ID
         if (args.find("id") != args.end() && args.at("id").isString()) {
-            std::string id_str = args.at("id").asString();
+            std::string id_str = args.at("id").getString();
             if (id_str.size() == NODE_ID_SIZE) {
                 std::copy(id_str.begin(), id_str.end(), query.sender_id.begin());
             }
@@ -106,7 +106,7 @@ KRPCQuery KRPCQuery::fromBencode(const bencode::BencodeValue& value) {
 
         // Target (for find_node)
         if (args.find("target") != args.end() && args.at("target").isString()) {
-            std::string target_str = args.at("target").asString();
+            std::string target_str = args.at("target").getString();
             if (target_str.size() == NODE_ID_SIZE) {
                 NodeID target_id;
                 std::copy(target_str.begin(), target_str.end(), target_id.begin());
@@ -116,23 +116,23 @@ KRPCQuery KRPCQuery::fromBencode(const bencode::BencodeValue& value) {
 
         // Info hash (for get_peers, announce_peer)
         if (args.find("info_hash") != args.end() && args.at("info_hash").isString()) {
-            std::string hash_str = args.at("info_hash").asString();
+            std::string hash_str = args.at("info_hash").getString();
             query.info_hash = std::vector<uint8_t>(hash_str.begin(), hash_str.end());
         }
 
         // Port (for announce_peer)
-        if (args.find("port") != args.end() && args.at("port").isInt()) {
-            query.port = static_cast<uint16_t>(args.at("port").asInt());
+        if (args.find("port") != args.end() && args.at("port").isInteger()) {
+            query.port = static_cast<uint16_t>(args.at("port").getInteger());
         }
 
         // Token (for announce_peer)
         if (args.find("token") != args.end() && args.at("token").isString()) {
-            query.token = args.at("token").asString();
+            query.token = args.at("token").getString();
         }
 
         // Implied port (for announce_peer)
-        if (args.find("implied_port") != args.end() && args.at("implied_port").isInt()) {
-            query.implied_port = static_cast<int>(args.at("implied_port").asInt());
+        if (args.find("implied_port") != args.end() && args.at("implied_port").isInteger()) {
+            query.implied_port = static_cast<int>(args.at("implied_port").getInteger());
         }
     }
 
@@ -151,68 +151,68 @@ std::string KRPCQuery::getQueryName() const {
 
 // KRPCResponse implementation
 
-bencode::BencodeValue KRPCResponse::toBencode() const {
-    bencode::BencodeDict dict;
+BencodeValue KRPCResponse::toBencode() const {
+    BencodeValue::Dictionary dict;
 
     // Transaction ID
-    dict["t"] = bencode::BencodeValue(transaction_id);
+    dict["t"] = BencodeValue(transaction_id);
 
     // Message type
-    dict["y"] = bencode::BencodeValue(std::string("r"));
+    dict["y"] = BencodeValue(std::string("r"));
 
     // Response values
-    bencode::BencodeDict response;
+    BencodeValue::Dictionary response;
 
     // Sender ID (required)
     std::string id_str(sender_id.begin(), sender_id.end());
-    response["id"] = bencode::BencodeValue(id_str);
+    response["id"] = BencodeValue(id_str);
 
     // Nodes (for find_node, get_peers)
     if (nodes.has_value() && !nodes->empty()) {
         std::string compact = KRPCMessageFactory::encodeCompactNodes(nodes.value());
-        response["nodes"] = bencode::BencodeValue(compact);
+        response["nodes"] = BencodeValue(compact);
     }
 
     // Values (peer list for get_peers)
     if (values.has_value() && !values->empty()) {
-        bencode::BencodeList vals;
+        BencodeValue::List vals;
         for (const auto& val : values.value()) {
-            vals.push_back(bencode::BencodeValue(val));
+            vals.push_back(BencodeValue(val));
         }
-        response["values"] = bencode::BencodeValue(vals);
+        response["values"] = BencodeValue(vals);
     }
 
     // Token (for get_peers)
     if (token.has_value()) {
-        response["token"] = bencode::BencodeValue(token.value());
+        response["token"] = BencodeValue(token.value());
     }
 
-    dict["r"] = bencode::BencodeValue(response);
+    dict["r"] = BencodeValue(response);
 
-    return bencode::BencodeValue(dict);
+    return BencodeValue(dict);
 }
 
-KRPCResponse KRPCResponse::fromBencode(const bencode::BencodeValue& value) {
+KRPCResponse KRPCResponse::fromBencode(const BencodeValue& value) {
     KRPCResponse response;
 
-    if (!value.isDict()) {
+    if (!value.isDictionary()) {
         throw std::runtime_error("KRPC response must be a dictionary");
     }
 
-    const auto& dict = value.asDict();
+    const auto& dict = value.getDictionary();
 
     // Parse transaction ID
     if (dict.find("t") != dict.end() && dict.at("t").isString()) {
-        response.transaction_id = dict.at("t").asString();
+        response.transaction_id = dict.at("t").getString();
     }
 
     // Parse response values
-    if (dict.find("r") != dict.end() && dict.at("r").isDict()) {
-        const auto& resp = dict.at("r").asDict();
+    if (dict.find("r") != dict.end() && dict.at("r").isDictionary()) {
+        const auto& resp = dict.at("r").getDictionary();
 
         // Sender ID
         if (resp.find("id") != resp.end() && resp.at("id").isString()) {
-            std::string id_str = resp.at("id").asString();
+            std::string id_str = resp.at("id").getString();
             if (id_str.size() == NODE_ID_SIZE) {
                 std::copy(id_str.begin(), id_str.end(), response.sender_id.begin());
             }
@@ -220,17 +220,17 @@ KRPCResponse KRPCResponse::fromBencode(const bencode::BencodeValue& value) {
 
         // Nodes
         if (resp.find("nodes") != resp.end() && resp.at("nodes").isString()) {
-            std::string compact = resp.at("nodes").asString();
+            std::string compact = resp.at("nodes").getString();
             response.nodes = KRPCMessageFactory::parseCompactNodes(compact);
         }
 
         // Values (peer list)
         if (resp.find("values") != resp.end() && resp.at("values").isList()) {
-            const auto& vals = resp.at("values").asList();
+            const auto& vals = resp.at("values").getList();
             std::vector<std::string> peer_values;
             for (const auto& val : vals) {
                 if (val.isString()) {
-                    peer_values.push_back(val.asString());
+                    peer_values.push_back(val.getString());
                 }
             }
             response.values = peer_values;
@@ -238,7 +238,7 @@ KRPCResponse KRPCResponse::fromBencode(const bencode::BencodeValue& value) {
 
         // Token
         if (resp.find("token") != resp.end() && resp.at("token").isString()) {
-            response.token = resp.at("token").asString();
+            response.token = resp.at("token").getString();
         }
     }
 
@@ -247,48 +247,48 @@ KRPCResponse KRPCResponse::fromBencode(const bencode::BencodeValue& value) {
 
 // KRPCError implementation
 
-bencode::BencodeValue KRPCError::toBencode() const {
-    bencode::BencodeDict dict;
+BencodeValue KRPCError::toBencode() const {
+    BencodeValue::Dictionary dict;
 
     // Transaction ID
-    dict["t"] = bencode::BencodeValue(transaction_id);
+    dict["t"] = BencodeValue(transaction_id);
 
     // Message type
-    dict["y"] = bencode::BencodeValue(std::string("e"));
+    dict["y"] = BencodeValue(std::string("e"));
 
     // Error value [code, message]
-    bencode::BencodeList error_list;
-    error_list.push_back(bencode::BencodeValue(static_cast<int64_t>(error_code)));
-    error_list.push_back(bencode::BencodeValue(error_message));
+    BencodeValue::List error_list;
+    error_list.push_back(BencodeValue(static_cast<int64_t>(error_code)));
+    error_list.push_back(BencodeValue(error_message));
 
-    dict["e"] = bencode::BencodeValue(error_list);
+    dict["e"] = BencodeValue(error_list);
 
-    return bencode::BencodeValue(dict);
+    return BencodeValue(dict);
 }
 
-KRPCError KRPCError::fromBencode(const bencode::BencodeValue& value) {
+KRPCError KRPCError::fromBencode(const BencodeValue& value) {
     KRPCError error;
 
-    if (!value.isDict()) {
+    if (!value.isDictionary()) {
         throw std::runtime_error("KRPC error must be a dictionary");
     }
 
-    const auto& dict = value.asDict();
+    const auto& dict = value.getDictionary();
 
     // Parse transaction ID
     if (dict.find("t") != dict.end() && dict.at("t").isString()) {
-        error.transaction_id = dict.at("t").asString();
+        error.transaction_id = dict.at("t").getString();
     }
 
     // Parse error
     if (dict.find("e") != dict.end() && dict.at("e").isList()) {
-        const auto& error_list = dict.at("e").asList();
+        const auto& error_list = dict.at("e").getList();
         if (error_list.size() >= 2) {
-            if (error_list[0].isInt()) {
-                error.error_code = static_cast<ErrorCode>(error_list[0].asInt());
+            if (error_list[0].isInteger()) {
+                error.error_code = static_cast<ErrorCode>(error_list[0].getInteger());
             }
             if (error_list[1].isString()) {
-                error.error_message = error_list[1].asString();
+                error.error_message = error_list[1].getString();
             }
         }
     }
@@ -301,20 +301,20 @@ KRPCError KRPCError::fromBencode(const bencode::BencodeValue& value) {
 std::variant<KRPCQuery, KRPCResponse, KRPCError> KRPCMessageFactory::parse(
     const std::vector<uint8_t>& data) {
 
-    bencode::BencodeValue value = bencode::decode(data);
+    BencodeValue value = BencodeParser::parse(data);
 
-    if (!value.isDict()) {
+    if (!value.isDictionary()) {
         throw std::runtime_error("Invalid KRPC message: not a dictionary");
     }
 
-    const auto& dict = value.asDict();
+    const auto& dict = value.getDictionary();
 
     // Determine message type
     if (dict.find("y") == dict.end() || !dict.at("y").isString()) {
         throw std::runtime_error("Invalid KRPC message: missing type");
     }
 
-    std::string type = dict.at("y").asString();
+    std::string type = dict.at("y").getString();
 
     if (type == "q") {
         return KRPCQuery::fromBencode(value);
@@ -425,8 +425,9 @@ KRPCError KRPCMessageFactory::createError(ErrorCode code,
 }
 
 std::vector<uint8_t> KRPCMessageFactory::serialize(const KRPCMessage& message) {
-    bencode::BencodeValue value = message.toBencode();
-    return bencode::encode(value);
+    BencodeValue value = message.toBencode();
+    const std::string encoded = BencodeParser::encode(value);
+    return std::vector<uint8_t>(encoded.begin(), encoded.end());
 }
 
 std::string KRPCMessageFactory::generateTransactionId() {

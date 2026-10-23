@@ -94,15 +94,15 @@ private:
 
     // Torrents being announced
     std::vector<std::vector<uint8_t>> announced_torrents_;
-    std::mutex torrents_mutex_;
+    mutable std::mutex torrents_mutex_;
 
     // Discovered peers
     std::vector<LSDPeer> discovered_peers_;
-    std::mutex peers_mutex_;
+    mutable std::mutex peers_mutex_;
 
     // Callback for peer discovery
     LSDPeerCallback peer_callback_;
-    std::mutex callback_mutex_;
+    mutable std::mutex callback_mutex_;
 
     // Worker threads
     std::thread announce_thread_;

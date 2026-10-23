@@ -1578,7 +1578,7 @@ void PeerConnection::enablePex() {
             }
 
             try {
-                bencode::BencodeValue data = bencode::decode(payload);
+                BencodeValue data = BencodeParser::parse(payload);
                 std::vector<PexPeer> new_peers;
                 int count = pex_manager_->parsePexMessage(data, new_peers);
 
@@ -1612,7 +1612,7 @@ bool PeerConnection::sendPexMessage() {
     }
 
     // Build PEX message
-    bencode::BencodeValue pex_data = pex_manager_->buildPexMessage();
+    BencodeValue pex_data = pex_manager_->buildPexMessage();
 
     // Send via extension protocol
     std::vector<uint8_t> message = extension_protocol_->buildExtensionMessage(

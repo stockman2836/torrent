@@ -4,6 +4,11 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <cstddef>
+
+#ifdef HAVE_LIBUTP
+#include <utp.h>
+#endif
 
 // BEP 29: uTP (Micro Transport Protocol) Integration
 // This is a wrapper around libutp (https://github.com/bittorrent/libutp)
@@ -15,8 +20,13 @@ namespace torrent {
 namespace utp {
 
 // Forward declarations for libutp types
+#ifdef HAVE_LIBUTP
+using ::UTPSocket;
+using ::utp_callback_arguments;
+#else
 struct UTPSocket;
-struct utp_callback_arguments;
+struct utp_callback_arguments {};
+#endif
 
 // ============================================================================
 // uTP Socket Wrapper
@@ -33,8 +43,8 @@ public:
     void close();
 
     // Data transmission
-    ssize_t send(const uint8_t* data, size_t length);
-    ssize_t recv(uint8_t* buffer, size_t buffer_size);
+    std::ptrdiff_t send(const uint8_t* data, size_t length);
+    std::ptrdiff_t recv(uint8_t* buffer, size_t buffer_size);
 
     // Check if connected
     bool isConnected() const;
@@ -68,10 +78,10 @@ private:
     OnErrorCallback on_error_;
 
     // Internal callbacks for libutp
-    static uint64 onRead(utp_callback_arguments* args);
-    static uint64 onWrite(utp_callback_arguments* args);
-    static uint64 onState(utp_callback_arguments* args);
-    static uint64 onError(utp_callback_arguments* args);
+    static uint64_t onRead(utp_callback_arguments* args);
+    static uint64_t onWrite(utp_callback_arguments* args);
+    static uint64_t onState(utp_callback_arguments* args);
+    static uint64_t onError(utp_callback_arguments* args);
 };
 
 // ============================================================================
@@ -143,14 +153,9 @@ namespace torrent {
 namespace utp {
     constexpr bool UTP_AVAILABLE = false;
 
-    // Stub types for when libutp is not available
-    using UTPSocket = void;
-    struct utp_callback_arguments {};
-    using uint64 = uint64_t;
 }
 }
 
 // Warn at compile time
-#warning "libutp not found - uTP support will be disabled. Install libutp to enable uTP."
 
 #endif // HAVE_LIBUTP

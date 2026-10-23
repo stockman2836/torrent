@@ -1,4 +1,5 @@
 #include "magnet_uri.h"
+#include <cstring>
 #include "utils.h"
 #include <sstream>
 #include <iomanip>

@@ -39,7 +39,7 @@ public:
 
     // Build extension message
     std::vector<uint8_t> buildExtensionMessage(const std::string& ext_name,
-                                               const bencode::BencodeValue& data) const;
+                                               const BencodeValue& data) const;
 
     // Handle incoming extension message
     void handleExtensionMessage(uint8_t msg_id, const std::vector<uint8_t>& payload);

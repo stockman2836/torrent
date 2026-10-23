@@ -18,34 +18,7 @@ FetchContent_MakeAvailable(googletest)
 # Include directories
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-# Create a library from the source files (excluding main.cpp)
-add_library(torrent_lib STATIC
-    ${PROJECT_SOURCE_DIR}/src/bencode.cpp
-    ${PROJECT_SOURCE_DIR}/src/utils.cpp
-    ${PROJECT_SOURCE_DIR}/src/torrent_file.cpp
-    ${PROJECT_SOURCE_DIR}/src/tracker_client.cpp
-    ${PROJECT_SOURCE_DIR}/src/udp_tracker.cpp
-    ${PROJECT_SOURCE_DIR}/src/peer_connection.cpp
-    ${PROJECT_SOURCE_DIR}/src/piece_manager.cpp
-    ${PROJECT_SOURCE_DIR}/src/file_manager.cpp
-    ${PROJECT_SOURCE_DIR}/src/download_manager.cpp
-    ${PROJECT_SOURCE_DIR}/src/logger.cpp
-    ${PROJECT_SOURCE_DIR}/src/config.cpp
-)
-
-target_link_libraries(torrent_lib
-    PUBLIC
-    Threads::Threads
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    CURL::libcurl
-    spdlog::spdlog
-    nlohmann_json::nlohmann_json
-)
-
-if(WIN32)
-    target_link_libraries(torrent_lib PUBLIC ws2_32 wsock32)
-endif()
+# Tests link the same library as the CLI, including all protocol modules.
 
 # Helper macro to create test executables
 macro(add_unit_test test_name test_file)
@@ -64,6 +37,15 @@ add_unit_test(test_bencode test_bencode.cpp)
 add_unit_test(test_torrent_file test_torrent_file.cpp)
 add_unit_test(test_piece_manager test_piece_manager.cpp)
 add_unit_test(test_file_manager test_file_manager.cpp)
+
+set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file_manager
+    PROPERTIES TIMEOUT 30)
+find_program(NODE_EXECUTABLE NAMES node)
+if(NODE_EXECUTABLE)
+    add_test(NAME test_download COMMAND "${NODE_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_download.cjs" "$<TARGET_FILE:torrent_client>")
+    set_tests_properties(test_download PROPERTIES TIMEOUT 55)
+endif()
 
 # Optional: Add coverage flags if needed
 if(CMAKE_BUILD_TYPE STREQUAL "Coverage")

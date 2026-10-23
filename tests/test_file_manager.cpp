@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <thread>
 
 using namespace torrent;
 namespace fs = std::filesystem;
@@ -293,7 +294,7 @@ TEST_F(FileManagerTest, WritePieceWithWrongSize) {
 
     bool result = manager.writePiece(0, wrong_size_data);
 
-    EXPECT_TRUE(result || !result);
+    EXPECT_FALSE(result);
 }
 
 // ==================== Concurrent Access Tests ====================

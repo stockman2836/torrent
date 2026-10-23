@@ -37,14 +37,14 @@ public:
     double progress() const;
 
     // Build request message for a piece
-    bencode::BencodeValue buildRequestMessage(size_t piece_index);
+    BencodeValue buildRequestMessage(size_t piece_index);
 
     // Build data message for a piece (when we have metadata to share)
-    bencode::BencodeValue buildDataMessage(size_t piece_index,
+    BencodeValue buildDataMessage(size_t piece_index,
                                           const std::vector<uint8_t>& metadata);
 
     // Build reject message
-    bencode::BencodeValue buildRejectMessage(size_t piece_index);
+    BencodeValue buildRejectMessage(size_t piece_index);
 
     // Handle incoming ut_metadata message
     void handleMessage(const std::vector<uint8_t>& payload);
@@ -64,14 +64,14 @@ public:
 
 private:
     // Handle request message
-    void handleRequest(const bencode::BencodeDict& dict);
+    void handleRequest(const BencodeValue::Dictionary& dict);
 
     // Handle data message
-    void handleData(const bencode::BencodeDict& dict,
+    void handleData(const BencodeValue::Dictionary& dict,
                    const std::vector<uint8_t>& piece_data);
 
     // Handle reject message
-    void handleReject(const bencode::BencodeDict& dict);
+    void handleReject(const BencodeValue::Dictionary& dict);
 
     // Check if all pieces are received and assemble metadata
     void checkCompletion();

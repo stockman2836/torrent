@@ -1,4 +1,5 @@
 #include "download_manager.h"
+#include "logger.h"
 #include "utils.h"
 #include "pex_manager.h"
 #include <iostream>
@@ -308,6 +309,8 @@ void DownloadManager::stop() {
 
     running_ = false;
 
+    stop_cv_.notify_all();
+
     // Stop DHT
     if (enable_dht_ && dht_manager_) {
         std::cout << "Stopping DHT...\n";
@@ -354,6 +357,11 @@ void DownloadManager::pause() {
     paused_ = true;
 }
 
+void DownloadManager::waitForStop(std::chrono::milliseconds delay) {
+    std::unique_lock<std::mutex> lock(stop_mutex_);
+    stop_cv_.wait_for(lock, delay, [this] { return !running_; });
+}
+
 void DownloadManager::resume() {
     paused_ = false;
 }
@@ -396,11 +404,11 @@ void DownloadManager::printStatus() const {
 
 void DownloadManager::downloadLoop() {
     // Wait for initial peer list from tracker
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    waitForStop(std::chrono::seconds(2));
 
     while (running_) {
         if (paused_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            waitForStop(std::chrono::milliseconds(100));
             continue;
         }
 
@@ -438,13 +446,13 @@ void DownloadManager::downloadLoop() {
         }
 
         // Sleep
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        waitForStop(std::chrono::seconds(1));
     }
 }
 
 void DownloadManager::trackerLoop() {
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        waitForStop(std::chrono::seconds(30));
 
         if (!running_) {
             break;
@@ -456,7 +464,7 @@ void DownloadManager::trackerLoop() {
 
 void DownloadManager::peerLoop(size_t peer_index) {
     // Get peer info
-    PeerInfo* peer_info = nullptr;
+    ActivePeerInfo* peer_info = nullptr;
     {
         std::lock_guard<std::mutex> lock(peers_mutex_);
         if (peer_index >= active_peers_.size()) {
@@ -470,51 +478,10 @@ void DownloadManager::peerLoop(size_t peer_index) {
     }
 
     PeerConnection* conn = peer_info->connection.get();
-    const Peer& peer = peer_info->peer_data;
+    const Peer peer = peer_info->peer_data;
     std::cout << "Starting peer loop for " << peer.ip << ":" << peer.port << "\n";
 
-    // Create connection
-    auto connection = std::make_unique<PeerConnection>(
-        peer.ip,
-        peer.port,
-        torrent_.infoHash(),
-        peer_id_
-    );
-
-    // Connect
-    if (!connection->connect()) {
-        std::cerr << "Failed to connect to peer " << peer.ip << ":" << peer.port << "\n";
-        return;
-    }
-
-    // Initialize peer bitfield
-    connection->initializePeerBitfield(torrent_.numPieces());
-
-    // Add to connections list
-    {
-        std::lock_guard<std::mutex> lock(connections_mutex_);
-        connections_.push_back(std::move(connection));
-    }
-
-    // Get pointer to connection (last element)
-    PeerConnection* conn_ptr = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(connections_mutex_);
-        if (!connections_.empty()) {
-            conn_ptr = connections_.back().get();
-        }
-    }
-
-    if (!conn_ptr) {
-        return;
-    }
-
-    // Perform handshake with our bitfield
-    std::vector<bool> our_bitfield = piece_manager_->getBitfield();
-    if (!conn_ptr->performHandshake(our_bitfield)) {
-        std::cerr << "Failed to perform handshake with " << peer.ip << ":" << peer.port << "\n";
-        return;
-    }
+    PeerConnection* conn_ptr = conn;
 
     // Main communication loop
     auto last_keepalive = std::chrono::steady_clock::now();
@@ -757,7 +724,7 @@ void DownloadManager::peerLoop(size_t peer_index) {
         }
 
         // Small sleep to prevent busy loop
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        waitForStop(std::chrono::milliseconds(10));
     }
 
     // Graceful cleanup on peer disconnection
@@ -836,7 +803,7 @@ void DownloadManager::connectToPeers() {
         // If peer supports Fast Extension, send optimized messages
         if (connection->peerSupportsFastExtension()) {
             // Check if we're a seeder or have no pieces
-            bool is_seeder = piece_manager_->isComplete();
+            bool is_seeder = piece_manager_->percentComplete() >= 100.0;
             size_t pieces_have = 0;
             for (bool have : our_bitfield) {
                 if (have) pieces_have++;
@@ -955,7 +922,7 @@ void DownloadManager::coordinatorLoop() {
 
     while (running_) {
         if (paused_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            waitForStop(std::chrono::milliseconds(500));
             continue;
         }
 
@@ -972,7 +939,7 @@ void DownloadManager::coordinatorLoop() {
         }
 
         // Sleep before next coordination cycle
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        waitForStop(std::chrono::seconds(1));
     }
 
     std::cout << "Coordinator loop ended\n";
@@ -1011,7 +978,7 @@ void DownloadManager::assignPiecesToPeers() {
     }
 }
 
-int32_t DownloadManager::selectNextPiece(PeerInfo* peer) {
+int32_t DownloadManager::selectNextPiece(ActivePeerInfo* peer) {
     if (!peer || !peer->connection) {
         return -1;
     }
@@ -1043,7 +1010,7 @@ int32_t DownloadManager::selectNextPiece(PeerInfo* peer) {
     // Collect all peer bitfields for rarity calculation
     std::vector<std::vector<bool>> all_peer_bitfields;
     {
-        std::lock_guard<std::mutex> peers_lock(peers_mutex_);
+        // assignPiecesToPeers already holds peers_mutex_.
         for (const auto& peer_info : active_peers_) {
             if (peer_info.connection && peer_info.connection->isConnected()) {
                 all_peer_bitfields.push_back(peer_info.connection->peerBitfield());
@@ -1081,10 +1048,10 @@ void DownloadManager::cleanupStalePeers() {
     }
 }
 
-PeerInfo* DownloadManager::selectPeerForPiece(uint32_t piece_index) {
+ActivePeerInfo* DownloadManager::selectPeerForPiece(uint32_t piece_index) {
     std::lock_guard<std::mutex> lock(peers_mutex_);
 
-    PeerInfo* best_peer = nullptr;
+    ActivePeerInfo* best_peer = nullptr;
     double best_speed = 0.0;
 
     for (auto& peer : active_peers_) {
@@ -1180,7 +1147,7 @@ void DownloadManager::resumeLoop() {
     std::cout << "Resume loop started (saving state every 30 seconds)\n";
 
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        waitForStop(std::chrono::seconds(30));
 
         if (!running_) {
             break;
@@ -1201,7 +1168,7 @@ void DownloadManager::dhtLoop() {
     std::cout << "DHT loop started\n";
 
     // Wait for DHT to bootstrap
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+    waitForStop(std::chrono::seconds(5));
 
     // Announce ourselves in DHT
     if (dht_manager_->getNodeCount() > 0) {
@@ -1210,7 +1177,7 @@ void DownloadManager::dhtLoop() {
     }
 
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
+        waitForStop(std::chrono::seconds(60));
 
         if (!running_) {
             break;
@@ -1289,10 +1256,10 @@ void DownloadManager::pexLoop() {
     std::cout << "PEX loop started\n";
 
     // Wait a bit before starting PEX
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    waitForStop(std::chrono::seconds(10));
 
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
+        waitForStop(std::chrono::seconds(60));
 
         if (!running_) {
             break;
@@ -1405,7 +1372,7 @@ void DownloadManager::lsdLoop() {
     // LSD announcements are handled automatically by the LSD class
     // This loop just monitors discovered peers
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        waitForStop(std::chrono::seconds(30));
 
         if (!running_) {
             break;
@@ -1444,7 +1411,7 @@ void DownloadManager::webseedLoop() {
     // Web seed downloads are handled automatically via callbacks
     // This loop monitors and requests pieces from web seeds
     while (running_) {
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        waitForStop(std::chrono::seconds(10));
 
         if (!running_ || seeding_mode_) {
             break;
@@ -1545,7 +1512,7 @@ void DownloadManager::utpLoop() {
 
         // Sleep for a short time (10ms) to allow other threads to run
         // uTP requires frequent ticking for good performance
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        waitForStop(std::chrono::milliseconds(10));
 
         if (!running_) {
             break;

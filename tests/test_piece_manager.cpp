@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 #include "piece_manager.h"
+#include "utils.h"
+#include <filesystem>
+#include <thread>
 #include <vector>
 #include <algorithm>
 
@@ -428,6 +431,34 @@ TEST_F(PieceManagerTest, ConcurrentMarkPieceComplete) {
 }
 
 // ==================== Main ====================
+
+TEST(PieceAssemblyRegression, CompletesVerifiedPieceAndRestoresResumeState) {
+    const std::vector<uint8_t> data = {0, 255, 12, 34, 56};
+    const auto hash = utils::sha1(data);
+    PieceManager original(1, data.size(), data.size(), hash);
+    ASSERT_TRUE(original.addBlock(0, 0, data));
+    ASSERT_TRUE(original.completePiece(0, nullptr));
+    EXPECT_DOUBLE_EQ(original.percentComplete(), 100.0);
+
+    const auto state = std::filesystem::temp_directory_path() /
+        ("torrent-resume-" + utils::generatePeerId() + ".dat");
+    ASSERT_TRUE(original.saveStateToDisk(state.string()));
+    PieceManager restored(1, data.size(), data.size(), hash);
+    EXPECT_TRUE(restored.loadStateFromDisk(state.string()));
+    std::filesystem::remove(state);
+    EXPECT_TRUE(restored.hasPiece(0));
+    EXPECT_DOUBLE_EQ(restored.percentComplete(), 100.0);
+}
+
+TEST(PieceAssemblyRegression, RejectsCorruptPiece) {
+    const std::vector<uint8_t> expected = {1, 2, 3, 4};
+    PieceManager manager(1, expected.size(), expected.size(), utils::sha1(expected));
+    ASSERT_TRUE(manager.addBlock(0, 0, {1, 2, 3, 5}));
+    EXPECT_FALSE(manager.completePiece(0, nullptr));
+    EXPECT_FALSE(manager.hasPiece(0));
+    EXPECT_FALSE(manager.isPieceInProgress(0));
+    EXPECT_DOUBLE_EQ(manager.percentComplete(), 0.0);
+}
 
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);

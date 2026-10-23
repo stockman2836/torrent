@@ -8,6 +8,7 @@
 #include <queue>
 #include <chrono>
 #include <map>
+#include <set>
 #include "utp_socket.h"
 
 namespace torrent {

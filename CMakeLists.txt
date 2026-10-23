@@ -17,7 +17,6 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Source files
 set(SOURCES
-    src/main.cpp
     src/bencode.cpp
     src/utils.cpp
     src/torrent_file.cpp
@@ -137,11 +136,13 @@ else()
 endif()
 
 # Executable
-add_executable(torrent_client ${SOURCES} ${HEADERS})
+add_library(torrent_lib STATIC ${SOURCES} ${HEADERS})
+add_executable(torrent_client src/main.cpp)
+target_link_libraries(torrent_client PRIVATE torrent_lib)
 
 # Link libraries
-target_link_libraries(torrent_client
-    PRIVATE
+target_link_libraries(torrent_lib
+    PUBLIC
     Threads::Threads
     OpenSSL::SSL
     OpenSSL::Crypto
@@ -153,7 +154,7 @@ target_link_libraries(torrent_client
 
 # Platform-specific libraries
 if(WIN32)
-    target_link_libraries(torrent_client PRIVATE ws2_32 wsock32)
+    target_link_libraries(torrent_lib PUBLIC ws2_32 wsock32)
 endif()
 
 # Tests (optional)

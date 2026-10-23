@@ -75,7 +75,7 @@ TEST_F(BencodeParserTest, ParseLongString) {
 }
 
 TEST_F(BencodeParserTest, ParseBinaryString) {
-    std::string binary_data = "5:\x00\x01\x02\x03\x04";
+    std::string binary_data("5:\x00\x01\x02\x03\x04", 7);
     auto result = BencodeParser::parse(binary_data);
     ASSERT_TRUE(result.isString());
     EXPECT_EQ(result.getString().size(), 5);
@@ -228,12 +228,13 @@ TEST_F(BencodeParserTest, RoundTripString) {
 }
 
 TEST_F(BencodeParserTest, RoundTripComplexStructure) {
-    std::string original = "d4:listli1ei2ei3ee6:stringi4:teste";
+    std::string original = "d4:listli1ei2ei3ee6:string4:teste";
     auto parsed = BencodeParser::parse(original);
     std::string encoded = BencodeParser::encode(parsed);
     // Parse again to verify correctness
     auto reparsed = BencodeParser::parse(encoded);
     ASSERT_TRUE(reparsed.isDictionary());
+    EXPECT_EQ(encoded, original);
 }
 
 // ==================== Binary Data Tests ====================

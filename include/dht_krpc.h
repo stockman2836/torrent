@@ -40,7 +40,7 @@ struct KRPCMessage {
     MessageType type;
 
     virtual ~KRPCMessage() = default;
-    virtual bencode::BencodeValue toBencode() const = 0;
+    virtual BencodeValue toBencode() const = 0;
 };
 
 // Query message
@@ -57,8 +57,8 @@ struct KRPCQuery : public KRPCMessage {
 
     KRPCQuery() { type = MessageType::QUERY; }
 
-    bencode::BencodeValue toBencode() const override;
-    static KRPCQuery fromBencode(const bencode::BencodeValue& value);
+    BencodeValue toBencode() const override;
+    static KRPCQuery fromBencode(const BencodeValue& value);
 
     std::string getQueryName() const;
 };
@@ -74,8 +74,8 @@ struct KRPCResponse : public KRPCMessage {
 
     KRPCResponse() { type = MessageType::RESPONSE; }
 
-    bencode::BencodeValue toBencode() const override;
-    static KRPCResponse fromBencode(const bencode::BencodeValue& value);
+    BencodeValue toBencode() const override;
+    static KRPCResponse fromBencode(const BencodeValue& value);
 };
 
 // Error message
@@ -89,12 +89,13 @@ struct KRPCError : public KRPCMessage {
         type = MessageType::ERROR;
     }
 
-    bencode::BencodeValue toBencode() const override;
-    static KRPCError fromBencode(const bencode::BencodeValue& value);
+    BencodeValue toBencode() const override;
+    static KRPCError fromBencode(const BencodeValue& value);
 };
 
 // KRPC Message factory and parser
 class KRPCMessageFactory {
+    friend class KRPCResponse;
 public:
     // Parse raw bencode data into appropriate message type
     static std::variant<KRPCQuery, KRPCResponse, KRPCError> parse(

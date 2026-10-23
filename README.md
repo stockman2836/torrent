@@ -107,6 +107,7 @@ The project is divided into several core components:
 - C++17 or higher
 - CMake 3.15+
 - OpenSSL (for SHA1)
+- libcurl (HTTP tracker and web seed requests)
 - Compiler: GCC, Clang, or MSVC
 
 ### Windows:
@@ -126,6 +127,7 @@ The project is divided into several core components:
 ```bash
 # Install OpenSSL via vcpkg (optional)
 vcpkg install openssl
+vcpkg install curl
 
 # Build
 mkdir build
@@ -178,3 +180,22 @@ make -j$(nproc)
 - `--max-upload <KB/s>` - Max upload speed
 - `--port <port>` - Listen port
 - `--log-level <level>` - Logging level
+
+## Verification
+
+The CLI and tests link the same `torrent_lib` target, including the protocol
+extensions. Run the checks after building:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+When Node.js is available at configuration time, CMake also registers
+`test_download`: an offline end-to-end test with a local HTTP tracker and TCP
+seed. It downloads a binary file across multiple pieces and blocks and compares
+the saved contents byte for byte. Logs and downloaded files remain in the test
+build directory under `download-test-*`. No public tracker is contacted.
+
+This test covers the `.torrent` TCP download path. Public swarm interoperability,
+magnet metadata exchange, encryption and optional libutp require separate checks.
+uTP remains disabled by default (`ENABLE_UTP=OFF`).

@@ -91,7 +91,7 @@ void UtpSocket::close() {
     }
 }
 
-ssize_t UtpSocket::send(const uint8_t* data, size_t length) {
+std::ptrdiff_t UtpSocket::send(const uint8_t* data, size_t length) {
     if (!utp_socket_) {
         return -1;
     }
@@ -104,7 +104,7 @@ ssize_t UtpSocket::send(const uint8_t* data, size_t length) {
     return sent;
 }
 
-ssize_t UtpSocket::recv(uint8_t* buffer, size_t buffer_size) {
+std::ptrdiff_t UtpSocket::recv(uint8_t* buffer, size_t buffer_size) {
     // Data is delivered via onRead callback
     // This is a synchronous wrapper (not typically used with libutp)
     LOG_WARN("uTP: recv() called - use callbacks instead");
@@ -439,11 +439,11 @@ bool UtpSocket::listen(uint16_t port) {
 
 void UtpSocket::close() {}
 
-ssize_t UtpSocket::send(const uint8_t* data, size_t length) {
+std::ptrdiff_t UtpSocket::send(const uint8_t* data, size_t length) {
     return -1;
 }
 
-ssize_t UtpSocket::recv(uint8_t* buffer, size_t buffer_size) {
+std::ptrdiff_t UtpSocket::recv(uint8_t* buffer, size_t buffer_size) {
     return -1;
 }
 

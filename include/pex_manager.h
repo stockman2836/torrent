@@ -64,11 +64,11 @@ public:
 
     // Build a PEX message with added and dropped peers
     // This creates a bencoded dictionary for the ut_pex extension
-    bencode::BencodeValue buildPexMessage();
+    BencodeValue buildPexMessage();
 
     // Parse an incoming PEX message
     // Returns the number of new peers discovered
-    int parsePexMessage(const bencode::BencodeValue& data,
+    int parsePexMessage(const BencodeValue& data,
                         std::vector<PexPeer>& new_peers_out);
 
     // Get list of all known peers

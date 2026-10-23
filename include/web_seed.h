@@ -106,7 +106,7 @@ private:
 
     // Callback
     WebSeedCallback callback_;
-    std::mutex callback_mutex_;
+    mutable std::mutex callback_mutex_;
 
     // Error tracking
     std::atomic<size_t> consecutive_errors_;
@@ -155,7 +155,7 @@ private:
     size_t total_length_;
 
     std::vector<std::unique_ptr<WebSeed>> web_seeds_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
 };
 
 } // namespace torrent

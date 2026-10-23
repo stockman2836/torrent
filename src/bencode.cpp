@@ -62,12 +62,16 @@ BencodeValue BencodeParser::parseInteger() {
     if (num_str.size() > 1 && num_str[0] == '0') {
         throw BencodeError("Invalid integer format (leading zero)");
     }
-    if (num_str.size() > 2 && num_str[0] == '-' && num_str[1] == '0') {
+    if (num_str.size() >= 2 && num_str[0] == '-' && num_str[1] == '0') {
         throw BencodeError("Invalid integer format (-0)");
     }
 
     try {
-        int64_t value = std::stoll(num_str);
+        size_t consumed = 0;
+        int64_t value = std::stoll(num_str, &consumed);
+        if (consumed != num_str.size()) {
+            throw BencodeError("Invalid integer: " + num_str);
+        }
         return BencodeValue(value);
     } catch (const std::exception&) {
         throw BencodeError("Invalid integer: " + num_str);

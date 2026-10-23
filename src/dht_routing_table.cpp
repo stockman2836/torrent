@@ -202,7 +202,7 @@ std::vector<Node> RoutingTable::findClosestNodes(const NodeID& target, size_t co
 
     // Return up to 'count' closest nodes
     if (all_nodes.size() > count) {
-        all_nodes.resize(count);
+        all_nodes.erase(all_nodes.begin() + count, all_nodes.end());
     }
 
     return all_nodes;

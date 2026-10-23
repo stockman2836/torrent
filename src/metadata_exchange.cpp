@@ -45,32 +45,32 @@ double MetadataExchange::progress() const {
     return (double)received / num_pieces_ * 100.0;
 }
 
-bencode::BencodeValue MetadataExchange::buildRequestMessage(size_t piece_index) {
-    bencode::BencodeDict dict;
-    dict["msg_type"] = bencode::BencodeValue(static_cast<int64_t>(MetadataMessageType::REQUEST));
-    dict["piece"] = bencode::BencodeValue(static_cast<int64_t>(piece_index));
+BencodeValue MetadataExchange::buildRequestMessage(size_t piece_index) {
+    BencodeValue::Dictionary dict;
+    dict["msg_type"] = BencodeValue(static_cast<int64_t>(MetadataMessageType::REQUEST));
+    dict["piece"] = BencodeValue(static_cast<int64_t>(piece_index));
 
-    return bencode::BencodeValue(dict);
+    return BencodeValue(dict);
 }
 
-bencode::BencodeValue MetadataExchange::buildDataMessage(
+BencodeValue MetadataExchange::buildDataMessage(
     size_t piece_index,
     const std::vector<uint8_t>& metadata) {
 
-    bencode::BencodeDict dict;
-    dict["msg_type"] = bencode::BencodeValue(static_cast<int64_t>(MetadataMessageType::DATA));
-    dict["piece"] = bencode::BencodeValue(static_cast<int64_t>(piece_index));
-    dict["total_size"] = bencode::BencodeValue(static_cast<int64_t>(metadata.size()));
+    BencodeValue::Dictionary dict;
+    dict["msg_type"] = BencodeValue(static_cast<int64_t>(MetadataMessageType::DATA));
+    dict["piece"] = BencodeValue(static_cast<int64_t>(piece_index));
+    dict["total_size"] = BencodeValue(static_cast<int64_t>(metadata.size()));
 
-    return bencode::BencodeValue(dict);
+    return BencodeValue(dict);
 }
 
-bencode::BencodeValue MetadataExchange::buildRejectMessage(size_t piece_index) {
-    bencode::BencodeDict dict;
-    dict["msg_type"] = bencode::BencodeValue(static_cast<int64_t>(MetadataMessageType::REJECT));
-    dict["piece"] = bencode::BencodeValue(static_cast<int64_t>(piece_index));
+BencodeValue MetadataExchange::buildRejectMessage(size_t piece_index) {
+    BencodeValue::Dictionary dict;
+    dict["msg_type"] = BencodeValue(static_cast<int64_t>(MetadataMessageType::REJECT));
+    dict["piece"] = BencodeValue(static_cast<int64_t>(piece_index));
 
-    return bencode::BencodeValue(dict);
+    return BencodeValue(dict);
 }
 
 void MetadataExchange::handleMessage(const std::vector<uint8_t>& payload) {
@@ -103,22 +103,22 @@ void MetadataExchange::handleMessage(const std::vector<uint8_t>& payload) {
 
         // Parse dict
         std::vector<uint8_t> dict_data(payload.begin(), payload.begin() + dict_end);
-        bencode::BencodeValue value = bencode::decode(dict_data);
+        BencodeValue value = BencodeParser::parse(dict_data);
 
-        if (!value.isDict()) {
+        if (!value.isDictionary()) {
             LOG_WARN("Invalid ut_metadata message: not a dict");
             return;
         }
 
-        const auto& dict = value.asDict();
+        const auto& dict = value.getDictionary();
 
         // Get message type
-        if (dict.find("msg_type") == dict.end() || !dict.at("msg_type").isInt()) {
+        if (dict.find("msg_type") == dict.end() || !dict.at("msg_type").isInteger()) {
             LOG_WARN("Invalid ut_metadata message: missing msg_type");
             return;
         }
 
-        int msg_type = static_cast<int>(dict.at("msg_type").asInt());
+        int msg_type = static_cast<int>(dict.at("msg_type").getInteger());
 
         // Extract piece data if present
         std::vector<uint8_t> piece_data;
@@ -197,13 +197,13 @@ std::vector<uint8_t> MetadataExchange::getMetadata() const {
     return metadata;
 }
 
-void MetadataExchange::handleRequest(const bencode::BencodeDict& dict) {
+void MetadataExchange::handleRequest(const BencodeValue::Dictionary& dict) {
     // Peer is requesting a metadata piece from us
-    if (dict.find("piece") == dict.end() || !dict.at("piece").isInt()) {
+    if (dict.find("piece") == dict.end() || !dict.at("piece").isInteger()) {
         return;
     }
 
-    size_t piece_index = static_cast<size_t>(dict.at("piece").asInt());
+    size_t piece_index = static_cast<size_t>(dict.at("piece").getInteger());
 
     LOG_DEBUG("Peer requested metadata piece {}", piece_index);
 
@@ -211,15 +211,15 @@ void MetadataExchange::handleRequest(const bencode::BencodeDict& dict) {
     // This would be handled by the caller (peer connection)
 }
 
-void MetadataExchange::handleData(const bencode::BencodeDict& dict,
+void MetadataExchange::handleData(const BencodeValue::Dictionary& dict,
                                   const std::vector<uint8_t>& piece_data) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (dict.find("piece") == dict.end() || !dict.at("piece").isInt()) {
+    if (dict.find("piece") == dict.end() || !dict.at("piece").isInteger()) {
         return;
     }
 
-    size_t piece_index = static_cast<size_t>(dict.at("piece").asInt());
+    size_t piece_index = static_cast<size_t>(dict.at("piece").getInteger());
 
     if (piece_index >= num_pieces_) {
         LOG_WARN("Received invalid metadata piece index: {}", piece_index);
@@ -243,14 +243,14 @@ void MetadataExchange::handleData(const bencode::BencodeDict& dict,
     checkCompletion();
 }
 
-void MetadataExchange::handleReject(const bencode::BencodeDict& dict) {
+void MetadataExchange::handleReject(const BencodeValue::Dictionary& dict) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (dict.find("piece") == dict.end() || !dict.at("piece").isInt()) {
+    if (dict.find("piece") == dict.end() || !dict.at("piece").isInteger()) {
         return;
     }
 
-    size_t piece_index = static_cast<size_t>(dict.at("piece").asInt());
+    size_t piece_index = static_cast<size_t>(dict.at("piece").getInteger());
 
     LOG_WARN("Peer rejected metadata piece request: {}", piece_index);
 

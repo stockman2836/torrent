@@ -16,11 +16,12 @@
 #include <atomic>
 #include <chrono>
 #include <set>
+#include <condition_variable>
 
 namespace torrent {
 
 // Peer performance tracking
-struct PeerInfo {
+struct ActivePeerInfo {
     std::unique_ptr<PeerConnection> connection;
     Peer peer_data;
 
@@ -39,7 +40,7 @@ struct PeerInfo {
     int pieces_completed = 0;
     int failed_requests = 0;
 
-    PeerInfo(std::unique_ptr<PeerConnection> conn, const Peer& peer)
+    ActivePeerInfo(std::unique_ptr<PeerConnection> conn, const Peer& peer)
         : connection(std::move(conn)), peer_data(peer),
           connect_time(std::chrono::steady_clock::now()),
           last_activity(std::chrono::steady_clock::now()) {}
@@ -103,6 +104,9 @@ public:
     void printStatus() const;
 
 private:
+    void waitForStop(std::chrono::milliseconds delay);
+    std::mutex stop_mutex_;
+    std::condition_variable stop_cv_;
     void downloadLoop();
     void trackerLoop();
     void peerLoop(size_t peer_index);
@@ -130,9 +134,9 @@ private:
 
     // Multi-peer coordination
     void assignPiecesToPeers();
-    PeerInfo* selectPeerForPiece(uint32_t piece_index);
+    ActivePeerInfo* selectPeerForPiece(uint32_t piece_index);
     void cleanupStalePeers();
-    int32_t selectNextPiece(PeerInfo* peer);
+    int32_t selectNextPiece(ActivePeerInfo* peer);
     bool isEndgameMode() const;
 
     TorrentFile torrent_;
@@ -149,8 +153,8 @@ private:
     std::unique_ptr<utp::UtpManager> utp_manager_;
 
     std::vector<Peer> available_peers_;
-    std::vector<PeerInfo> active_peers_;
-    std::mutex peers_mutex_;
+    std::vector<ActivePeerInfo> active_peers_;
+    mutable std::mutex peers_mutex_;
 
     // Piece tracking
     std::set<uint32_t> pieces_in_download_;  // Pieces currently being downloaded

@@ -16,6 +16,7 @@ class PeerConnection;
 // ============================================================================
 
 class MSEHandshake {
+    friend class PeerConnection;
 public:
     // Encryption mode preference
     enum class Mode {

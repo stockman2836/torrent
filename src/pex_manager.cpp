@@ -109,8 +109,8 @@ void PexManager::markPeerDropped(const std::string& ip, uint16_t port) {
     removePeer(ip, port);
 }
 
-bencode::BencodeValue PexManager::buildPexMessage() {
-    bencode::BencodeDict dict;
+BencodeValue PexManager::buildPexMessage() {
+    BencodeValue::Dictionary dict;
 
     // Limit the number of peers we send
     std::set<PexPeer> peers_to_add;
@@ -124,61 +124,61 @@ bencode::BencodeValue PexManager::buildPexMessage() {
     // Build "added" field (compact peer list)
     if (!peers_to_add.empty()) {
         std::vector<uint8_t> added_compact = peersToCompact(peers_to_add);
-        dict["added"] = bencode::BencodeValue(
+        dict["added"] = BencodeValue(
             std::string(added_compact.begin(), added_compact.end())
         );
 
         // Build "added.f" field (flags for each peer)
         std::vector<uint8_t> added_flags = peersToFlags(peers_to_add);
-        dict["added.f"] = bencode::BencodeValue(
+        dict["added.f"] = BencodeValue(
             std::string(added_flags.begin(), added_flags.end())
         );
 
         LOG_DEBUG("PEX: Building message with {} added peers", peers_to_add.size());
     } else {
         // Empty strings for no peers
-        dict["added"] = bencode::BencodeValue(std::string(""));
-        dict["added.f"] = bencode::BencodeValue(std::string(""));
+        dict["added"] = BencodeValue(std::string(""));
+        dict["added.f"] = BencodeValue(std::string(""));
     }
 
     // Build "dropped" field (compact peer list)
     if (!dropped_peers_.empty()) {
         std::vector<uint8_t> dropped_compact = peersToCompact(dropped_peers_);
-        dict["dropped"] = bencode::BencodeValue(
+        dict["dropped"] = BencodeValue(
             std::string(dropped_compact.begin(), dropped_compact.end())
         );
 
         LOG_DEBUG("PEX: Building message with {} dropped peers", dropped_peers_.size());
     } else {
-        dict["dropped"] = bencode::BencodeValue(std::string(""));
+        dict["dropped"] = BencodeValue(std::string(""));
     }
 
     // Clear the added/dropped lists after building message
     added_peers_.clear();
     dropped_peers_.clear();
 
-    return bencode::BencodeValue(dict);
+    return BencodeValue(dict);
 }
 
-int PexManager::parsePexMessage(const bencode::BencodeValue& data,
+int PexManager::parsePexMessage(const BencodeValue& data,
                                  std::vector<PexPeer>& new_peers_out) {
-    if (!data.isDict()) {
+    if (!data.isDictionary()) {
         LOG_WARN("PEX: Invalid message format (not a dictionary)");
         return 0;
     }
 
-    const auto& dict = data.asDict();
+    const auto& dict = data.getDictionary();
     int new_peer_count = 0;
 
     // Parse "added" peers
     if (dict.find("added") != dict.end() && dict.at("added").isString()) {
-        const std::string& added_str = dict.at("added").asString();
+        const std::string& added_str = dict.at("added").getString();
         std::vector<uint8_t> added_compact(added_str.begin(), added_str.end());
 
         // Parse "added.f" flags
         std::vector<uint8_t> added_flags;
         if (dict.find("added.f") != dict.end() && dict.at("added.f").isString()) {
-            const std::string& flags_str = dict.at("added.f").asString();
+            const std::string& flags_str = dict.at("added.f").getString();
             added_flags.assign(flags_str.begin(), flags_str.end());
         }
 
@@ -200,7 +200,7 @@ int PexManager::parsePexMessage(const bencode::BencodeValue& data,
 
     // Parse "dropped" peers
     if (dict.find("dropped") != dict.end() && dict.at("dropped").isString()) {
-        const std::string& dropped_str = dict.at("dropped").asString();
+        const std::string& dropped_str = dict.at("dropped").getString();
         std::vector<uint8_t> dropped_compact(dropped_str.begin(), dropped_str.end());
 
         std::vector<PexPeer> dropped_peers = compactToPeers(dropped_compact, {});

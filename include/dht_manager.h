@@ -145,7 +145,7 @@ private:
     // Peer storage (for serving get_peers)
     struct PeerStorage {
         std::map<std::vector<uint8_t>, std::vector<DHTpeer>> peers;
-        std::mutex mutex;
+        mutable std::mutex mutex;
 
         void addPeer(const std::vector<uint8_t>& info_hash, const DHTpeer& peer);
         std::vector<DHTpeer> getPeers(const std::vector<uint8_t>& info_hash) const;
@@ -161,7 +161,7 @@ private:
 
     // Transaction tracking
     std::map<std::string, Transaction> pending_transactions_;
-    std::mutex transactions_mutex_;
+    mutable std::mutex transactions_mutex_;
 
     // Token secret (rotated periodically)
     std::string token_secret_;

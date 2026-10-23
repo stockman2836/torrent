@@ -1,4 +1,6 @@
 #include "piece_manager.h"
+#include "file_manager.h"
+#include <climits>
 #include "utils.h"
 #include "logger.h"
 #include <algorithm>
@@ -33,7 +35,8 @@ void PieceManager::markPieceComplete(uint32_t piece_index) {
         bitfield_[piece_index] = true;
         pieces_downloaded_++;
         LOG_INFO("Piece {} marked complete. Progress: {}/{} ({:.2f}%)",
-                 piece_index, pieces_downloaded_, num_pieces_, percentComplete());
+                 piece_index, pieces_downloaded_, num_pieces_,
+                 num_pieces_ ? 100.0 * pieces_downloaded_ / num_pieces_ : 0.0);
     }
 }
 
@@ -249,7 +252,7 @@ bool PieceManager::completePiece(uint32_t piece_index, FileManager* file_manager
     pieces_in_progress_.erase(it);
 
     std::cout << "✓ Piece " << piece_index << " COMPLETED! Progress: "
-              << percentComplete() << "%\n";
+              << (num_pieces_ ? 100.0 * pieces_downloaded_ / num_pieces_ : 0.0) << "%\n";
 
     return true;
 }
@@ -384,7 +387,7 @@ bool PieceManager::saveStateToDisk(const std::string& resume_file_path) const {
         file.write(reinterpret_cast<const char*>(&version), 1);
 
         // Number of pieces (big-endian)
-        uint32_t num_pieces_be = htonl(static_cast<uint32_t>(num_pieces_));
+        uint32_t num_pieces_be = utils::htonl(static_cast<uint32_t>(num_pieces_));
         file.write(reinterpret_cast<const char*>(&num_pieces_be), 4);
 
         // Bitfield (pack into bytes)
@@ -444,7 +447,7 @@ bool PieceManager::loadStateFromDisk(const std::string& resume_file_path) {
         // Read number of pieces
         uint32_t num_pieces_be;
         file.read(reinterpret_cast<char*>(&num_pieces_be), 4);
-        uint32_t saved_num_pieces = ntohl(num_pieces_be);
+        uint32_t saved_num_pieces = utils::ntohl(num_pieces_be);
 
         if (saved_num_pieces != num_pieces_) {
             std::cerr << "Resume file piece count mismatch: expected " << num_pieces_
@@ -475,7 +478,8 @@ bool PieceManager::loadStateFromDisk(const std::string& resume_file_path) {
         file.close();
 
         std::cout << "Resume state loaded: " << pieces_downloaded_ << "/" << num_pieces_
-                  << " pieces completed (" << percentComplete() << "%)\n";
+                  << " pieces completed ("
+                  << (num_pieces_ ? 100.0 * pieces_downloaded_ / num_pieces_ : 0.0) << "%)\n";
 
         return true;
 
