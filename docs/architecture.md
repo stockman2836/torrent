@@ -49,6 +49,7 @@ The coordinator's implementation is divided by responsibility:
 
 - `download_manager.cpp`: construction, lifecycle and status.
 - `peers.cpp`: peer workers and transfer processing.
+- `transfer.cpp`: block acceptance, completion and remaining byte counts.
 - `scheduling.cpp`: piece assignment, selection and stale-peer cleanup.
 - `tracker.cpp`: announces and tracker refreshes.
 - `resume.cpp`: state persistence and verification after restart.
@@ -64,6 +65,19 @@ the active list therefore does not destroy an object still used by its worker.
 Peer threads have their own list, separate from background service threads.
 The coordinator joins background workers before joining peer workers. The
 session's periodic waits wake when shutdown is requested.
+
+Peer workers select and reserve their next piece through one scheduling path.
+Reservations are released after completion, verification failure or disconnect.
+The scheduler reads peer bitfield snapshots protected by the session mutex.
+Block acceptance, completion checks and disk commit run under one piece-manager
+lock; production download paths do not retain pointers into mutable assembly
+state. Announce `left` counts missing verified pieces independently of traffic
+statistics.
+
+TCP receive waits check a session cancellation callback. Shutdown is requested
+before joining workers; the final verified bitfield is saved after all writers
+finish. Endgame currently preserves ordinary reservations; redundant endgame
+requests and CANCEL support remain separate roadmap work.
 
 ## Peer protocol implementation
 

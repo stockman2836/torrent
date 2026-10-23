@@ -363,6 +363,19 @@ bool PeerConnection::receiveData(void* buffer, size_t length) {
     uint8_t* ptr = static_cast<uint8_t*>(buffer);
 
     while (total_received < length) {
+        if (cancelled_) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            int ready = 0;
+            while (ready == 0) {
+                if (cancelled_() || std::chrono::steady_clock::now() >= deadline) return false;
+                fd_set readable;
+                FD_ZERO(&readable);
+                FD_SET(socket_fd_, &readable);
+                timeval timeout{0, 100000};
+                ready = select(socket_fd_ + 1, &readable, nullptr, nullptr, &timeout);
+                if (ready < 0) return false;
+            }
+        }
         int received = recv(socket_fd_, (char*)(ptr + total_received), length - total_received, 0);
 
         if (received == SOCKET_ERROR) {

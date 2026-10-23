@@ -133,6 +133,8 @@ public:
     bool connect();
     void disconnect();
     bool isConnected() const { return connected_; }
+    // Assigned before starting the owning worker; checked while waiting for TCP data.
+    void setCancellationCallback(std::function<bool()> cancelled) { cancelled_ = std::move(cancelled); }
 
     // uTP support
     void setUtpSocket(std::shared_ptr<utp::UtpSocket> utp_socket);
@@ -263,6 +265,7 @@ private:
     bool setSocketTimeout(int timeout_ms);
 
     std::string ip_;
+    std::function<bool()> cancelled_;
     uint16_t port_;
     std::vector<uint8_t> info_hash_;
     std::string peer_id_;

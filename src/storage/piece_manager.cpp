@@ -83,7 +83,10 @@ std::vector<Block> PieceManager::getBlocksForPiece(uint32_t piece_index) {
 
 bool PieceManager::addBlock(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data) {
     std::lock_guard<std::mutex> lock(mutex_);
+    return addBlockLocked(piece_index, offset, data);
+}
 
+bool PieceManager::addBlockLocked(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data) {
     if (piece_index >= num_pieces_) {
         std::cerr << "Invalid piece index: " << piece_index << "\n";
         return false;
@@ -93,6 +96,12 @@ bool PieceManager::addBlock(uint32_t piece_index, uint32_t offset, const std::ve
     if (bitfield_[piece_index]) {
         std::cout << "Piece " << piece_index << " already completed, ignoring block\n";
         return true;
+    }
+
+    const size_t size = std::min(piece_length_, total_length_ - piece_index * piece_length_);
+    if (offset >= size || offset % BLOCK_SIZE != 0 ||
+        data.size() != std::min(BLOCK_SIZE, size - offset)) {
+        return false;
     }
 
     // Get or create PieceInProgress
@@ -202,7 +211,10 @@ PieceInProgress* PieceManager::getPieceInProgress(uint32_t piece_index) {
 
 bool PieceManager::completePiece(uint32_t piece_index, FileManager* file_manager) {
     std::lock_guard<std::mutex> lock(mutex_);
+    return completePieceLocked(piece_index, file_manager);
+}
 
+bool PieceManager::completePieceLocked(uint32_t piece_index, FileManager* file_manager) {
     // Check if piece is in progress
     auto it = pieces_in_progress_.find(piece_index);
     if (it == pieces_in_progress_.end()) {
@@ -260,6 +272,29 @@ bool PieceManager::completePiece(uint32_t piece_index, FileManager* file_manager
 size_t PieceManager::numPiecesInProgress() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return pieces_in_progress_.size();
+}
+
+size_t PieceManager::numPiecesDownloaded() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return pieces_downloaded_;
+}
+
+PieceManager::BlockResult PieceManager::receiveBlock(uint32_t index, uint32_t offset,
+    const std::vector<uint8_t>& data, FileManager* files) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (index >= num_pieces_ || bitfield_[index]) return BlockResult::Rejected;
+    const auto existing = pieces_in_progress_.find(index);
+    if (existing != pieces_in_progress_.end() && offset % BLOCK_SIZE == 0 &&
+        offset / BLOCK_SIZE < existing->second->total_blocks &&
+        existing->second->blocks_received[offset / BLOCK_SIZE]) return BlockResult::Rejected;
+    if (!addBlockLocked(index, offset, data)) return BlockResult::Rejected;
+    if (!pieces_in_progress_.at(index)->isComplete()) return BlockResult::Stored;
+    return completePieceLocked(index, files) ? BlockResult::Complete : BlockResult::Failed;
+}
+
+void PieceManager::discardPiece(uint32_t index) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pieces_in_progress_.erase(index);
 }
 
 // Piece selection strategies

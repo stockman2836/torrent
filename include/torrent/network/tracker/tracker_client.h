@@ -29,9 +29,9 @@ using PeerInfo = Peer;
 
 class TrackerResponse {
 public:
-    int32_t interval;
-    int32_t complete;    // seeders
-    int32_t incomplete;  // leechers
+    int32_t interval = 1800;
+    int32_t complete = 0;    // seeders
+    int32_t incomplete = 0;  // leechers
     std::vector<Peer> peers;
     std::string failure_reason;
 

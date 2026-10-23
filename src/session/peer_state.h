@@ -22,6 +22,9 @@ struct ActivePeerInfo {
     uint32_t current_piece = UINT32_MAX;  // UINT32_MAX means not downloading
     bool is_choking = true;
     bool is_interested = false;
+    // Accessed under the session's peers_mutex_.
+    std::vector<bool> available_pieces;
+    bool finished = false;
 
     // Statistics
     int pieces_completed = 0;

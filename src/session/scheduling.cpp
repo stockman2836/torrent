@@ -20,9 +20,6 @@ void DownloadManager::coordinatorLoop() {
             continue;
         }
 
-        // Assign pieces to available peers
-        assignPiecesToPeers();
-
         // Cleanup stale peers
         cleanupStalePeers();
 
@@ -39,37 +36,31 @@ void DownloadManager::coordinatorLoop() {
     std::cout << "Coordinator loop ended\n";
 }
 
-void DownloadManager::assignPiecesToPeers() {
+void DownloadManager::requestNextPiece(ActivePeerInfo& peer) {
+    if (!peer.connection->canDownload() || peer.connection->hasPendingRequests()) return;
     std::lock_guard<std::mutex> lock(peers_mutex_);
-
-    for (auto& peer_info : active_peers_) {
-        if (!peer_info->connection || !peer_info->connection->canDownload()) {
-            continue;
-        }
-
-        // Skip if peer is already downloading something
-        if (peer_info->current_piece != UINT32_MAX) {
-            continue;
-        }
-
-        // Select next piece for this peer
-        int32_t next_piece = selectNextPiece(peer_info.get());
-        if (next_piece < 0) {
-            continue;
-        }
-
-        // Assign piece to peer
-        peer_info->current_piece = next_piece;
-
-        // Mark piece as being downloaded
-        {
-            std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
-            pieces_in_download_.insert(next_piece);
-        }
-
-        std::cout << "Assigned piece #" << next_piece << " to peer "
-                  << peer_info->peer_data.ip << "\n";
+    if (!running_ || peer.current_piece != UINT32_MAX) return;
+    const auto index = selectNextPiece(&peer);
+    if (index < 0) return;
+    peer.current_piece = index;
+    {
+        std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+        pieces_in_download_.insert(index);
     }
+    if (!peer.connection->requestPiece(index, piece_manager_->getBlocksForPiece(index))) {
+        std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+        pieces_in_download_.erase(index);
+        peer.current_piece = UINT32_MAX;
+    }
+}
+
+void DownloadManager::releasePeerPiece(ActivePeerInfo& peer) {
+    std::lock_guard<std::mutex> lock(peers_mutex_);
+    if (peer.current_piece == UINT32_MAX) return;
+    std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
+    pieces_in_download_.erase(peer.current_piece);
+    piece_manager_->discardPiece(peer.current_piece);
+    peer.current_piece = UINT32_MAX;
 }
 
 int32_t DownloadManager::selectNextPiece(ActivePeerInfo* peer) {
@@ -77,17 +68,8 @@ int32_t DownloadManager::selectNextPiece(ActivePeerInfo* peer) {
         return -1;
     }
 
-    // In endgame mode, request any missing piece
-    if (endgame_mode_) {
-        for (uint32_t i = 0; i < torrent_.numPieces(); ++i) {
-            if (!piece_manager_->hasPiece(i) && peer->connection->peerHasPiece(i)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    std::vector<bool> peer_has_pieces = peer->connection->peerBitfield();
+    // Preserve reservations until redundant endgame requests support CANCEL.
+    const auto& peer_has_pieces = peer->available_pieces;
     std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
 
     // Sequential mode - user preference
@@ -104,10 +86,10 @@ int32_t DownloadManager::selectNextPiece(ActivePeerInfo* peer) {
     // Collect all peer bitfields for rarity calculation
     std::vector<std::vector<bool>> all_peer_bitfields;
     {
-        // assignPiecesToPeers already holds peers_mutex_.
+        // requestNextPiece already holds peers_mutex_.
         for (const auto& peer_info : active_peers_) {
-            if (peer_info->connection && peer_info->connection->isConnected()) {
-                all_peer_bitfields.push_back(peer_info->connection->peerBitfield());
+            if (!peer_info->finished) {
+                all_peer_bitfields.push_back(peer_info->available_pieces);
             }
         }
     }
@@ -126,7 +108,7 @@ void DownloadManager::cleanupStalePeers() {
     std::lock_guard<std::mutex> lock(peers_mutex_);
 
     for (auto it = active_peers_.begin(); it != active_peers_.end(); ) {
-        if (!(*it)->connection || !(*it)->connection->isConnected() || (*it)->isStale(60)) {
+        if ((*it)->finished) {
             std::cout << "Removing stale/disconnected peer " << (*it)->peer_data.ip << "\n";
 
             // Remove piece assignment

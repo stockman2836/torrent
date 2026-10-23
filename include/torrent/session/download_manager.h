@@ -73,7 +73,10 @@ private:
     void verifyExistingPieces();
 
     // Multi-peer coordination
-    void assignPiecesToPeers();
+    void requestNextPiece(ActivePeerInfo& peer);
+    void releasePeerPiece(ActivePeerInfo& peer);
+    void receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data);
+    int64_t bytesRemaining() const;
     void cleanupStalePeers();
     int32_t selectNextPiece(ActivePeerInfo* peer);
     bool isEndgameMode() const;

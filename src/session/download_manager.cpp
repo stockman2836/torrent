@@ -150,18 +150,7 @@ void DownloadManager::start() {
 
         // Set callback for piece downloads
         webseed_manager_->setCallback([this](const WebSeedDownload& download) {
-            if (download.success) {
-                // Add downloaded block to piece manager
-                piece_manager_->addBlock(download.piece_index, download.offset, download.data);
-
-                // Check if piece is complete
-                if (piece_manager_->isPieceInProgress(download.piece_index)) {
-                    auto* piece = piece_manager_->getPieceInProgress(download.piece_index);
-                    if (piece && piece->isComplete()) {
-                        piece_manager_->completePiece(download.piece_index, file_manager_.get());
-                    }
-                }
-            }
+            if (download.success) receiveBlock(download.piece_index, download.offset, download.data);
         });
     }
 
@@ -201,14 +190,15 @@ void DownloadManager::start() {
 }
 
 void DownloadManager::stop() {
-    if (!running_) {
+    if (!running_.exchange(false)) {
         return;
     }
 
     std::cout << "Stopping client...\n";
+    stop_cv_.notify_all();
 
     // Notify tracker we're stopping
-    int64_t left = torrent_.totalLength() - total_downloaded_;
+    int64_t left = bytesRemaining();
     tracker_client_->announce(
         total_uploaded_,
         total_downloaded_,
@@ -217,13 +207,6 @@ void DownloadManager::stop() {
         "stopped"
     );
 
-    // Save final resume state before shutdown
-    std::cout << "Saving resume state...\n";
-    saveResumeState();
-
-    running_ = false;
-
-    stop_cv_.notify_all();
 
     // Stop DHT
     if (enable_dht_ && dht_manager_) {
@@ -261,6 +244,8 @@ void DownloadManager::stop() {
         if (thread.joinable()) thread.join();
     }
     peer_threads_.clear();
+    // All writers have finished; persist the final verified bitfield.
+    saveResumeState();
 
     // Disconnect all peers
     {

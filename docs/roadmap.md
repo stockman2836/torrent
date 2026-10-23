@@ -7,6 +7,25 @@
 
 This document tracks the development roadmap for the BitTorrent client.
 
+### Current checkpoint — 2026-10-23
+
+- [x] Structural refactor with explicit module dependencies.
+- [x] Offline basic TCP download integration check.
+- [x] Multi-peer download without duplicate block requests.
+- [x] Resume a partial session without downloading verified pieces again.
+- [x] Detect and redownload corrupted saved pieces.
+- [x] Recover from a peer disconnecting during a piece.
+- [x] Verify writes across multi-file piece boundaries.
+- [x] Cancel idle TCP receive waits during shutdown.
+
+Verification: five unit suites and six offline integration scenarios pass.
+The historical completed-feature checklist below describes implementation scope,
+not comprehensive interoperability coverage for every extension.
+
+Next: offline magnet metadata exchange and transition into piece downloading,
+then redundant endgame requests with CANCEL. Public swarm checks and
+UPnP/NAT-PMP remain later milestones.
+
 ### Completed Features 
 
 - [x] Bencode parser

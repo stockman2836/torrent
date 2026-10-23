@@ -460,6 +460,56 @@ TEST(PieceAssemblyRegression, RejectsCorruptPiece) {
     EXPECT_DOUBLE_EQ(manager.percentComplete(), 0.0);
 }
 
+TEST(PieceReceiveRegression, RejectsMalformedBlocksWithoutCreatingAssembly) {
+    std::vector<uint8_t> data(BLOCK_SIZE + 5, 0x42);
+    PieceManager manager(1, data.size(), data.size(), utils::sha1(data));
+    using Result = PieceManager::BlockResult;
+    EXPECT_EQ(manager.receiveBlock(0, 1, {1, 2, 3}, nullptr), Result::Rejected);
+    EXPECT_EQ(manager.receiveBlock(0, 0, {}, nullptr), Result::Rejected);
+    EXPECT_EQ(manager.receiveBlock(0, 0, {1, 2, 3}, nullptr), Result::Rejected);
+    EXPECT_EQ(manager.receiveBlock(0, BLOCK_SIZE, std::vector<uint8_t>(6), nullptr), Result::Rejected);
+    EXPECT_EQ(manager.numPiecesInProgress(), 0);
+}
+
+TEST(PieceReceiveRegression, CompletesConcurrentBlocksExactlyOnce) {
+    std::vector<uint8_t> data(BLOCK_SIZE * 2, 0x42);
+    PieceManager manager(1, data.size(), data.size(), utils::sha1(data));
+    using Result = PieceManager::BlockResult;
+    std::vector<Result> results(2);
+    std::thread first([&] {
+        results[0] = manager.receiveBlock(0, 0, std::vector<uint8_t>(BLOCK_SIZE, 0x42), nullptr);
+    });
+    std::thread second([&] {
+        results[1] = manager.receiveBlock(0, BLOCK_SIZE, std::vector<uint8_t>(BLOCK_SIZE, 0x42), nullptr);
+    });
+    first.join();
+    second.join();
+    EXPECT_EQ(std::count(results.begin(), results.end(), Result::Complete), 1);
+    EXPECT_EQ(std::count(results.begin(), results.end(), Result::Stored), 1);
+    EXPECT_EQ(manager.numPiecesDownloaded(), 1);
+    EXPECT_EQ(manager.receiveBlock(0, 0, std::vector<uint8_t>(BLOCK_SIZE, 0x42), nullptr), Result::Rejected);
+}
+
+TEST(PieceReceiveRegression, DiscardsPartialAssemblyForReassignment) {
+    std::vector<uint8_t> data(BLOCK_SIZE * 2, 0x42);
+    PieceManager manager(1, data.size(), data.size(), utils::sha1(data));
+    using Result = PieceManager::BlockResult;
+    const std::vector<uint8_t> block(BLOCK_SIZE, 0x42);
+    EXPECT_EQ(manager.receiveBlock(0, 0, block, nullptr), Result::Stored);
+    EXPECT_EQ(manager.receiveBlock(0, 0, block, nullptr), Result::Rejected);
+    manager.discardPiece(0);
+    EXPECT_EQ(manager.receiveBlock(0, BLOCK_SIZE, block, nullptr), Result::Stored);
+    EXPECT_EQ(manager.receiveBlock(0, 0, block, nullptr), Result::Complete);
+}
+
+TEST(PieceReceiveRegression, ReportsHashFailureWithoutMarkingComplete) {
+    const std::vector<uint8_t> expected = {1, 2, 3, 4};
+    PieceManager manager(1, expected.size(), expected.size(), utils::sha1(expected));
+    EXPECT_EQ(manager.receiveBlock(0, 0, {1, 2, 3, 5}, nullptr), PieceManager::BlockResult::Failed);
+    EXPECT_FALSE(manager.hasPiece(0));
+    EXPECT_EQ(manager.numPiecesInProgress(), 0);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

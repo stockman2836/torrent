@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 
 namespace torrent {
 
@@ -36,6 +37,7 @@ struct PieceInProgress {
 
 class PieceManager {
 public:
+    enum class BlockResult { Rejected, Stored, Complete, Failed };
     PieceManager(size_t num_pieces,
                  size_t piece_length,
                  size_t total_length,
@@ -62,6 +64,9 @@ public:
     // Block management
     std::vector<Block> getBlocksForPiece(uint32_t piece_index);
     bool addBlock(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data);
+    BlockResult receiveBlock(uint32_t piece_index, uint32_t offset,
+                             const std::vector<uint8_t>& data, FileManager* file_manager);
+    void discardPiece(uint32_t piece_index);
 
     // Piece assembly
     bool isPieceInProgress(uint32_t piece_index) const;
@@ -72,7 +77,7 @@ public:
     bool verifyPiece(uint32_t piece_index, const std::vector<uint8_t>& data) const;
 
     // Progress
-    size_t numPiecesDownloaded() const { return pieces_downloaded_; }
+    size_t numPiecesDownloaded() const;
     double percentComplete() const;
     std::vector<bool> getBitfield() const;
     size_t numPiecesInProgress() const;
@@ -103,6 +108,8 @@ private:
 private:
     // Helper methods
     std::vector<int> calculatePieceRarity(const std::vector<std::vector<bool>>& all_peer_bitfields) const;
+    bool addBlockLocked(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data);
+    bool completePieceLocked(uint32_t piece_index, FileManager* file_manager);
 };
 
 } // namespace torrent

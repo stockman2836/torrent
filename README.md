@@ -104,9 +104,15 @@ ctest --test-dir build -R test_download --output-on-failure
 ```
 
 Five unit-test executables cover metadata parsing, piece management, file I/O
-and CLI parsing. The optional sixth test starts a local HTTP tracker and TCP
-seed, downloads 50,003 bytes through the real CLI, and compares the saved file
-byte for byte. It does not contact public trackers. Logs and artifacts stay in
-`build/tests/download-test-*`.
+and CLI parsing. With Node.js installed, six integration scenarios run against
+local trackers and TCP seeds: basic download, multiple peers, partial download
+followed by restart, corrupted saved data, peer disconnect and multi-file piece
+boundaries. The multi-peer check rejects duplicate block requests. Each result
+is compared byte for byte with its original payload; no public tracker is used.
+
+Integration artifacts stay under `build/tests/download-test-*` and
+`build/tests/transfer-*`. The partial-download helper exercises the public
+session stop API, then resume checks restart the ordinary CLI. The tests also
+check shutdown with idle peers and the resumed announce's remaining byte count.
 
 See [test documentation](tests/README.md) for details and limitations.

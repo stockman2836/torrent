@@ -45,6 +45,7 @@ endif()
 add_library(torrent_session STATIC
     session/download_manager.cpp
     session/peers.cpp
+    session/transfer.cpp
     session/scheduling.cpp
     session/tracker.cpp
     session/resume.cpp

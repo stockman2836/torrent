@@ -23,7 +23,7 @@ void DownloadManager::trackerLoop() {
 }
 
 void DownloadManager::updateTracker() {
-    int64_t left = torrent_.totalLength() - total_downloaded_;
+    int64_t left = bytesRemaining();
 
     // Determine event type
     std::string event = "";
@@ -65,7 +65,10 @@ void DownloadManager::updateTracker() {
                   << response.complete << " seeders, "
                   << response.incomplete << " leechers\n";
 
-        available_peers_ = response.peers;
+        {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            available_peers_ = response.peers;
+        }
         connectToPeers();
 
     } catch (const std::exception& e) {
