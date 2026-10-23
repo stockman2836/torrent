@@ -31,5 +31,6 @@ downloads/*
 .DS_Store
 Thumbs.db
 
-# Development planning
-ROADMAP.md
+# Runtime state
+*.log
+.resume_*.dat

@@ -1,9 +1,9 @@
 // Example: Piece Reception & Assembly
 // This demonstrates Task 2.4 implementation
 
-#include "piece_manager.h"
-#include "file_manager.h"
-#include "torrent_file.h"
+#include "torrent/storage/piece_manager.h"
+#include "torrent/storage/file_manager.h"
+#include "torrent/metainfo/torrent_file.h"
 #include <iostream>
 
 using namespace torrent;

@@ -1,8 +1,8 @@
 // Example: How to use the bitfield management functionality
 // This file demonstrates the usage of Task 2.2 implementation
 
-#include "peer_connection.h"
-#include "piece_manager.h"
+#include "torrent/network/peer/peer_connection.h"
+#include "torrent/storage/piece_manager.h"
 #include <iostream>
 #include <vector>
 

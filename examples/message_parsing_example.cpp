@@ -1,7 +1,7 @@
 // Example: How to use the new message parsing functionality
 // This file demonstrates the usage of Task 2.1 implementation
 
-#include "peer_connection.h"
+#include "torrent/network/peer/peer_connection.h"
 #include <iostream>
 
 using namespace torrent;

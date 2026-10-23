@@ -1,201 +1,112 @@
 # BitTorrent Client
 
-A full-featured BitTorrent client in C++17 with support for core BitTorrent protocol features.
+A C++17 command-line BitTorrent client. Supports torrent metadata, HTTP/UDP
+trackers, TCP peer transfers, piece verification, multi-file storage and resume
+state. Additional modules implement DHT, magnet metadata exchange, PEX, MSE,
+Fast Extension, IPv6, local discovery, web seeds and optional uTP.
 
-## Features
+The automated integration test covers the ordinary `.torrent` TCP download
+path. The additional protocols still require broader interoperability testing.
 
-- .torrent file parsing (Bencode format)
-- **Magnet link support (partial)** - Parse and display magnet URIs
-- HTTP and UDP tracker communication
-- BitTorrent peer protocol
-- **Extension Protocol (BEP 10)** - Support for protocol extensions
-- **Metadata Exchange (BEP 9)** - ut_metadata for magnet links
-- **DHT (Distributed Hash Table) support** - Trackerless operation
-- Piece-based download management
-- Multithreaded architecture
-- Support for single-file and multi-file torrents
-- SHA1 verification of downloaded data
-- Resume capability
-- Logging system
-- JSON configuration
-- CLI interface
+## Project structure
 
-## Architecture
+```text
+app/                     CLI parsing, input resolution and application lifecycle
+include/torrent/         Public headers organized by module
+  core/                  Configuration, logging, crypto and shared helpers
+  metainfo/              Bencode, torrent metadata, magnet URIs and block types
+  storage/               Piece assembly, file I/O and resume state
+  network/               Peer protocol, trackers, DHT, discovery and transports
+  session/               Download coordination and metadata acquisition
+src/                     Implementations mirroring the public module layout
+cmake/                   Dependency discovery
+config/examples/         Full and minimal example configurations
+examples/                Standalone API examples (optional build)
+tools/                   Manual network diagnostics (optional build)
+tests/unit/              Google Test suites
+tests/integration/       Offline tracker/peer download test
+docs/architecture.md     Module boundaries and development rules
+docs/protocols/          Protocol-specific notes
+docs/roadmap.md          Future work
+```
 
-The project is divided into several core components:
-
-### Main Modules:
-
-1. **Bencode Parser** (`bencode.h/cpp`)
-
-   - Parsing Bencode format (used in .torrent files)
-   - Support for integers, strings, lists, dictionaries
-   - Encoding/Decoding
-
-2. **Torrent File** (`torrent_file.h/cpp`)
-
-   - .torrent file parsing
-   - Metadata extraction (announce URL, file sizes, info hash)
-   - Support for single-file and multi-file modes
-
-3. **Tracker Client** (`tracker_client.h/cpp`, `udp_tracker.h/cpp`)
-
-   - HTTP and UDP tracker support
-   - Peer list retrieval
-   - Tracker response parsing (compact/dictionary format)
-
-4. **Peer Connection** (`peer_connection.h/cpp`)
-
-   - BitTorrent peer protocol implementation
-   - Peer handshake
-   - Message exchange (choke, interested, request, piece, etc.)
-
-5. **Piece Manager** (`piece_manager.h/cpp`)
-
-   - File piece download management
-   - Piece verification via SHA1
-   - Bitfield tracking of downloaded pieces
-   - Download strategies
-
-6. **File Manager** (`file_manager.h/cpp`)
-
-   - File system operations
-   - Reading/writing pieces to files
-   - Multi-file torrent support
-
-7. **Download Manager** (`download_manager.h/cpp`)
-
-   - Overall download process coordination
-   - Thread management
-   - Statistics (speed, progress)
-
-8. **Utils** (`utils.h/cpp`)
-   - SHA1 hashing (OpenSSL)
-   - URL encoding
-   - Hex conversion
-   - Peer ID generation
-   - Output formatting
-
-9. **DHT Manager** (`dht_manager.h/cpp`, `dht_node.h/cpp`, `dht_krpc.h/cpp`, `dht_routing_table.h/cpp`)
-
-   - Kademlia-based DHT implementation (BEP 5)
-   - KRPC protocol (ping, find_node, get_peers, announce_peer)
-   - K-bucket routing table
-   - Bootstrap from well-known nodes
-   - Peer discovery without trackers
-   - Token-based announce_peer validation
-
-10. **Logger** (`logger.h/cpp`)
-    - Multi-level logging (trace, debug, info, warn, error)
-    - File and console output
-    - Log rotation
-
-11. **Config** (`config.h/cpp`)
-    - JSON-based configuration
-    - CLI argument override
-    - Configurable DHT, speed limits, ports, etc.
-
-12. **Magnet Link Support** (`magnet_uri.h/cpp`, `extension_protocol.h/cpp`, `metadata_exchange.h/cpp`, `magnet_download_manager.h/cpp`)
-    - Magnet URI parser (hex and base32 info hash)
-    - Extension Protocol (BEP 10) - Extended handshake
-    - Metadata Exchange (BEP 9) - ut_metadata extension
-    - Magnet Download Manager - Coordinate metadata download
-    - Partial implementation (parsing and structure ready)
+The application and tests use the same libraries. Storage and networking are
+independent modules; the session coordinates them. See
+[architecture](docs/architecture.md) for the dependency diagram and ownership
+rules.
 
 ## Requirements
 
-- C++17 or higher
-- CMake 3.15+
-- OpenSSL (for SHA1)
-- libcurl (HTTP tracker and web seed requests)
-- Compiler: GCC, Clang, or MSVC
+- CMake 3.15+ and a C++17 compiler (MSVC, GCC or Clang).
+- OpenSSL, libcurl and platform thread/socket libraries.
+- spdlog, nlohmann/json and Google Test: installed CMake packages are preferred;
+  missing packages are fetched at the pinned versions during configuration.
+- Node.js is optional and enables the offline end-to-end test.
+- libutp is optional and required only with `ENABLE_UTP=ON`.
 
-### Windows:
+On Windows, dependencies can be installed through vcpkg:
 
-- Visual Studio 2019+ or MinGW
-- OpenSSL (can be installed via vcpkg)
-
-### Linux/macOS:
-
-- GCC 7+ or Clang 5+
-- OpenSSL (usually pre-installed)
-
-## Building
-
-### Windows (Visual Studio):
-
-```bash
-# Install OpenSSL via vcpkg (optional)
-vcpkg install openssl
-vcpkg install curl
-
-# Build
-mkdir build
-cd build
-cmake .. -DCMAKE_TOOLCHAIN_FILE=[path to vcpkg]/scripts/buildsystems/vcpkg.cmake
-cmake --build . --config Release
+```powershell
+vcpkg install openssl curl spdlog nlohmann-json gtest
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
 ```
 
-### Windows (MinGW):
+On Linux/macOS, install OpenSSL and libcurl development packages before building:
 
-```bash
-mkdir build
-cd build
-cmake .. -G "MinGW Makefiles"
-cmake --build .
-```
-
-### Linux/macOS:
-
-```bash
-# Install dependencies (Ubuntu/Debian)
-sudo apt-get install build-essential cmake libssl-dev
-
-# Build
-mkdir build
-cd build
-cmake ..
-make -j$(nproc)
-```
-
-## Usage
-
-```bash
-# Basic usage with .torrent file
-./torrent_client example.torrent
-
-# With magnet link (partial support - shows info)
-./torrent_client "magnet:?xt=urn:btih:..."
-
-# With configuration file
-./torrent_client example.torrent --config config.json
-```
-
-### Options:
-
-- `<torrent_file|magnet_uri>` - Path to .torrent file or magnet link (required)
-- `--config <file>` - Configuration file path
-- `--download-dir <path>` - Download directory
-- `--max-download <KB/s>` - Max download speed
-- `--max-upload <KB/s>` - Max upload speed
-- `--port <port>` - Listen port
-- `--log-level <level>` - Logging level
-
-## Verification
-
-The CLI and tests link the same `torrent_lib` target, including the protocol
-extensions. Run the checks after building:
-
-```bash
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-When Node.js is available at configuration time, CMake also registers
-`test_download`: an offline end-to-end test with a local HTTP tracker and TCP
-seed. It downloads a binary file across multiple pieces and blocks and compares
-the saved contents byte for byte. Logs and downloaded files remain in the test
-build directory under `download-test-*`. No public tracker is contacted.
+Use `CMAKE_PREFIX_PATH` for dependencies installed in a custom prefix. On Windows
+with MinGW/Ninja, prefer an ASCII checkout path when the toolchain has trouble
+with non-ASCII dependency paths.
 
-This test covers the `.torrent` TCP download path. Public swarm interoperability,
-magnet metadata exchange, encryption and optional libutp require separate checks.
-uTP remains disabled by default (`ENABLE_UTP=OFF`).
+## Build options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `BUILD_TESTS` | `ON` | Unit tests and optional Node.js integration test |
+| `BUILD_EXAMPLES` | `OFF` | Standalone API examples |
+| `BUILD_TOOLS` | `OFF` | Manual HTTP, socket and handshake diagnostics |
+| `ENABLE_UTP` | `OFF` | Link libutp and enable its transport implementation |
+
+An explicit `ENABLE_UTP=ON` requires libutp to be found; configuration fails with
+an explanation if it is missing. Compile definitions and library settings apply
+only to their owning targets.
+
+## Usage
+
+The executable is built under `build/app/` (or `build/app/Release/` with Visual
+Studio). The default configuration path remains `./config.json`, relative to the
+working directory. CLI values override configuration values.
+
+```sh
+./build/app/torrent_client example.torrent
+./build/app/torrent_client "magnet:?xt=urn:btih:..."
+./build/app/torrent_client example.torrent --config config/examples/minimal.json
+./build/app/torrent_client example.torrent --download-dir ./downloads --max-download 500
+./build/app/torrent_client --help
+```
+
+Options: `--config`, `--download-dir`, `--max-download` and `--max-upload` (KB/s,
+zero means unlimited), `--port`, `--log-level` and `--help`. Invalid numeric
+values produce an error before the download starts.
+
+## Verification
+
+```sh
+ctest --test-dir build --output-on-failure
+ctest --test-dir build -R test_download --output-on-failure
+```
+
+Five unit-test executables cover metadata parsing, piece management, file I/O
+and CLI parsing. The optional sixth test starts a local HTTP tracker and TCP
+seed, downloads 50,003 bytes through the real CLI, and compares the saved file
+byte for byte. It does not contact public trackers. Logs and artifacts stay in
+`build/tests/download-test-*`.
+
+See [test documentation](tests/README.md) for details and limitations.

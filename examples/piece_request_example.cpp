@@ -1,8 +1,8 @@
 // Example: Piece Request Logic
 // This demonstrates Task 2.3 implementation
 
-#include "peer_connection.h"
-#include "piece_manager.h"
+#include "torrent/network/peer/peer_connection.h"
+#include "torrent/storage/piece_manager.h"
 #include <iostream>
 
 using namespace torrent;
