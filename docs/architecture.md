@@ -89,8 +89,19 @@ statistics.
 
 TCP receive waits check a session cancellation callback. Shutdown is requested
 before joining workers; the final verified bitfield is saved after all writers
-finish. Endgame currently preserves ordinary reservations; redundant endgame
-requests and CANCEL support remain separate roadmap work.
+finish.
+
+Endgame tracks outstanding blocks in each peer's session state under the
+session mutex. An idle peer first tries ordinary piece selection; only then can
+it rescue an old outstanding block near completion. At most two peers hold
+copies of a block. Accepted blocks remove their outstanding copies and queue
+`CANCEL` commands for the corresponding workers. Workers poll idle TCP sockets,
+flush cancellation/HAVE queues and mutate their own connection's request state.
+Message sends are serialized so wire frames cannot interleave.
+
+Responses without a matching outstanding session request are ignored before
+assembly and statistics. Disconnect cleanup keeps partial data while another
+peer still owns work for that piece. See the [endgame policy](protocols/ENDGAME.md).
 
 ## Peer protocol implementation
 

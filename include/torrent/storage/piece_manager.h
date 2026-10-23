@@ -62,7 +62,8 @@ public:
     bool isSequentialMode() const { return sequential_mode_; }
 
     // Block management
-    std::vector<Block> getBlocksForPiece(uint32_t piece_index);
+    std::vector<Block> getBlocksForPiece(uint32_t piece_index) const;
+    std::vector<Block> getMissingBlocks(uint32_t piece_index) const;
     bool addBlock(uint32_t piece_index, uint32_t offset, const std::vector<uint8_t>& data);
     BlockResult receiveBlock(uint32_t piece_index, uint32_t offset,
                              const std::vector<uint8_t>& data, FileManager* file_manager);

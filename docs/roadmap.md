@@ -20,13 +20,15 @@ This document tracks the development roadmap for the BitTorrent client.
 - [x] Tracker-based magnet metadata exchange followed by piece downloading.
 - [x] Verify metadata hash and fall back after rejects, bad hashes and idle peers.
 - [x] Fall back from an unavailable magnet tracker.
+- [x] Bounded redundant endgame block requests with CANCEL.
+- [x] Ignore late cancelled blocks and retain shared data after disconnects.
 
-Verification: seven unit suites and twelve offline integration scenarios pass.
+Verification: seven unit suites and sixteen offline integration scenarios pass.
 The historical completed-feature checklist below describes implementation scope,
 not comprehensive interoperability coverage for every extension.
 
-Next: redundant endgame requests with CANCEL. DHT-only magnet coverage, public
-swarm checks and UPnP/NAT-PMP remain later milestones.
+Next: selective file downloading through the CLI. DHT-only magnet coverage,
+public swarm checks and UPnP/NAT-PMP remain later milestones.
 
 ### Completed Features 
 
@@ -82,19 +84,21 @@ Automatic port forwarding for better connectivity.
 ### 2.2 Improved Endgame Mode
 
 **Priority: Medium**
-**Status: TODO**
+**Status: DONE (offline verification)**
 
 Better piece selection during endgame.
 
-- [ ] Implement redundant requests for last pieces
-- [ ] Add cancel messages when piece received
-- [ ] Optimize endgame strategy
-- [ ] Add tests
+- [x] Implement redundant requests for last missing blocks
+- [x] Send matching CANCELs when a block arrives
+- [x] Bound requests to two peers per block and wait before duplicating
+- [x] Test late responses, disconnects, exact cancellation fields and copy limits
 
 **Files to modify:**
 
 - `src/storage/piece_manager.cpp`
-- `src/session/download_manager.cpp`
+- `src/session/scheduling.cpp`
+- `src/session/transfer.cpp`
+- `src/session/peers.cpp`
 
 ---
 

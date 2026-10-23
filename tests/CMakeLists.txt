@@ -49,6 +49,12 @@ if(NODE_EXECUTABLE)
             "$<TARGET_FILE:torrent_client>")
         set_tests_properties(test_magnet_${scenario} PROPERTIES TIMEOUT 30)
     endforeach()
+    foreach(scenario cancel late cap disconnect)
+        add_test(NAME test_endgame_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_endgame.cjs" ${scenario}
+            "$<TARGET_FILE:torrent_client>")
+        set_tests_properties(test_endgame_${scenario} PROPERTIES TIMEOUT 15)
+    endforeach()
 endif()
 
 # Optional: Add coverage flags if needed

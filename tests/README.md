@@ -38,6 +38,10 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_magnet_tracker` | Fall back from an unavailable tracker | CLI executable |
 | `test_magnet_invalid` | Invalid metadata never starts a file download | CLI executable |
 | `test_magnet_stall` | Fall back from an idle metadata peer after its deadline | CLI executable |
+| `test_endgame_cancel` | Rescue a stalled block and send a matching CANCEL | CLI executable |
+| `test_endgame_late` | Ignore a late cancelled response without corrupting assembly | CLI executable |
+| `test_endgame_cap` | Limit concurrent block copies with three connected seeds | CLI executable |
+| `test_endgame_disconnect` | Retain valid partial data when a shared owner disconnects | CLI executable |
 
 Each unit suite has a 30-second timeout. The integration test has a 55-second
 CTest timeout and kills the child client after 45 seconds if it does not exit.
@@ -46,6 +50,9 @@ process timeout. Its seeds leave idle sockets open to check receive cancellation
 during shutdown.
 Magnet scenarios use a 20-second child-process timeout and a 30-second CTest
 timeout. Each TCP metadata peer attempt has a 10-second deadline.
+Endgame checks have an 8-second child-process timeout and a 15-second CTest
+timeout. Their slow seed never supplies its held blocks normally, so completing
+the file requires an endgame request to another seed.
 
 The integration test downloads two pieces split into multiple 16-KiB blocks,
 checks the info hash in the handshake, validates block requests and compares
@@ -69,6 +76,14 @@ An independent decoder checks the actual wire frames. Corrupt metadata remains
 valid Bencode but has a wrong info hash, checking verification separately from
 decoding. Logs remain in `build/tests/magnet-*`. Run these cases with
 `ctest --test-dir build -R test_magnet --output-on-failure`.
+
+Endgame fixtures check exact `CANCEL` index/offset/length fields and compare the
+finished 229,499-byte payload. The late-response case sends corrupt data after
+`CANCEL` while another block remains pending; it must neither enter the piece
+assembly nor inflate downloaded statistics. The disconnect case verifies that
+an already received block is retained while another peer owns the missing one.
+Logs remain under `build/tests/endgame-*`. Run these cases with
+`ctest --test-dir build -R test_endgame --output-on-failure`.
 
 Run individual suites with `ctest --test-dir build -R test_command_line -V` or
 `ctest --test-dir build -R test_download --output-on-failure`.

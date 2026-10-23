@@ -74,6 +74,8 @@ private:
 
     // Multi-peer coordination
     void requestNextPiece(ActivePeerInfo& peer);
+    void requestEndgameBlock(ActivePeerInfo& peer); // Caller holds peers_mutex_.
+    void flushPeerCommands(ActivePeerInfo& peer);
     void releasePeerPiece(ActivePeerInfo& peer);
     void receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data);
     int64_t bytesRemaining() const;

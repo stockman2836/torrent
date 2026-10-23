@@ -105,7 +105,7 @@ ctest --test-dir build -R test_download --output-on-failure
 
 Seven unit-test executables cover metadata parsing, piece management, file I/O,
 CLI parsing, extension dispatch and metadata exchange. With Node.js installed,
-twelve integration scenarios run against
+sixteen integration scenarios run against
 local trackers and TCP seeds: basic download, multiple peers, partial download
 followed by restart, corrupted saved data, peer disconnect and multi-file piece
 boundaries. The multi-peer check rejects duplicate block requests. Each result
@@ -121,5 +121,11 @@ metadata hash verification, rejection or timeout of one peer, tracker fallback,
 and transition into ordinary file downloading. Unverified metadata cannot create
 download files. The fixtures use tracker-discovered loopback peers; they do not
 establish public-swarm or DHT-only interoperability.
+
+Endgame automatically lets idle peers rescue the last delayed blocks. Copies
+are limited to two peers per block; other requests are cancelled after a block
+arrives. Offline checks cover wire `CANCEL` messages, late cancelled responses,
+copy limits and preserving shared partial data after a disconnect. See
+[endgame policy](docs/protocols/ENDGAME.md) for thresholds and ownership rules.
 
 See [test documentation](tests/README.md) for details and limitations.

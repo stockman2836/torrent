@@ -510,6 +510,33 @@ TEST(PieceReceiveRegression, ReportsHashFailureWithoutMarkingComplete) {
     EXPECT_EQ(manager.numPiecesInProgress(), 0);
 }
 
+TEST(PieceReceiveRegression, MissingBlocksSnapshotExcludesReceivedAndVerifiedData) {
+    std::vector<uint8_t> data(BLOCK_SIZE + 5, 0x42);
+    PieceManager manager(1, data.size(), data.size(), utils::sha1(data));
+    auto missing = manager.getMissingBlocks(0);
+    ASSERT_EQ(missing.size(), 2);
+    EXPECT_EQ(missing[1].length, 5);
+    EXPECT_EQ(manager.receiveBlock(0, 0, std::vector<uint8_t>(BLOCK_SIZE, 0x42), nullptr),
+              PieceManager::BlockResult::Stored);
+    missing = manager.getMissingBlocks(0);
+    ASSERT_EQ(missing.size(), 1);
+    EXPECT_EQ(missing[0].offset, BLOCK_SIZE);
+    EXPECT_EQ(missing[0].length, 5);
+    EXPECT_EQ(manager.receiveBlock(0, BLOCK_SIZE, std::vector<uint8_t>(5, 0x42), nullptr),
+              PieceManager::BlockResult::Complete);
+    EXPECT_TRUE(manager.getMissingBlocks(0).empty());
+    EXPECT_TRUE(manager.getMissingBlocks(999).empty());
+}
+
+TEST(PieceReceiveRegression, DiscardMakesEveryBlockAvailableAgain) {
+    std::vector<uint8_t> data(BLOCK_SIZE * 2, 0x42);
+    PieceManager manager(1, data.size(), data.size(), utils::sha1(data));
+    manager.receiveBlock(0, 0, std::vector<uint8_t>(BLOCK_SIZE, 0x42), nullptr);
+    ASSERT_EQ(manager.getMissingBlocks(0).size(), 1);
+    manager.discardPiece(0);
+    EXPECT_EQ(manager.getMissingBlocks(0).size(), 2);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

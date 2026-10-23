@@ -2,6 +2,8 @@
 
 #include "torrent/network/peer/peer_connection.h"
 #include "torrent/network/tracker/tracker_client.h"
+#include "torrent/metainfo/block.h"
+#include <map>
 #include <chrono>
 #include <memory>
 
@@ -9,6 +11,11 @@ namespace torrent {
 
 // Peer performance tracking
 struct ActivePeerInfo {
+    using BlockKey = std::pair<uint32_t, uint32_t>;
+    struct PendingBlock {
+        Block block;
+        std::chrono::steady_clock::time_point requested_at;
+    };
     std::unique_ptr<PeerConnection> connection;
     Peer peer_data;
 
@@ -25,6 +32,9 @@ struct ActivePeerInfo {
     // Accessed under the session's peers_mutex_.
     std::vector<bool> available_pieces;
     bool finished = false;
+    std::map<BlockKey, PendingBlock> pending_blocks;
+    std::vector<Block> pending_cancels;
+    std::vector<uint32_t> pending_haves;
 
     // Statistics
     int pieces_completed = 0;

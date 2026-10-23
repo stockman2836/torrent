@@ -27,6 +27,8 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
     auto last_activity = std::chrono::steady_clock::now();
 
     while (running_ && !paused_ && conn_ptr->isConnected()) {
+        flushPeerCommands(*peer_info);
+        requestNextPiece(*peer_info);
         // Send keep-alive periodically (every 2 minutes)
         auto now = std::chrono::steady_clock::now();
         auto since_keepalive = std::chrono::duration_cast<std::chrono::seconds>(now - last_keepalive).count();
@@ -43,6 +45,37 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
             break;
         }
 
+        // Handle timed out requests
+        auto timed_out = conn_ptr->getTimedOutRequests(30);
+        if (!timed_out.empty()) {
+            std::cout << "Detected " << timed_out.size() << " timed out requests from " << peer.ip << "\n";
+
+            // Retry timed out requests
+            for (const auto& req : timed_out) {
+                {
+                    std::lock_guard<std::mutex> lock(peers_mutex_);
+                    if (!peer_info->pending_blocks.count({req.piece_index, req.offset})) continue;
+                }
+                std::cout << "Retrying timed out request: piece=" << req.piece_index
+                          << " offset=" << req.offset << " length=" << req.length << "\n";
+
+                // Retry the request
+                if (conn_ptr->requestBlock(req.piece_index, req.offset, req.length)) {
+                    std::lock_guard<std::mutex> lock(peers_mutex_);
+                    const auto request = peer_info->pending_blocks.find({req.piece_index, req.offset});
+                    if (request != peer_info->pending_blocks.end()) request->second.requested_at = now;
+                    std::cout << "Successfully re-requested block\n";
+                } else {
+                    std::cerr << "Failed to re-request block (peer may be choking us)\n";
+                    releasePeerPiece(*peer_info);
+                    conn_ptr->clearPendingRequests();
+                    break;
+                }
+            }
+        }
+
+        // Poll while idle so this worker can issue endgame requests and CANCELs.
+        if (!conn_ptr->waitForData(100)) continue;
         // Receive and process messages
         auto message = conn_ptr->receiveMessage();
         if (!message) {
@@ -75,29 +108,19 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
             }
         }
 
-        // Handle timed out requests
-        auto timed_out = conn_ptr->getTimedOutRequests(30);
-        if (!timed_out.empty()) {
-            std::cout << "Detected " << timed_out.size() << " timed out requests from " << peer.ip << "\n";
-
-            // Retry timed out requests
-            for (const auto& req : timed_out) {
-                std::cout << "Retrying timed out request: piece=" << req.piece_index
-                          << " offset=" << req.offset << " length=" << req.length << "\n";
-
-                // Retry the request
-                if (conn_ptr->requestBlock(req.piece_index, req.offset, req.length)) {
-                    std::cout << "Successfully re-requested block\n";
-                } else {
-                    std::cerr << "Failed to re-request block (peer may be choking us)\n";
-                    // Note: If retry fails, coordinatorLoop will eventually reassign to another peer
-                }
-            }
-        }
-
         if (message->type == MessageType::PIECE) {
             PieceMessage block;
             if (conn_ptr->parsePiece(*message, block)) {
+                bool requested = false, valid_size = false;
+                {
+                    std::lock_guard<std::mutex> lock(peers_mutex_);
+                    const auto request = peer_info->pending_blocks.find({block.piece_index, block.offset});
+                    requested = request != peer_info->pending_blocks.end();
+                    valid_size = requested && request->second.block.length == block.data.size();
+                }
+                // Late responses to cancelled requests must not alter assembly or statistics.
+                if (!requested) continue;
+                if (!valid_size) break;
                 download_limiter_.waitAndConsume(block.data.size());
                 receiveBlock(block.piece_index, block.offset, block.data);
             }
@@ -196,13 +219,12 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
             }
         }
 
-        // Process a received block before deciding whether to request another piece.
-        requestNextPiece(*peer_info);
-
         // Small sleep to prevent busy loop
         waitForStop(std::chrono::milliseconds(10));
     }
 
+    // Deliver final CANCELs even if completion has already stopped the session.
+    flushPeerCommands(*peer_info);
     // Graceful cleanup on peer disconnection
     std::cout << "Peer loop ending for " << peer.ip << ":" << peer.port;
     if (!conn_ptr->isConnected()) {
@@ -306,20 +328,9 @@ void DownloadManager::connectToPeers() {
 
 void DownloadManager::broadcastHave(uint32_t piece_index) {
     std::lock_guard<std::mutex> lock(peers_mutex_);
-
-    std::cout << "Broadcasting HAVE message for piece " << piece_index
-              << " to " << active_peers_.size() << " peers\n";
-
-    size_t sent = 0;
     for (auto& peer_info : active_peers_) {
-        if (peer_info->connection && peer_info->connection->isConnected()) {
-            if (peer_info->connection->sendHave(piece_index)) {
-                sent++;
-            }
-        }
+        if (!peer_info->finished) peer_info->pending_haves.push_back(piece_index);
     }
-
-    std::cout << "HAVE message sent to " << sent << " peers\n";
 }
 
 } // namespace torrent

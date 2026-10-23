@@ -9,20 +9,43 @@ void DownloadManager::receiveBlock(uint32_t index, uint32_t offset, const std::v
     if (result == PieceManager::BlockResult::Rejected) return;
     total_downloaded_ += data.size();
     download_tracker_.addBytes(data.size());
-    if (result == PieceManager::BlockResult::Stored) return;
-
     {
         std::lock_guard<std::mutex> peers_lock(peers_mutex_);
         std::lock_guard<std::mutex> pieces_lock(pieces_mutex_);
-        pieces_in_download_.erase(index);
+        const bool terminal = result != PieceManager::BlockResult::Stored;
+        if (terminal) pieces_in_download_.erase(index);
         for (auto& peer : active_peers_) {
-            if (peer->current_piece == index) {
+            for (auto request = peer->pending_blocks.begin(); request != peer->pending_blocks.end();) {
+                if (request->first.first == index && (terminal || request->first.second == offset)) {
+                    peer->pending_cancels.push_back(request->second.block);
+                    request = peer->pending_blocks.erase(request);
+                } else ++request;
+            }
+            if (terminal && peer->current_piece == index) {
                 peer->current_piece = UINT32_MAX;
                 if (result == PieceManager::BlockResult::Failed) peer->failed_requests++;
             }
         }
     }
     if (result == PieceManager::BlockResult::Complete) broadcastHave(index);
+}
+
+void DownloadManager::flushPeerCommands(ActivePeerInfo& peer) {
+    std::vector<Block> cancels;
+    std::vector<uint32_t> haves;
+    {
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        cancels.swap(peer.pending_cancels);
+        haves.swap(peer.pending_haves);
+    }
+    if (!peer.connection->isConnected()) return;
+    for (const auto& block : cancels) {
+        if (peer.connection->isPendingRequest(block.piece_index, block.offset)) {
+            peer.connection->sendCancel(block.piece_index, block.offset, block.length);
+            peer.connection->removeRequest(block.piece_index, block.offset);
+        }
+    }
+    for (const auto index : haves) peer.connection->sendHave(index);
 }
 
 int64_t DownloadManager::bytesRemaining() const {

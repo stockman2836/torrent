@@ -34,6 +34,7 @@
 namespace torrent {
 
 bool PeerConnection::sendMessage(const PeerMessage& message) {
+    std::lock_guard<std::mutex> lock(send_mutex_);
     std::vector<uint8_t> data = serializeMessage(message);
     return sendData(data.data(), data.size());
 }

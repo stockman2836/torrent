@@ -407,7 +407,7 @@ bool PeerConnection::receiveData(void* buffer, size_t length) {
     return true;
 }
 
-bool PeerConnection::receiveDataWithTimeout(void* buffer, size_t length, int timeout_ms) {
+bool PeerConnection::waitForData(int timeout_ms) {
     if (!connected_ || socket_fd_ == INVALID_SOCKET) {
         return false;
     }
@@ -423,11 +423,12 @@ bool PeerConnection::receiveDataWithTimeout(void* buffer, size_t length, int tim
 
     int result = select(socket_fd_ + 1, &read_fds, nullptr, nullptr, &timeout);
 
-    if (result <= 0) {
-        return false; // Timeout or error
-    }
+    if (result < 0) disconnect();
+    return result > 0;
+}
 
-    return receiveData(buffer, length);
+bool PeerConnection::receiveDataWithTimeout(void* buffer, size_t length, int timeout_ms) {
+    return waitForData(timeout_ms) && receiveData(buffer, length);
 }
 
 } // namespace torrent

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <map>
 #include <set>
+#include <mutex>
 #include "torrent/network/transport/utp_socket.h"
 
 namespace torrent {
@@ -133,6 +134,7 @@ public:
     bool connect();
     void disconnect();
     bool isConnected() const { return connected_; }
+    bool waitForData(int timeout_ms);
     // Assigned before starting the owning worker; checked while waiting for TCP data.
     void setCancellationCallback(std::function<bool()> cancelled) { cancelled_ = std::move(cancelled); }
 
@@ -266,6 +268,7 @@ private:
     bool setSocketTimeout(int timeout_ms);
 
     std::string ip_;
+    std::mutex send_mutex_;
     std::function<bool()> cancelled_;
     uint16_t port_;
     std::vector<uint8_t> info_hash_;

@@ -54,7 +54,7 @@ int32_t PieceManager::getNextPiece(const std::vector<bool>& peer_has_pieces) {
     return -1;  // No piece to download
 }
 
-std::vector<Block> PieceManager::getBlocksForPiece(uint32_t piece_index) {
+std::vector<Block> PieceManager::getBlocksForPiece(uint32_t piece_index) const {
     std::vector<Block> blocks;
 
     if (piece_index >= num_pieces_) {
@@ -78,6 +78,19 @@ std::vector<Block> PieceManager::getBlocksForPiece(uint32_t piece_index) {
         offset += block_size;
     }
 
+    return blocks;
+}
+
+std::vector<Block> PieceManager::getMissingBlocks(uint32_t index) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (index >= num_pieces_ || bitfield_[index]) return {};
+    auto blocks = getBlocksForPiece(index);
+    const auto piece = pieces_in_progress_.find(index);
+    if (piece != pieces_in_progress_.end()) {
+        blocks.erase(std::remove_if(blocks.begin(), blocks.end(), [&](const Block& block) {
+            return piece->second->blocks_received[block.offset / BLOCK_SIZE];
+        }), blocks.end());
+    }
     return blocks;
 }
 
