@@ -44,6 +44,18 @@ their DHT sockets can coexist. A job that reaches `Seeding` keeps its session an
 file ownership but releases its download slot. This distinction remains in place
 while the seed stops, so network cleanup does not occupy a download slot again.
 
+Each running session owns a `PeerListener` on its advertised TCP port. The socket
+is bound before the first announce, and a separate worker accepts connections.
+Incoming handshakes run on bounded peer workers with a five-second total deadline;
+one slow handshake does not block accepting others. The expected info hash comes
+from the session owning that port. Both directions use `PeerConnection` and the
+same session peer loop, rate limiter, request validation and verified piece state.
+Upload buffers are hashed again before sending, so external file corruption is
+not shared. Incoming handshake workers count toward the active peer cap; finished
+workers are joined and removed during cleanup. Network handshakes do not hold the
+session's peer mutex. Stop cancels handshakes and transfers, joins the accept worker,
+closes the listener and drains existing incoming connections with a bounded wait.
+
 Each task exposes an immutable file list plus a synchronized status snapshot.
 One background worker exclusively
 owns input resolution and the download session. Start, stop and close never join

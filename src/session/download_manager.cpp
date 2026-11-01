@@ -4,6 +4,7 @@
 #include "torrent/core/logger.h"
 #include "torrent/core/utils.h"
 #include "torrent/network/discovery/pex_manager.h"
+#include "torrent/network/peer/peer_listener.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -27,6 +28,7 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     , enable_lsd_(config.enable_lsd)
     , enable_webseeds_(config.enable_webseeds)
     , enable_utp_(config.enable_utp)
+    , listen_ipv6_(config.enable_ipv6 && config.ip_version != "ipv4")
     , total_downloaded_(0)
     , total_uploaded_(0)
     , download_limiter_(config.max_download_speed)
@@ -36,6 +38,8 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     , max_peers_(config.max_peers) {
 
     torrent_.printInfo();
+    if (config.max_peers < 1 || config.max_peers > 10000) throw std::invalid_argument("Invalid peer limit");
+    peer_threads_.reserve(max_peers_);
 
     // Initialize managers
     piece_manager_ = std::make_unique<PieceManager>(
@@ -116,6 +120,12 @@ void DownloadManager::start() {
     // A completed subset has nothing to fetch. A complete nonempty torrent may
     // still start its existing seeding lifecycle when used through the session API.
     if (progress() >= 100.0 && (bytesRemaining() > 0 || torrent_.totalLength() == 0)) return;
+
+    try {
+        listener_ = std::make_unique<PeerListener>(listen_port_, listen_ipv6_);
+        listen_port_ = listener_->port();
+    } catch (...) { running_ = false; throw; }
+    listener_thread_ = std::thread(&DownloadManager::incomingLoop, this);
 
     std::cout << "Contacting tracker...\n";
     updateTracker();
@@ -203,6 +213,8 @@ void DownloadManager::stop() {
 
     std::cout << "Stopping client...\n";
     stop_cv_.notify_all();
+    if (listener_thread_.joinable()) listener_thread_.join();
+    listener_.reset();
 
     // Notify tracker we're stopping
     int64_t left = bytesRemaining();
@@ -247,8 +259,8 @@ void DownloadManager::stop() {
     }
 
     worker_threads_.clear();
-    for (auto& thread : peer_threads_) {
-        if (thread.joinable()) thread.join();
+    for (auto& worker : peer_threads_) {
+        if (worker.thread.joinable()) worker.thread.join();
     }
     peer_threads_.clear();
     // All writers have finished; persist the final verified bitfield.

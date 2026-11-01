@@ -32,6 +32,7 @@ struct ActivePeerInfo {
     // Accessed under the session's peers_mutex_.
     std::vector<bool> available_pieces;
     bool finished = false;
+    bool handshaking = false;
     std::map<BlockKey, PendingBlock> pending_blocks;
     std::vector<Block> pending_cancels;
     std::vector<uint32_t> pending_haves;

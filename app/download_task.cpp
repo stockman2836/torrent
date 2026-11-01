@@ -81,6 +81,7 @@ bool DownloadTask::start(Config config) {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshot_.uploaded_bytes = snapshot_.seed_seconds = 0;
         snapshot_.seed_ratio = 0;
+        snapshot_.listen_port = 0;
     }
     worker_ = std::thread([this, config] {
         try {
@@ -108,6 +109,7 @@ bool DownloadTask::start(Config config) {
                     snapshot_.download_speed = can_seed ? 0 : manager.downloadSpeed();
                     snapshot_.upload_speed = manager.uploadSpeed();
                     snapshot_.uploaded_bytes = manager.uploadedBytes();
+                    snapshot_.listen_port = manager.listenPort();
                     snapshot_.can_seed = can_seed;
                     snapshot_.seed_seconds = elapsed.count();
                     snapshot_.seed_ratio = input_->torrent.totalLength() > 0

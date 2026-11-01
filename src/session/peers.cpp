@@ -135,7 +135,10 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                           << " length=" << req_msg.length << "\n";
 
                 // Check if we're choking this peer
-                if (conn_ptr->amChoking()) {
+                if (req_msg.piece_index >= torrent_.numPieces() || req_msg.length == 0 || req_msg.length > 16384) {
+                    if (conn_ptr->peerSupportsFastExtension()) conn_ptr->sendRejectRequest(req_msg.piece_index, req_msg.offset, req_msg.length);
+                }
+                else if (conn_ptr->amChoking()) {
                     std::cout << "Ignoring REQUEST: we are choking this peer\n";
                 }
                 // Check if we have the requested piece
@@ -154,10 +157,15 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                         std::cerr << "Failed to read piece " << req_msg.piece_index << " from disk\n";
                     }
                     // Validate offset and length
-                    else if (req_msg.offset + req_msg.length > piece_data.size()) {
+                    else if (req_msg.offset >= piece_data.size() || req_msg.length > piece_data.size() - req_msg.offset) {
                         std::cerr << "Invalid REQUEST: offset=" << req_msg.offset
                                   << " length=" << req_msg.length
                                   << " exceeds piece size " << piece_data.size() << "\n";
+                    }
+                    else if (!std::equal(torrent_.pieces().begin() + req_msg.piece_index * 20,
+                                         torrent_.pieces().begin() + req_msg.piece_index * 20 + 20,
+                                         utils::sha1(piece_data).begin())) {
+                        LOG_WARN("Refusing to upload corrupted piece {}", req_msg.piece_index);
                     }
                     else {
                         // Extract the requested block
@@ -248,21 +256,18 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
 }
 
 void DownloadManager::connectToPeers() {
-    std::lock_guard<std::mutex> lock(peers_mutex_);
+    std::unique_lock<std::mutex> connecting(connect_mutex_, std::try_to_lock);
+    if (!connecting.owns_lock()) return;
+    cleanupStalePeers();
     if (!running_) return;
-
-    std::cout << "Connecting to peers (have " << available_peers_.size()
-              << ", active " << active_peers_.size() << "/" << max_peers_ << ")...\n";
-
-    // Connect to more peers if below max
-    size_t to_connect = std::min(
-        available_peers_.size(),
-        max_peers_ - active_peers_.size()
-    );
-
-    for (size_t i = 0; i < to_connect && !available_peers_.empty(); ++i) {
-        Peer peer = available_peers_.back();
-        available_peers_.pop_back();
+    for (size_t i = 0; i < max_peers_ && running_; ++i) {
+        Peer peer("", 0);
+        {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            if (active_peers_.size() >= max_peers_ || available_peers_.empty()) break;
+            peer = available_peers_.back();
+            available_peers_.pop_back();
+        }
 
         std::cout << "Connecting to: " << peer.ip << ":" << peer.port << "\n";
 
@@ -315,11 +320,13 @@ void DownloadManager::connectToPeers() {
         }
 
         // Add to active peers
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        if (!running_ || active_peers_.size() >= max_peers_) continue;
         auto peer_info = std::make_shared<ActivePeerInfo>(std::move(connection), peer);
         active_peers_.push_back(peer_info);
 
         // Start peer thread
-        peer_threads_.emplace_back(&DownloadManager::peerLoop, this, peer_info);
+        peer_threads_.push_back({peer_info, std::thread(&DownloadManager::peerLoop, this, peer_info)});
 
         std::cout << "Connected to " << peer.ip << " (total active: " << active_peers_.size() << ")\n";
     }

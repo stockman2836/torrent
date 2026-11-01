@@ -34,6 +34,7 @@
 namespace torrent {
 
 void PeerConnection::initializePeerBitfield(size_t num_pieces) {
+    known_piece_count_ = num_pieces;
     peer_bitfield_.clear();
     peer_bitfield_.resize(num_pieces, false);
     std::cout << "Initialized peer bitfield with " << num_pieces << " pieces\n";

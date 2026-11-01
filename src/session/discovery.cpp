@@ -147,7 +147,7 @@ void DownloadManager::updatePEX() {
 
     // Process each active peer
     for (auto& peer_info : active_peers_) {
-        if (!peer_info->connection || !peer_info->connection->isPexEnabled()) {
+        if (peer_info->handshaking || !peer_info->connection || !peer_info->connection->isPexEnabled()) {
             continue;
         }
 

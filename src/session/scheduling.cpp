@@ -130,6 +130,12 @@ bool DownloadManager::isEndgameMode() const {
 
 void DownloadManager::cleanupStalePeers() {
     std::lock_guard<std::mutex> lock(peers_mutex_);
+    for (auto worker = peer_threads_.begin(); worker != peer_threads_.end();) {
+        if (worker->peer->finished) {
+            if (worker->thread.joinable()) worker->thread.join();
+            worker = peer_threads_.erase(worker);
+        } else ++worker;
+    }
     active_peers_.erase(std::remove_if(active_peers_.begin(), active_peers_.end(),
         [](const auto& peer) { return peer->finished; }), active_peers_.end());
 }

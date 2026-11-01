@@ -22,6 +22,7 @@
 namespace torrent {
 
 struct ActivePeerInfo;
+class PeerListener;
 
 class DownloadManager {
 public:
@@ -43,6 +44,7 @@ public:
     int64_t downloadSpeed() const;
     int64_t uploadSpeed() const;
     int64_t uploadedBytes() const { return total_uploaded_.load(); }
+    uint16_t listenPort() const { return listen_port_; }
     bool canSeed() const;
     void beginSeeding();
 
@@ -55,6 +57,7 @@ private:
     void downloadLoop();
     void trackerLoop();
     void peerLoop(std::shared_ptr<ActivePeerInfo> peer_info);
+    void incomingLoop();
     void coordinatorLoop();
     void resumeLoop();  // Periodic state saving
     void dhtLoop();     // DHT operations
@@ -99,10 +102,13 @@ private:
     std::unique_ptr<LSD> lsd_manager_;
     std::unique_ptr<WebSeedManager> webseed_manager_;
     std::unique_ptr<utp::UtpManager> utp_manager_;
+    std::unique_ptr<PeerListener> listener_;
+    std::thread listener_thread_;
 
     std::vector<Peer> available_peers_;
     std::vector<std::shared_ptr<ActivePeerInfo>> active_peers_;
     mutable std::mutex peers_mutex_;
+    std::mutex connect_mutex_;
 
     // Piece tracking
     std::set<uint32_t> pieces_in_download_;  // Pieces currently being downloaded
@@ -117,9 +123,14 @@ private:
     bool enable_lsd_;
     bool enable_webseeds_;
     bool enable_utp_;
+    bool listen_ipv6_;
 
     std::vector<std::thread> worker_threads_;
-    std::vector<std::thread> peer_threads_;
+    struct PeerWorker {
+        std::shared_ptr<ActivePeerInfo> peer;
+        std::thread thread;
+    };
+    std::vector<PeerWorker> peer_threads_;
 
     // Configuration
     const size_t min_peers_ = 5;

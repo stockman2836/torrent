@@ -36,7 +36,7 @@ namespace torrent {
 bool PeerConnection::sendMessage(const PeerMessage& message) {
     std::lock_guard<std::mutex> lock(send_mutex_);
     std::vector<uint8_t> data = serializeMessage(message);
-    return sendData(data.data(), data.size());
+    return sendData(data.data(), data.size(), message.type == MessageType::CANCEL);
 }
 
 std::vector<uint8_t> PeerConnection::serializeMessage(const PeerMessage& message) {
@@ -142,10 +142,9 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
                 // Update peer bitfield - mark the piece as available
                 if (have_msg.piece_index < peer_bitfield_.size()) {
                     peer_bitfield_[have_msg.piece_index] = true;
-                } else {
-                    // Expand bitfield if needed
-                    peer_bitfield_.resize(have_msg.piece_index + 1, false);
-                    peer_bitfield_[have_msg.piece_index] = true;
+                } else if (known_piece_count_ > 0) {
+                    disconnect();
+                    return nullptr;
                 }
             }
             break;
@@ -168,6 +167,9 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
                     std::cout << " - SEEDER";
                 }
                 std::cout << "\n";
+            } else if (known_piece_count_ > 0) {
+                disconnect();
+                return nullptr;
             }
             break;
         }
@@ -283,6 +285,11 @@ bool PeerConnection::parseBitfield(const PeerMessage& message, BitfieldMessage& 
     }
 
     // Convert byte array to vector<bool>
+    if (known_piece_count_ > 0) {
+        if (message.payload.size() != (known_piece_count_ + 7) / 8) return false;
+        const auto padding = (8 - known_piece_count_ % 8) % 8;
+        if (padding && (message.payload.back() & ((1u << padding) - 1))) return false;
+    }
     result.bitfield.clear();
     result.bitfield.reserve(message.payload.size() * 8);
 
@@ -293,6 +300,7 @@ bool PeerConnection::parseBitfield(const PeerMessage& message, BitfieldMessage& 
         }
     }
 
+    if (known_piece_count_ > 0) result.bitfield.resize(known_piece_count_);
     // Note: The bitfield may have extra bits due to byte padding
     // The caller should trim it to the actual number of pieces if needed
     std::cout << "Parsed BITFIELD message: " << result.bitfield.size() << " bits (may need trimming)\n";

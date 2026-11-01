@@ -122,9 +122,15 @@ starts; the settings are saved with each torrent.
 Seeding requires a fully verified, nonempty torrent. A selected subset completes
 and stops when the rest is unavailable. A seeding job frees its download slot so
 the queue can start the next torrent; tasks writing to its files still wait.
-Sharing currently uses connections initiated by the client to peers; accepting
-incoming TCP connections is a separate network feature. These controls apply to
-desktop jobs; the CLI keeps its download-and-exit behavior.
+Each active session accepts incoming TCP peers on its announced port as well as
+initiating outgoing connections. The port is shown with the selected torrent.
+Different torrents use separate ports, and incoming handshakes must match the
+torrent's info hash. Connections work over IPv4 and, when enabled, IPv6. Unknown
+torrents and self connections are rejected; only verified pieces are uploaded.
+The listener closes on stop or removal. Incoming handshakes use a five-second
+deadline and count toward the peer limit. The application does not configure
+router port forwarding or firewall rules. These controls apply to desktop jobs;
+the CLI keeps its download-and-exit behavior.
 
 Preferences and the desktop log live in `%LOCALAPPDATA%/TorrentClient`; the default
 download folder is `%USERPROFILE%/Downloads/TorrentClient`. Resume data stays with

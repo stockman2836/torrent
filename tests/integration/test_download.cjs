@@ -6,6 +6,7 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { availablePort } = require('./fixture_helpers.cjs');
 
 function encode(value) {
   if (Buffer.isBuffer(value)) return Buffer.concat([Buffer.from(`${value.length}:`), value]);
@@ -93,7 +94,7 @@ async function main() {
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({
       enable_dht: false, enable_pex: false, enable_lsd: false,
       enable_webseeds: false, enable_utp: false, enable_encryption: false,
-      download_dir: './files', log_file: './client.log', listen_port: 16881 }));
+      download_dir: './files', log_file: './client.log', listen_port: await availablePort() }));
     const args = desktopUI
       ? ['--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
       : ['test.torrent', '--config', 'config.json'];

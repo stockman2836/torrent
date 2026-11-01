@@ -423,7 +423,8 @@ private:
             size_t count = 0; int64_t size = 0;
             for (size_t i = 0; i < displayed_->size(); ++i) if (ListView_GetCheckState(files_, i)) { ++count; size += (*displayed_)[i].length; }
             SetWindowTextW(summary_, (wide(state.name) + L"  ·  Выбрано " + std::to_wstring(count) + L" из " +
-                std::to_wstring(displayed_->size()) + L"  ·  " + bytes(size)).c_str());
+                std::to_wstring(displayed_->size()) + L"  ·  " + bytes(size) +
+                (busy && state.listen_port ? L"  ·  Порт " + std::to_wstring(state.listen_port) : L"")).c_str());
         } else SetWindowTextW(summary_, L"Файлы появятся после чтения метаданных");
         if (state.state == DownloadState::Failed && previous_ != state.state && !smoke)
             MessageBoxW(handle, wide(state.error).c_str(), L"Ошибка загрузки", MB_OK | MB_ICONERROR);

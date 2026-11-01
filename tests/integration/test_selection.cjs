@@ -5,6 +5,7 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { availablePort } = require('./fixture_helpers.cjs');
 
 function encode(value) {
   if (Buffer.isBuffer(value)) return Buffer.concat([Buffer.from(`${value.length}:`), value]);
@@ -86,7 +87,7 @@ async function main() {
     fs.writeFileSync(path.join(work, 'test.torrent'), encode({ announce: `http://127.0.0.1:${tracker.address().port}/announce`, info }));
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: false, enable_pex: false,
       enable_lsd: false, enable_webseeds: false, enable_utp: false, enable_encryption: false,
-      seed_after_download: scenario === 'seed', download_dir: './files', log_file: './client.log', listen_port: 16881 }));
+      seed_after_download: scenario === 'seed', download_dir: './files', log_file: './client.log', listen_port: await availablePort() }));
     const sentinel = Buffer.from('keep this existing unselected file');
     if (scenario === 'preserve') {
       fs.mkdirSync(path.join(work, 'files/payload'), { recursive: true });

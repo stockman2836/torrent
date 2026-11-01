@@ -10,6 +10,7 @@
 #include <chrono>
 #include <thread>
 #include <sstream>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -188,6 +189,25 @@ bool PeerConnection::connect() {
 void PeerConnection::disconnect() {
     if (transport_type_ == TransportType::TCP && socket_fd_ != INVALID_SOCKET) {
         LOG_DEBUG("Disconnecting from peer {}:{} (TCP)", ip_, port_);
+        if (incoming_) {
+            // Complete a bounded graceful shutdown so an exclusive listener can restart.
+            shutdown(socket_fd_, 1); // SD_SEND / SHUT_WR.
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+            bool drained = false;
+            while (std::chrono::steady_clock::now() < deadline) {
+                fd_set readable; FD_ZERO(&readable); FD_SET(socket_fd_, &readable);
+                timeval delay{0, 20000};
+                if (select(static_cast<int>(socket_fd_ + 1), &readable, nullptr, nullptr, &delay) <= 0) continue;
+                char discard[4096];
+                const auto received = recv(socket_fd_, discard, sizeof(discard), 0);
+                if (received == 0) { drained = true; break; }
+                if (received < 0) break;
+            }
+            if (!drained) {
+                linger abortive{1, 0};
+                setsockopt(socket_fd_, SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&abortive), sizeof(abortive));
+            }
+        }
         closesocket(socket_fd_);
         socket_fd_ = INVALID_SOCKET;
     } else if (transport_type_ == TransportType::UTP && utp_socket_) {
@@ -275,7 +295,7 @@ bool PeerConnection::setSocketTimeout(int timeout_ms) {
     return true;
 }
 
-bool PeerConnection::sendData(const void* data, size_t length) {
+bool PeerConnection::sendData(const void* data, size_t length, bool cleanup) {
     if (!connected_) {
         std::cerr << "Cannot send: not connected\n";
         return false;
@@ -303,9 +323,11 @@ bool PeerConnection::sendData(const void* data, size_t length) {
     }
 
     size_t total_sent = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     const uint8_t* ptr = static_cast<const uint8_t*>(data);
 
     while (total_sent < length) {
+        if ((!cleanup && cancelled_ && cancelled_()) || std::chrono::steady_clock::now() >= deadline) return false;
         int sent = send(socket_fd_, (const char*)(ptr + total_sent), length - total_sent, 0);
 
         if (sent == SOCKET_ERROR) {
@@ -315,6 +337,7 @@ bool PeerConnection::sendData(const void* data, size_t length) {
 #else
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
 #endif
+                if (cancelled_ && cancelled_()) return false;
                 // Retry
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
@@ -361,12 +384,12 @@ bool PeerConnection::receiveData(void* buffer, size_t length) {
     size_t total_received = 0;
     uint8_t* ptr = static_cast<uint8_t*>(buffer);
 
+    const auto deadline = std::min(read_deadline_, std::chrono::steady_clock::now() + std::chrono::seconds(30));
     while (total_received < length) {
-        if (cancelled_) {
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        if (cancelled_ || read_deadline_ != std::chrono::steady_clock::time_point::max()) {
             int ready = 0;
             while (ready == 0) {
-                if (cancelled_() || std::chrono::steady_clock::now() >= deadline) return false;
+                if ((cancelled_ && cancelled_()) || std::chrono::steady_clock::now() >= deadline) return false;
                 fd_set readable;
                 FD_ZERO(&readable);
                 FD_SET(socket_fd_, &readable);

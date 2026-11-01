@@ -24,6 +24,7 @@ struct DownloadSnapshot {
     int64_t seed_seconds = 0;
     double seed_ratio = 0;
     bool can_seed = false;
+    uint16_t listen_port = 0;
 };
 
 // Commands are issued by one UI thread. The engine belongs exclusively to the worker.

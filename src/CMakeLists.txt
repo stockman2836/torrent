@@ -23,6 +23,7 @@ add_library(torrent_network STATIC
     network/dht/dht_routing_table.cpp
     network/dht/dht_manager.cpp
     network/peer/connection.cpp
+    network/peer/listener.cpp
     network/peer/handshake.cpp
     network/peer/messages.cpp
     network/peer/send.cpp
@@ -46,6 +47,7 @@ endif()
 add_library(torrent_session STATIC
     session/download_manager.cpp
     session/peers.cpp
+    session/incoming.cpp
     session/transfer.cpp
     session/scheduling.cpp
     session/tracker.cpp

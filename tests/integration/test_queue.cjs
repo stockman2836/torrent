@@ -6,6 +6,7 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { availablePort } = require('./fixture_helpers.cjs');
 
 function encode(value) {
   if (Buffer.isBuffer(value)) return Buffer.concat([Buffer.from(`${value.length}:`), value]);
@@ -142,7 +143,7 @@ async function main() {
       announce: `http://127.0.0.1:${tracker.address().port}/announce`, info: torrent.info }));
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: false, enable_lsd: false,
       enable_pex: false, enable_utp: false, enable_webseeds: false, enable_encryption: false,
-      sequential_download: true, download_dir: './files', listen_port: 16881 }));
+      sequential_download: true, download_dir: './files', listen_port: await availablePort(2) }));
     const args = mode === 'ui'
       ? ['--ui-queue-test', path.join(work, '0.torrent'), path.join(work, '1.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
       : ['0.torrent', '1.torrent', 'config.json', mode];

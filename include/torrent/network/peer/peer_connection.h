@@ -20,6 +20,7 @@ class ExtensionProtocol;
 class MSEHandshake;
 class EncryptedStream;
 class PexManager;
+class PeerListener;
 
 // Transport type for peer connections
 enum class TransportType {
@@ -135,6 +136,8 @@ public:
     void disconnect();
     bool isConnected() const { return connected_; }
     bool waitForData(int timeout_ms);
+    const std::string& remoteAddress() const { return ip_; }
+    uint16_t remotePort() const { return port_; }
     // Assigned before starting the owning worker; checked while waiting for TCP data.
     void setCancellationCallback(std::function<bool()> cancelled) { cancelled_ = std::move(cancelled); }
 
@@ -146,6 +149,7 @@ public:
     // Handshake
     bool performHandshake();
     bool performHandshake(const std::vector<bool>& our_bitfield);
+    bool acceptHandshake(const std::vector<bool>& our_bitfield);
 
     // Message sending
     bool sendKeepAlive();
@@ -255,13 +259,16 @@ public:
     void generateAllowedFastSet(size_t num_pieces, size_t k = 10);
 
 private:
+    friend class PeerListener;
+    bool sendHandshake();
+    bool receiveHandshake();
     // Friend class for MSE handshake access to low-level methods
     friend class MSEHandshake;
     bool sendMessage(const PeerMessage& message);
     std::vector<uint8_t> serializeMessage(const PeerMessage& message);
 
     // Low-level socket operations
-    bool sendData(const void* data, size_t length);
+    bool sendData(const void* data, size_t length, bool cleanup = false);
     bool receiveData(void* buffer, size_t length);
     bool receiveDataWithTimeout(void* buffer, size_t length, int timeout_ms);
     bool setNonBlocking(bool non_blocking);
@@ -277,9 +284,11 @@ private:
 
     // Transport layer
     TransportType transport_type_;
-    int socket_fd_;                                    // TCP socket
+    std::intptr_t socket_fd_; // SOCKET is pointer-sized on 64-bit Windows.
+    std::chrono::steady_clock::time_point read_deadline_ = std::chrono::steady_clock::time_point::max();
     std::shared_ptr<utp::UtpSocket> utp_socket_;      // uTP socket
     bool connected_;
+    bool incoming_ = false;
     bool handshake_completed_;
     bool is_ipv6_;  // True if this connection uses IPv6
 
@@ -290,6 +299,7 @@ private:
     bool peer_interested_;
 
     std::vector<bool> peer_bitfield_;
+    size_t known_piece_count_ = 0;
 
     // Message queue for processing messages in order
     std::queue<std::unique_ptr<PeerMessage>> message_queue_;

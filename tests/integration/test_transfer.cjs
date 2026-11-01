@@ -5,6 +5,7 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { availablePort } = require('./fixture_helpers.cjs');
 
 const hash = data => crypto.createHash('sha1').update(data).digest();
 function encode(value) {
@@ -139,7 +140,7 @@ async function main() {
     fs.writeFileSync(path.join(work, 'test.torrent'), encode({ announce: `http://127.0.0.1:${tracker.address().port}/announce`, info }));
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: false, enable_pex: false,
       enable_lsd: false, enable_webseeds: false, enable_utp: false, enable_encryption: false,
-      sequential_download: scenario !== 'multi', download_dir: './files', log_file: './client.log', listen_port: 16881 }));
+      sequential_download: scenario !== 'multi', download_dir: './files', log_file: './client.log', listen_port: await availablePort() }));
     if (stage === 'partial') {
       await run(partialExecutable, 'partial');
       assert.deepEqual(fs.readFileSync(path.join(work, 'files', 'payload.bin')).subarray(0, pieceLength), data.subarray(0, pieceLength));
