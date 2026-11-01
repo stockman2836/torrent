@@ -9,6 +9,7 @@
 #undef ERROR
 #include "download_queue.h"
 #include "speed_limits.h"
+#include "seeding_dialog.h"
 #include "torrent/core/logger.h"
 #include <algorithm>
 #include <filesystem>
@@ -61,7 +62,7 @@ std::wstring bytes(int64_t value) {
     return out.str();
 }
 enum Control { Source = 100, Browse, Read, Folder, ChooseFolder, Files, SelectAll, SelectNone,
-    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits };
+    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits, SeedSettings };
 const wchar_t* priorityName(FilePriority value) {
     switch (value) {
     case FilePriority::High: return L"Высокий";
@@ -103,7 +104,7 @@ private:
     HWND title_, subtitle_, source_, browse_, read_, folderLabel_, folder_, choose_, files_,
         all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_,
         jobs_, jobsLabel_, remove_, limit_, limitLabel_, rateLabel_, downloadLabel_, uploadLabel_,
-        downloadLimit_, uploadLimit_, applyLimits_;
+        downloadLimit_, uploadLimit_, applyLimits_, seedSettings_;
     HFONT font_ = nullptr, heading_ = nullptr;
     std::shared_ptr<const std::vector<FileInfo>> displayed_;
     std::vector<FilePriority> priorities_;
@@ -186,6 +187,7 @@ private:
         speeds_ = control(L"STATIC", L"", SS_RIGHT);
         start_ = control(L"BUTTON", L"Скачать", WS_TABSTOP | BS_DEFPUSHBUTTON, Start);
         stop_ = control(L"BUTTON", L"Остановить", WS_TABSTOP, Stop);
+        seedSettings_ = control(L"BUTTON", L"Раздача…", WS_TABSTOP, SeedSettings);
         open_ = control(L"BUTTON", L"Открыть папку", WS_TABSTOP, OpenFolder);
         auto home = knownFolder(FOLDERID_LocalAppData) / L"TorrentClient";
         fs::create_directories(home);
@@ -194,6 +196,7 @@ private:
         config_.download_dir = (knownFolder(FOLDERID_Downloads) / L"TorrentClient").u8string();
         config_.resume_dir = (home / L"resume").u8string();
         if (fs::exists(settings_)) config_.loadFromFile(settings_.u8string());
+        config_.seed_after_download = false; // New jobs opt in; older desktop versions ignored this JSON field.
         if (smoke) {
             config_.loadFromFile(utf8(smokeConfig));
             settings_.clear();
@@ -247,6 +250,7 @@ private:
         move(summary_, left, bottom+56, w-left-24, 23); move(progress_, left, bottom+85, w-left-24, 17);
         move(status_, left, bottom+112, w-left-275, 25); move(speeds_, w-270, bottom+112, 246, 25);
         move(start_, left, h-53, 150, 34); move(stop_, left+162, h-53, 140, 34); move(open_, w-184, h-53, 160, 34);
+        move(seedSettings_, left+314, h-53, 140, 34);
     }
     void browse() {
         wchar_t path[32768]{};
@@ -336,6 +340,14 @@ private:
         persist();
         refresh();
     }
+    void seedingSettings() {
+        const auto entry = current();
+        if (!entry || closing_ || entry->removing) return;
+        auto options = SeedingOptions::fromConfig(entry->config);
+        if (editSeedingOptions(handle, options, smoke) && queue_.setSeedingOptions(selected_, options)) {
+            saveEdits(); persist(); refresh();
+        }
+    }
     void populate(const DownloadSnapshot& snapshot, const Config& config) {
         filling_ = true;
         ListView_DeleteAllItems(files_);
@@ -380,13 +392,16 @@ private:
         EnableWindow(start_, editable());
         EnableWindow(stop_, entry && (busy || entry->queued) && !closing_ && state.state != DownloadState::Stopping);
         EnableWindow(remove_, entry && !entry->removing && !closing_);
+        EnableWindow(seedSettings_, entry && !entry->removing && !closing_ && state.state != DownloadState::Stopping);
         EnableWindow(open_, entry && !text(folder_).empty());
         SetWindowTextW(start_, state.state == DownloadState::Stopped ? L"Продолжить" : L"Скачать");
+        if (entry && state.can_seed && entry->config.seed_after_download) SetWindowTextW(start_, L"Раздавать");
         const wchar_t* label = L"Готов к работе";
         switch (state.state) {
         case DownloadState::Loading: label = L"Чтение метаданных…"; break;
         case DownloadState::Ready: label = L"Выберите файлы и нажмите «Скачать»"; break;
         case DownloadState::Downloading: label = L"Загрузка…"; break;
+        case DownloadState::Seeding: label = L"Раздача"; break;
         case DownloadState::Stopping: label = L"Остановка и сохранение прогресса…"; break;
         case DownloadState::Stopped: label = L"Остановлено — можно продолжить загрузку"; break;
         case DownloadState::Complete: label = L"Загрузка завершена"; break;
@@ -397,6 +412,8 @@ private:
         if (entry && entry->removing) label = L"Удаление из списка…";
         std::wostringstream status;
         status << label;
+        if (state.state == DownloadState::Seeding)
+            status << L" · " << std::fixed << std::setprecision(2) << state.seed_ratio << L" · " << state.seed_seconds / 60 << L" мин";
         if (state.state == DownloadState::Downloading || state.state == DownloadState::Complete)
             status << L"  " << std::fixed << std::setprecision(1) << state.progress << L"%";
         SetWindowTextW(status_, status.str().c_str());
@@ -429,6 +446,7 @@ private:
         if (!smokeStarted_) {
             if (entries_.size() != 2 || std::any_of(entries_.begin(), entries_.end(), [](const auto& entry) { return entry.busy; })) return;
             smokeStarted_ = true; // Command handlers refresh the window recursively.
+            SendMessageW(handle, WM_COMMAND, SeedSettings, 0);
             SetWindowTextW(downloadLimit_, L"32"); SetWindowTextW(uploadLimit_, L"16");
             SendMessageW(handle, WM_COMMAND, ApplyLimits, 0);
             ListView_SetItemState(files_, 0, LVIS_SELECTED, LVIS_SELECTED);
@@ -460,6 +478,7 @@ private:
         case DownloadState::Loading: return L"Метаданные";
         case DownloadState::Ready: return L"Готов";
         case DownloadState::Downloading: return L"Загрузка";
+        case DownloadState::Seeding: return L"Раздача";
         case DownloadState::Stopping: return L"Остановка";
         case DownloadState::Stopped: return L"Остановлен";
         case DownloadState::Complete: return L"Завершён";
@@ -542,6 +561,7 @@ private:
             case Read: load(); break;
             case ChooseFolder: chooseFolder(); break;
             case Start: start(); break;
+            case SeedSettings: seedingSettings(); break;
             case ApplyLimits: applySpeedLimits(); refresh(); break;
             case Stop: queue_.stop(selected_); refresh(); break;
             case Remove: queue_.remove(selected_); persist(); refresh(); break;

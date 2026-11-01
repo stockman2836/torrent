@@ -40,7 +40,9 @@ The queue starts ready jobs in enqueue order up to a configurable limit. Jobs wi
 overlapping output files wait until the writer finishes. Stopping keeps a slot
 occupied until engine cleanup completes. Removing an entry stops and unloads it
 asynchronously without deleting payload data. Task port pairs are distinct so
-their DHT sockets can coexist.
+their DHT sockets can coexist. A job that reaches `Seeding` keeps its session and
+file ownership but releases its download slot. This distinction remains in place
+while the seed stops, so network cleanup does not occupy a download slot again.
 
 Each task exposes an immutable file list plus a synchronized status snapshot.
 One background worker exclusively
@@ -56,8 +58,17 @@ pointer. Downloads share one bucket across peer and web seed delivery within a
 session; uploads use a separate bucket. Waits consume large blocks incrementally,
 wake when a rate changes and check shutdown while waiting. UI values use KiB/s
 and convert to bytes/s without losing the precision of stored integer limits.
+`SeedingOptions` validates the enabled flag, ratio and hours, and decides whether
+either limit has been reached. Its elapsed-time input makes timer boundaries
+testable without waiting hours. The task worker starts the timer only when all
+pieces of a nonempty torrent are verified, publishes uploaded bytes and ratio,
+and applies live policy updates. Empty torrents and incomplete selections finish
+without seeding. Session completion announces are sent once; an already complete
+resumed torrent announces `started` with `left=0` without another `completed`.
 The list saves sources, destinations, file choices and the concurrency limit as
-versioned JSON using a temporary file and atomic replacement. Restored entries
+versioned JSON using a temporary file and atomic replacement. Seeding and speed
+settings are saved per entry; missing seeding settings in older lists default to
+stopping after download. Restored entries
 resolve metadata but remain outside the download queue until the user starts them.
 The original file is preserved when restoration fails. The desktop target is
 Windows-only; the shared queue supports Windows and POSIX file replacement.

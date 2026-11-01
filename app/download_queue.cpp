@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <limits>
 #include <stdexcept>
 #ifdef _WIN32
 #define NOMINMAX
@@ -66,6 +67,7 @@ DownloadQueue::Entry* DownloadQueue::find(DownloadId id) {
 }
 
 DownloadId DownloadQueue::add(std::string source, Config config) {
+    SeedingOptions::fromConfig(config).validate();
     if (closing_) throw std::logic_error("The download list is closing");
     if (source.empty()) throw std::invalid_argument("Empty torrent source");
     if (!MagnetURI::isMagnetURI(source)) source = absolute(source);
@@ -106,7 +108,7 @@ bool DownloadQueue::configure(DownloadId id, const std::string& directory,
 
 bool DownloadQueue::enqueue(DownloadId id) {
     auto entry = find(id);
-    if (entry && entry->transferring && !entry->task.busy()) entry->transferring = false;
+    if (entry && entry->transferring && !entry->task.busy()) entry->transferring = entry->downloading = false;
     if (closing_ || !entry || entry->removing || entry->queued || entry->transferring) return false;
     if (!entry->task.busy() && !entry->task.snapshot().files) entry->task.load(entry->source, entry->config);
     entry->queued = true;
@@ -122,6 +124,15 @@ bool DownloadQueue::setSpeedLimits(DownloadId id, int64_t download_bytes_per_sec
     entry->task.setSpeedLimits(download_bytes_per_sec, upload_bytes_per_sec);
     entry->config.max_download_speed = download_bytes_per_sec;
     entry->config.max_upload_speed = upload_bytes_per_sec;
+    return true;
+}
+
+bool DownloadQueue::setSeedingOptions(DownloadId id, const SeedingOptions& options) {
+    options.validate();
+    auto entry = find(id);
+    if (closing_ || !entry || entry->removing) return false;
+    entry->task.setSeedingOptions(options);
+    options.applyTo(entry->config);
     return true;
 }
 
@@ -173,7 +184,8 @@ bool DownloadQueue::conflicts(const Entry& candidate, const Entry& active) const
 
 void DownloadQueue::tick() {
     for (auto& entry : entries_) {
-        if (entry->transferring && !entry->task.busy()) entry->transferring = false;
+        if (entry->transferring && !entry->task.busy()) entry->transferring = entry->downloading = false;
+        if (entry->task.snapshot().state == DownloadState::Seeding) entry->downloading = false;
         if ((closing_ || entry->removing) && !entry->unloading && !entry->task.busy()) {
             entry->task.unload(); entry->unloading = true;
         }
@@ -183,7 +195,7 @@ void DownloadQueue::tick() {
     }), entries_.end());
     if (closing_) return;
     auto active = static_cast<size_t>(std::count_if(entries_.begin(), entries_.end(), [](const auto& entry) {
-        return entry->transferring;
+        return entry->downloading;
     }));
     for (auto it = pending_.begin(); it != pending_.end();) {
         auto entry = find(*it);
@@ -199,7 +211,7 @@ void DownloadQueue::tick() {
         });
         if (collision) { ++it; continue; }
         if (entry->task.start(entry->config)) {
-            entry->transferring = true; entry->queued = false; ++active;
+            entry->transferring = entry->downloading = true; entry->queued = false; ++active;
             it = pending_.erase(it);
         } else ++it;
     }
@@ -225,7 +237,9 @@ void DownloadQueue::save(const std::string& path) const {
             priorities.push_back({{"index", index}, {"priority", filePriorityName(priority)}});
         document["downloads"].push_back({{"source", entry->source}, {"directory", entry->config.download_dir},
             {"files", entry->config.file_indices}, {"priorities", priorities},
-            {"max_download_speed", entry->config.max_download_speed}, {"max_upload_speed", entry->config.max_upload_speed}});
+            {"max_download_speed", entry->config.max_download_speed}, {"max_upload_speed", entry->config.max_upload_speed},
+            {"seed_after_download", entry->config.seed_after_download}, {"seed_ratio_limit", entry->config.seed_ratio_limit},
+            {"seed_time_limit_hours", entry->config.seed_time_limit_hours}});
     }
     const auto destination = fs::u8path(path);
     auto temporary = destination; temporary += ".tmp";
@@ -259,6 +273,11 @@ void DownloadQueue::restore(const std::string& path, const Config& defaults) {
         config.download_dir = item.at("directory").get<std::string>();
         config.max_download_speed = savedSpeed(item, "max_download_speed", defaults.max_download_speed);
         config.max_upload_speed = savedSpeed(item, "max_upload_speed", defaults.max_upload_speed);
+        const auto seed_hours = savedSpeed(item, "seed_time_limit_hours", 0);
+        if (seed_hours > std::numeric_limits<int>::max()) throw std::invalid_argument("Invalid saved seeding time limit");
+        SeedingOptions seeding{item.value("seed_after_download", false), item.value("seed_ratio_limit", 2.0),
+                               static_cast<int>(seed_hours)};
+        seeding.applyTo(config);
         if (config.max_download_speed < 0 || config.max_upload_speed < 0)
             throw std::invalid_argument("Invalid saved speed limits");
         config.file_indices.clear();

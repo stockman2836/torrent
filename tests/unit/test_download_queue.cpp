@@ -110,6 +110,7 @@ TEST_F(DownloadQueueTest, SavedListRestoresChoicesAndLimitWithoutStartingDownloa
     ASSERT_TRUE(queue.configure(first, config.download_dir, {{0, FilePriority::High}}));
     queue.setLimit(3);
     ASSERT_TRUE(queue.setSpeedLimits(first, 32768, 16384));
+    ASSERT_TRUE(queue.setSeedingOptions(first, {true, 1.5, 3}));
     queue.save(path);
     queue.save(path); // Replaces an existing file, including on Windows.
     DownloadQueue restored;
@@ -120,6 +121,10 @@ TEST_F(DownloadQueueTest, SavedListRestoresChoicesAndLimitWithoutStartingDownloa
     EXPECT_EQ(restored.snapshots()[0].config.max_download_speed, 32768);
     EXPECT_EQ(restored.snapshots()[0].config.max_upload_speed, 16384);
     EXPECT_EQ(restored.snapshots()[1].config.max_download_speed, 0);
+    EXPECT_TRUE(restored.snapshots()[0].config.seed_after_download);
+    EXPECT_DOUBLE_EQ(restored.snapshots()[0].config.seed_ratio_limit, 1.5);
+    EXPECT_EQ(restored.snapshots()[0].config.seed_time_limit_hours, 3);
+    EXPECT_FALSE(restored.snapshots()[1].config.seed_after_download);
     EXPECT_EQ(restored.snapshots()[0].config.file_priorities.at(0), FilePriority::High);
     EXPECT_EQ(restored.snapshots()[0].config.download_dir, config.download_dir);
     EXPECT_FALSE(restored.snapshots()[0].queued);
@@ -201,12 +206,16 @@ TEST_F(DownloadQueueTest, LegacyListUsesDefaultLimitsAndInvalidRatesKeepTheListE
     { std::ifstream input(fs::u8path(path)); input >> document; }
     document["downloads"][0].erase("max_download_speed");
     document["downloads"][0].erase("max_upload_speed");
+    document["downloads"][0].erase("seed_after_download");
+    document["downloads"][0].erase("seed_ratio_limit");
+    document["downloads"][0].erase("seed_time_limit_hours");
     { std::ofstream output(fs::u8path(path)); output << document; }
     Config defaults = config; defaults.max_download_speed = 1234; defaults.max_upload_speed = 5678;
     DownloadQueue restored;
     restored.restore(path, defaults);
     EXPECT_EQ(restored.snapshots()[0].config.max_download_speed, 1234);
     EXPECT_EQ(restored.snapshots()[0].config.max_upload_speed, 5678);
+    EXPECT_FALSE(restored.snapshots()[0].config.seed_after_download);
     for (const auto value : {nlohmann::json(-1), nlohmann::json(1.5), nlohmann::json("100")}) {
         document["downloads"][0]["max_download_speed"] = value;
         { std::ofstream output(fs::u8path(path)); output << document; }
@@ -214,4 +223,16 @@ TEST_F(DownloadQueueTest, LegacyListUsesDefaultLimitsAndInvalidRatesKeepTheListE
         EXPECT_THROW(invalid.restore(path, config), std::invalid_argument);
         EXPECT_TRUE(invalid.snapshots().empty());
     }
+}
+
+TEST_F(DownloadQueueTest, SeedingChoicesCanChangeWhileWaitingAndRejectInvalidValues) {
+    DownloadQueue queue;
+    const auto id = queue.add(torrent("waiting"), config);
+    queue.enqueue(id);
+    EXPECT_TRUE(queue.setSeedingOptions(id, {true, 0, 2}));
+    EXPECT_TRUE(queue.snapshots()[0].config.seed_after_download);
+    EXPECT_THROW(queue.setSeedingOptions(id, {true, -1, 0}), std::invalid_argument);
+    EXPECT_EQ(queue.snapshots()[0].config.seed_time_limit_hours, 2);
+    queue.close();
+    EXPECT_FALSE(queue.setSeedingOptions(id, {false, 0, 0}));
 }

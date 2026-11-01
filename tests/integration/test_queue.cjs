@@ -22,20 +22,36 @@ function packet(id, payload = Buffer.alloc(0)) {
 
 async function main() {
   const executable = path.resolve(process.argv[2]), mode = process.argv[3] || 'serial';
-  const work = fs.mkdtempSync(path.join(process.cwd(), 'queue-test-'));
+  const scratch = fs.existsSync(path.join(process.cwd(), 'build')) ? path.join(process.cwd(), 'build') : process.cwd();
+  const work = fs.mkdtempSync(path.join(scratch, 'queue-test-'));
+  const seedMode = mode.startsWith('seed-') || mode === 'ui';
+  const collision = mode === 'collision' || mode === 'seed-collision';
   const pieceLength = 32768;
   const torrents = [0, 1].map(id => {
     const data = Buffer.alloc(100003);
     for (let i = 0; i < data.length; ++i) data[i] = (i * 37 + id * 31) % 256;
     const pieces = [];
     for (let offset = 0; offset < data.length; offset += pieceLength) pieces.push(sha1(data.subarray(offset, offset + pieceLength)));
-    const name = mode === 'collision' ? 'shared.bin' : `${id}.bin`;
+    const name = collision ? 'shared.bin' : `${id}.bin`;
     const info = { length: data.length, name, 'piece length': pieceLength, pieces: Buffer.concat(pieces) };
     return { id, data, info, hash: sha1(encode(info)), stops: 0, requests: [], sockets: new Set(),
-      uploads: [], held: [], started: 0, stopped: 0, uploadStarted: 0 };
+      uploads: [], held: [], started: 0, stopped: 0, uploadStarted: 0, completed: 0, resumedCompleted: 0, seededRequest: false };
   });
   let protocolError, maxActive = 0, child;
   const active = new Set(), sockets = new Set(), timers = new Set();
+  function requestSeededBlocks(torrent, socket) {
+    if (torrent.seededRequest || mode === 'seed-collision') return;
+    torrent.seededRequest = true;
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      if (socket.destroyed) return;
+      for (let n = 0; n < 2; ++n) {
+        const request = Buffer.alloc(12); request.writeUInt32BE(16384, 8);
+        socket.write(packet(6, request));
+      }
+    }, mode === 'ui' ? 1200 : 800);
+    timers.add(timer);
+  }
   const peer = net.createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('error', () => {});
     let pending = Buffer.alloc(0), torrent;
@@ -57,6 +73,10 @@ async function main() {
           if (pending.length < length + 4) break;
           const message = pending.subarray(4, length + 4); pending = pending.subarray(length + 4);
           const uploadMode = torrent.id === 0 && ['upload', 'upload-live', 'upload-stop'].includes(mode);
+          if (mode === 'seed-resume' && torrent.id === 0 && torrent.stops > 0 && message[0] === 5) {
+            assert.equal(message[1] & 0xf0, 0xf0, 'Resumed seed did not advertise verified pieces');
+            requestSeededBlocks(torrent, socket);
+          }
           if (uploadMode && message[0] === 4 && message.readUInt32BE(1) === 0 && !torrent.uploadStarted) {
             torrent.uploadStarted = Date.now();
             for (let n = 0; n < 4; ++n) {
@@ -64,7 +84,7 @@ async function main() {
               socket.write(packet(6, request));
             }
           }
-          if (uploadMode && message[0] === 7) {
+          if ((uploadMode || seedMode) && message[0] === 7) {
             assert.equal(message.readUInt32BE(1), 0); assert.equal(message.readUInt32BE(5), 0);
             assert.deepEqual(message.subarray(9), torrent.data.subarray(0, 16384));
             torrent.uploads.push(Date.now());
@@ -98,6 +118,14 @@ async function main() {
       const hash = Buffer.from(raw.replace(/%([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))), 'latin1');
       const torrent = torrents.find(t => t.hash.equals(hash)); assert.ok(torrent);
       if (query.get('event') === 'started') { active.add(torrent.id); torrent.started = Date.now(); }
+      if (query.get('event') === 'completed') {
+        ++torrent.completed;
+        if (torrent.stops > 0) ++torrent.resumedCompleted;
+        if (seedMode && torrent.id === 0 && mode !== 'seed-resume') {
+          assert.equal(Number(query.get('left')), 0);
+          for (const socket of torrent.sockets) requestSeededBlocks(torrent, socket);
+        }
+      }
       if (query.get('event') === 'stopped') {
         active.delete(torrent.id); ++torrent.stops;
         torrent.stopped = Date.now();
@@ -127,9 +155,9 @@ async function main() {
     fs.writeFileSync(path.join(work, 'output.log'), output);
     if (protocolError) throw protocolError;
     assert.equal(code, 0, output);
-    assert.equal(maxActive, mode === 'parallel' ? 2 : 1, 'Unexpected number of overlapping downloads');
+    assert.equal(maxActive, mode === 'parallel' || seedMode && !collision ? 2 : 1, 'Unexpected number of overlapping sessions');
     for (const torrent of torrents) {
-      if (mode === 'collision' && torrent.id === 0) continue;
+      if (collision && torrent.id === 0) continue;
       const saved = fs.readFileSync(path.join(work, 'files', torrent.info.name));
       const partial = ['remove', 'upload-stop'].includes(mode) && torrent.id === 0;
       assert.deepEqual(partial ? saved.subarray(0, pieceLength) : saved, partial ? torrent.data.subarray(0, pieceLength) : torrent.data);
@@ -147,6 +175,14 @@ async function main() {
       else assert.ok(elapsed < 5000, `Upload limit change did not release the active transfer: ${elapsed}ms`);
     }
     if (mode === 'upload-stop') assert.equal(torrents[0].uploads.length, 0, 'Cancelled upload was sent');
+    if (seedMode && !collision) {
+      assert.equal(torrents[0].uploads.length, 2, 'Verified payload was not seeded');
+      assert.equal(torrents[0].completed, 1, 'Incorrect completion announcements');
+      if (mode === 'seed-resume') {
+        assert.equal(torrents[0].resumedCompleted, 0, 'Resumed seed announced another completion');
+        assert.ok(!torrents[0].requests.some(r => r.phase > 0), 'A complete resumed seed downloaded data again');
+      }
+    }
     assert.equal(active.size, 0);
     console.log(`PASS queue ${mode}: both torrents verified; max active ${maxActive}.`);
   } finally {

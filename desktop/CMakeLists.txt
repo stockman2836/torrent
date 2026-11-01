@@ -1,4 +1,4 @@
-add_executable(torrent_desktop WIN32 main.cpp resources.rc)
+add_executable(torrent_desktop WIN32 main.cpp seeding_dialog.cpp resources.rc)
 set_target_properties(torrent_desktop PROPERTIES OUTPUT_NAME TorrentClient)
 target_compile_definitions(torrent_desktop PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(torrent_desktop PRIVATE torrent_app comctl32 comdlg32 shell32 ole32 uuid gdi32 uxtheme)

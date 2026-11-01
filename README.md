@@ -93,7 +93,7 @@ cleanup; network timeouts can delay stopping. **Download** adds the selected
 torrent to the queue. The active download limit defaults to one and can be set
 from 1 to 8. Lowering the limit lets existing transfers finish before starting
 more. Jobs writing to the same files wait for each other even when the limit is
-higher. Each session stops when its selected files finish. **Remove from list**
+higher. By default each session stops when its selected files finish. **Remove from list**
 stops the job and removes its row while keeping downloaded files and resume data.
 
 The list, file priorities, destinations and concurrency limit are saved in
@@ -110,6 +110,21 @@ torrent is downloading or waiting in the queue. Starting a torrent also applies
 the values currently entered in its fields. Applied limits are saved with the
 download list and restored independently for each torrent. Limits apply to
 payload data; short bursts and protocol traffic can exceed the displayed value.
+
+Click **Seeding** for a torrent to continue sharing after it finishes. Set a ratio
+limit and a whole number of hours; `0` disables that limit. The first reached
+limit stops sharing. Changes apply to active sessions, and **Stop** ends sharing
+manually. The ratio is bytes uploaded during the current session divided by the
+full torrent's verified size, including uploads made during downloading. The
+timer starts when the full torrent finishes. Counters restart when a new session
+starts; the settings are saved with each torrent.
+
+Seeding requires a fully verified, nonempty torrent. A selected subset completes
+and stops when the rest is unavailable. A seeding job frees its download slot so
+the queue can start the next torrent; tasks writing to its files still wait.
+Sharing currently uses connections initiated by the client to peers; accepting
+incoming TCP connections is a separate network feature. These controls apply to
+desktop jobs; the CLI keeps its download-and-exit behavior.
 
 Preferences and the desktop log live in `%LOCALAPPDATA%/TorrentClient`; the default
 download folder is `%USERPROFILE%/Downloads/TorrentClient`. Resume data stays with

@@ -31,6 +31,7 @@ add_unit_test(test_download_task torrent_app)
 add_unit_test(test_download_queue torrent_app)
 add_unit_test(test_speed_limits torrent_app)
 add_unit_test(test_token_bucket Torrent::Core)
+add_unit_test(test_seeding_options torrent_app)
 set_tests_properties(test_speed_limits test_token_bucket PROPERTIES TIMEOUT 15)
 target_link_libraries(test_download_queue PRIVATE nlohmann_json::nlohmann_json)
 set_tests_properties(test_download_queue PROPERTIES TIMEOUT 30)
@@ -44,7 +45,8 @@ find_program(NODE_EXECUTABLE NAMES node)
 if(NODE_EXECUTABLE)
     add_executable(queue_driver integration/queue_driver.cpp)
     target_link_libraries(queue_driver PRIVATE torrent_app)
-    foreach(scenario serial parallel stop remove collision limited live limited-stop upload upload-live upload-stop)
+    foreach(scenario serial parallel stop remove collision limited live limited-stop upload upload-live upload-stop
+            seed-ratio seed-unlimited seed-disable seed-resume seed-collision)
         add_test(NAME test_queue_${scenario} COMMAND "${NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_queue.cjs" "$<TARGET_FILE:queue_driver>" ${scenario})
         set_tests_properties(test_queue_${scenario} PROPERTIES TIMEOUT 30)
@@ -63,7 +65,7 @@ if(NODE_EXECUTABLE)
     add_test(NAME test_desktop_download COMMAND "${NODE_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_download.cjs" "$<TARGET_FILE:desktop_driver>")
     set_tests_properties(test_desktop_download PROPERTIES TIMEOUT 55)
-    foreach(scenario single multiple zero resume corrupt changed invalid preserve)
+    foreach(scenario single multiple zero resume corrupt changed invalid preserve seed)
         add_test(NAME test_desktop_selection_${scenario} COMMAND "${NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_selection.cjs" ${scenario}
             "$<TARGET_FILE:desktop_driver>")

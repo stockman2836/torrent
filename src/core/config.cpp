@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
+#include <cmath>
 #include <iostream>
 
 using json = nlohmann::json;
@@ -259,7 +260,7 @@ bool Config::validate() const {
         valid = false;
     }
 
-    if (seed_ratio_limit < 0) {
+    if (!std::isfinite(seed_ratio_limit) || seed_ratio_limit < 0) {
         LOG_ERROR("Invalid seed_ratio_limit: {}", seed_ratio_limit);
         valid = false;
     }

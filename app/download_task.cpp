@@ -2,6 +2,7 @@
 #include "torrent/session/download_manager.h"
 #include "torrent/core/utils.h"
 #include <chrono>
+#include <optional>
 
 namespace torrent::app {
 
@@ -42,6 +43,9 @@ bool DownloadTask::load(const std::string& source, Config config) {
         snapshot_.name.clear();
         snapshot_.info_hash.clear();
         snapshot_.progress = 0;
+        snapshot_.can_seed = false;
+        snapshot_.uploaded_bytes = snapshot_.seed_seconds = 0;
+        snapshot_.seed_ratio = 0;
     }
     worker_ = std::thread([this, source, config] {
         try {
@@ -66,17 +70,34 @@ bool DownloadTask::load(const std::string& source, Config config) {
 }
 
 bool DownloadTask::start(Config config) {
+    const auto seeding = SeedingOptions::fromConfig(config);
+    seeding.validate();
     if (config.max_download_speed < 0 || config.max_upload_speed < 0)
         throw std::invalid_argument("Speed limits must be non-negative");
     if (busy_ || !input_ || !begin(DownloadState::Downloading)) return false;
     setSpeedLimits(config.max_download_speed, config.max_upload_speed);
+    setSeedingOptions(seeding);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        snapshot_.uploaded_bytes = snapshot_.seed_seconds = 0;
+        snapshot_.seed_ratio = 0;
+    }
     worker_ = std::thread([this, config] {
         try {
             DownloadManager manager(input_->torrent, config, std::move(input_->dht));
             auto download_limit = config.max_download_speed, upload_limit = config.max_upload_speed;
+            std::optional<std::chrono::steady_clock::time_point> seed_started;
             if (!cancelled_) manager.start();
             while (!cancelled_ && manager.isRunning()) {
                 const double progress = manager.progress();
+                const bool can_seed = progress >= 100 && manager.canSeed();
+                const auto now = std::chrono::steady_clock::now();
+                if (can_seed && !seed_started) {
+                    seed_started = now;
+                    manager.beginSeeding();
+                }
+                const auto elapsed = seed_started ? std::chrono::duration_cast<std::chrono::seconds>(now - *seed_started)
+                                                 : std::chrono::seconds(0);
                 {
                     std::unique_lock<std::mutex> lock(mutex_);
                     if (download_limit != download_limit_ || upload_limit != upload_limit_) {
@@ -84,12 +105,16 @@ bool DownloadTask::start(Config config) {
                         manager.setSpeedLimits(download_limit, upload_limit);
                     }
                     snapshot_.progress = progress;
-                    snapshot_.download_speed = manager.downloadSpeed();
+                    snapshot_.download_speed = can_seed ? 0 : manager.downloadSpeed();
                     snapshot_.upload_speed = manager.uploadSpeed();
-                    if (progress >= 100) break;
-                    wake_.wait_for(lock, std::chrono::milliseconds(150), [this, download_limit, upload_limit] {
-                        return cancelled_.load() || download_limit_ != download_limit || upload_limit_ != upload_limit;
-                    });
+                    snapshot_.uploaded_bytes = manager.uploadedBytes();
+                    snapshot_.can_seed = can_seed;
+                    snapshot_.seed_seconds = elapsed.count();
+                    snapshot_.seed_ratio = input_->torrent.totalLength() > 0
+                        ? static_cast<double>(snapshot_.uploaded_bytes) / input_->torrent.totalLength() : 0;
+                    if (progress >= 100 && (!can_seed || seeding_.finished(snapshot_.uploaded_bytes, input_->torrent.totalLength(), elapsed))) break;
+                    if (!cancelled_) snapshot_.state = can_seed ? DownloadState::Seeding : DownloadState::Downloading;
+                    wake_.wait_for(lock, std::chrono::milliseconds(150));
                 }
             }
             const double progress = manager.progress();
@@ -101,11 +126,20 @@ bool DownloadTask::start(Config config) {
             manager.stop();
             std::lock_guard<std::mutex> lock(mutex_);
             snapshot_.state = progress >= 100 ? DownloadState::Complete : DownloadState::Stopped;
+            snapshot_.uploaded_bytes = manager.uploadedBytes();
+            snapshot_.seed_ratio = input_->torrent.totalLength() > 0
+                ? static_cast<double>(snapshot_.uploaded_bytes) / input_->torrent.totalLength() : 0;
             snapshot_.download_speed = snapshot_.upload_speed = 0;
         } catch (const std::exception& error) { fail(error); }
         busy_ = false;
     });
     return true;
+}
+
+void DownloadTask::setSeedingOptions(const SeedingOptions& options) {
+    options.validate();
+    { std::lock_guard<std::mutex> lock(mutex_); seeding_ = options; }
+    wake_.notify_all();
 }
 
 void DownloadTask::setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec) {

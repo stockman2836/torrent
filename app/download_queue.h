@@ -26,6 +26,7 @@ public:
                    const std::map<size_t, FilePriority>& priorities);
     bool enqueue(DownloadId id);
     bool setSpeedLimits(DownloadId id, int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
+    bool setSeedingOptions(DownloadId id, const SeedingOptions& options);
     void stop(DownloadId id);
     void remove(DownloadId id); // Removes the list entry, never downloaded data.
     void setLimit(size_t limit);
@@ -44,6 +45,7 @@ private:
         Config config;
         DownloadTask task;
         bool transferring = false;
+        bool downloading = false;
         bool queued = false;
         bool removing = false;
         bool unloading = false;

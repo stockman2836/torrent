@@ -24,7 +24,7 @@ const listen = server => new Promise((resolve, reject) => {
 
 async function main() {
   const [scenario, program] = process.argv.slice(2);
-  assert.ok(['list', 'single', 'multiple', 'zero', 'resume', 'corrupt', 'changed', 'invalid', 'preserve'].includes(scenario));
+  assert.ok(['list', 'single', 'multiple', 'zero', 'resume', 'corrupt', 'changed', 'invalid', 'preserve', 'seed'].includes(scenario));
   const work = fs.mkdtempSync(path.join(process.cwd(), `selection-${scenario}-`));
   const pieceLength = 16384, lengths = [10007, 40009, 65536, 777, 0];
   const names = ['first.bin', 'nested/middle.bin', 'skipped.bin', 'tail.bin', 'empty.bin'];
@@ -86,7 +86,7 @@ async function main() {
     fs.writeFileSync(path.join(work, 'test.torrent'), encode({ announce: `http://127.0.0.1:${tracker.address().port}/announce`, info }));
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: false, enable_pex: false,
       enable_lsd: false, enable_webseeds: false, enable_utp: false, enable_encryption: false,
-      download_dir: './files', log_file: './client.log', listen_port: 16881 }));
+      seed_after_download: scenario === 'seed', download_dir: './files', log_file: './client.log', listen_port: 16881 }));
     const sentinel = Buffer.from('keep this existing unselected file');
     if (scenario === 'preserve') {
       fs.mkdirSync(path.join(work, 'files/payload'), { recursive: true });

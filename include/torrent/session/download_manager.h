@@ -42,6 +42,9 @@ public:
     double progress() const;
     int64_t downloadSpeed() const;
     int64_t uploadSpeed() const;
+    int64_t uploadedBytes() const { return total_uploaded_.load(); }
+    bool canSeed() const;
+    void beginSeeding();
 
     void printStatus() const;
 
@@ -127,6 +130,7 @@ private:
 
     // Tracker state
     bool first_announce_ = true;
+    bool complete_at_start_ = false;
     int tracker_failures_ = 0;
 
     // Speed limiting and tracking

@@ -30,7 +30,7 @@ struct Config {
     std::map<size_t, FilePriority> file_priorities; // Runtime overrides, also zero-based.
 
     // Upload/Seeding settings
-    bool seed_after_download = true;
+    bool seed_after_download = false;
     double seed_ratio_limit = 2.0;  // Stop seeding after ratio (0 = unlimited)
     int seed_time_limit_hours = 0;  // Stop seeding after hours (0 = unlimited)
 

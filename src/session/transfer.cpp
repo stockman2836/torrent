@@ -59,4 +59,8 @@ int64_t DownloadManager::bytesRemaining() const {
     return remaining;
 }
 
+bool DownloadManager::canSeed() const {
+    return torrent_.totalLength() > 0 && bytesRemaining() == 0;
+}
+
 } // namespace torrent

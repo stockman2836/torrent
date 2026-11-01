@@ -85,3 +85,14 @@ TEST_F(DownloadTaskTest, ConfigurationRoundTripsUnicodePath) {
     ASSERT_TRUE(loaded.loadFromFile(path));
     EXPECT_EQ(loaded.download_dir, config.download_dir);
 }
+
+TEST_F(DownloadTaskTest, EmptyTorrentCannotRemainSeeding) {
+    DownloadTask task;
+    config.seed_after_download = true;
+    config.seed_ratio_limit = 0;
+    ASSERT_TRUE(task.load(torrent(), config)); task.wait();
+    ASSERT_TRUE(task.start(config)); task.wait();
+    EXPECT_EQ(task.snapshot().state, DownloadState::Complete);
+    EXPECT_FALSE(task.snapshot().can_seed);
+    EXPECT_EQ(task.snapshot().uploaded_bytes, 0);
+}

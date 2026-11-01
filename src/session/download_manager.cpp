@@ -109,6 +109,7 @@ void DownloadManager::start() {
     // Load resume state if available
     std::cout << "Checking for resume data...\n";
     loadResumeState();
+    complete_at_start_ = canSeed();
 
     running_ = true;
     paused_ = false;
@@ -332,37 +333,20 @@ void DownloadManager::downloadLoop() {
         printStatus();
 
         // Check if download complete and transition to seeding
-        if (!seeding_mode_ && progress() >= 100.0 && bytesRemaining() == 0) {
-            std::cout << "\n========================================\n";
-            std::cout << "Download complete! Transitioning to seeding mode...\n";
-            std::cout << "========================================\n";
-
-            // Switch to seeding mode
-            seeding_mode_ = true;
-
-            // Notify tracker of completion
-            int64_t left = 0; // No bytes left to download
-            TrackerResponse response = tracker_client_->announce(
-                total_uploaded_,
-                total_downloaded_,
-                left,
-                listen_port_,
-                "completed"
-            );
-
-            if (response.isSuccess()) {
-                std::cout << "Tracker notified of completion. Now seeding to "
-                          << response.peers.size() << " peers.\n";
-            } else {
-                std::cerr << "Failed to notify tracker: " << response.failure_reason << "\n";
-            }
-
-            std::cout << "Seeding will continue until client is stopped.\n";
-            std::cout << "========================================\n\n";
-        }
+        if (!seeding_mode_ && progress() >= 100.0) beginSeeding();
 
         // Sleep
         waitForStop(std::chrono::seconds(1));
+    }
+}
+
+void DownloadManager::beginSeeding() {
+    if (!canSeed() || seeding_mode_.exchange(true) || complete_at_start_) return;
+    try {
+        const auto response = tracker_client_->announce(total_uploaded_, total_downloaded_, 0, listen_port_, "completed");
+        if (!response.isSuccess()) std::cerr << "Failed to announce completion: " << response.failure_reason << '\n';
+    } catch (const std::exception& error) {
+        std::cerr << "Completion announce failed: " << error.what() << '\n';
     }
 }
 
