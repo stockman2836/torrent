@@ -17,13 +17,12 @@
 #pragma comment(lib, "ws2_32.lib")
 
 // Helper to initialize Winsock
-static bool winsock_initialized = false;
 static void initWinsock() {
-    if (!winsock_initialized) {
+    static const bool initialized = [] {
         WSADATA wsa_data;
-        WSAStartup(MAKEWORD(2, 2), &wsa_data);
-        winsock_initialized = true;
-    }
+        return WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
+    }();
+    if (!initialized) throw std::runtime_error("WSAStartup failed");
 }
 #else
 #include <sys/socket.h>

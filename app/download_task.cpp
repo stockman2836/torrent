@@ -1,5 +1,6 @@
 #include "download_task.h"
 #include "torrent/session/download_manager.h"
+#include "torrent/core/utils.h"
 #include <chrono>
 
 namespace torrent::app {
@@ -39,6 +40,7 @@ bool DownloadTask::load(const std::string& source, Config config) {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshot_.files.reset();
         snapshot_.name.clear();
+        snapshot_.info_hash.clear();
         snapshot_.progress = 0;
     }
     worker_ = std::thread([this, source, config] {
@@ -49,6 +51,7 @@ bool DownloadTask::load(const std::string& source, Config config) {
                 auto files = std::make_shared<const std::vector<FileInfo>>(input->torrent.files());
                 std::lock_guard<std::mutex> lock(mutex_);
                 snapshot_.name = input->torrent.name();
+                snapshot_.info_hash = utils::toHex(input->torrent.infoHash());
                 snapshot_.files = std::move(files);
                 input_ = std::move(input);
                 snapshot_.state = cancelled_ ? DownloadState::Stopped : DownloadState::Ready;

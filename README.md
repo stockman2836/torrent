@@ -84,12 +84,24 @@ only to their owning targets.
 
 On Windows, open `build/desktop/TorrentClient.exe` (or
 `build/desktop/Release/TorrentClient.exe` with Visual Studio). Select a `.torrent`
-file or paste a magnet link, read its metadata, select a destination and check the
-files to download. Select rows and apply a priority using the dropdown. The window
+file or paste a magnet link and click **Add**. Select a torrent in the list on the
+left, choose its destination and check the files to download. Select file rows
+and apply a priority using the dropdown. Each torrent keeps its own choices. The window
 shows progress and transfer speeds. **Stop** saves verified pieces; **Continue**
 starts a session that verifies and reuses them. Closing the window waits for this
-cleanup; network timeouts can delay stopping. This first interface manages one
-torrent at a time and stops when the selected files finish.
+cleanup; network timeouts can delay stopping. **Download** adds the selected
+torrent to the queue. The active download limit defaults to one and can be set
+from 1 to 8. Lowering the limit lets existing transfers finish before starting
+more. Jobs writing to the same files wait for each other even when the limit is
+higher. Each session stops when its selected files finish. **Remove from list**
+stops the job and removes its row while keeping downloaded files and resume data.
+
+The list, file priorities, destinations and concurrency limit are saved in
+`%LOCALAPPDATA%/TorrentClient/downloads.json`. After reopening the app, select a
+torrent and click **Download** to resume it; payload downloads do not start
+automatically. Existing pieces are checked when the session starts. Keep original
+`.torrent` files available so their metadata can be read again. Magnet metadata
+is resolved again when the saved list is opened.
 
 Preferences and the desktop log live in `%LOCALAPPDATA%/TorrentClient`; the default
 download folder is `%USERPROFILE%/Downloads/TorrentClient`. Resume data stays with
@@ -103,6 +115,7 @@ tests in CTest. To exercise the actual window in hidden mode, run:
 
 ```powershell
 node tests/integration/test_download.cjs build/desktop/TorrentClient.exe --desktop-ui
+node tests/integration/test_queue.cjs build/desktop/TorrentClient.exe ui
 ```
 
 The remaining examples below use the CLI.

@@ -28,6 +28,9 @@ add_unit_test(test_extension_protocol Torrent::Network)
 add_unit_test(test_metadata_exchange Torrent::Network)
 add_unit_test(test_file_selection Torrent::Metainfo)
 add_unit_test(test_download_task torrent_app)
+add_unit_test(test_download_queue torrent_app)
+target_link_libraries(test_download_queue PRIVATE nlohmann_json::nlohmann_json)
+set_tests_properties(test_download_queue PROPERTIES TIMEOUT 30)
 set_tests_properties(test_download_task PROPERTIES TIMEOUT 30)
 
 set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file_manager test_command_line
@@ -36,6 +39,13 @@ set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file
     PROPERTIES TIMEOUT 30)
 find_program(NODE_EXECUTABLE NAMES node)
 if(NODE_EXECUTABLE)
+    add_executable(queue_driver integration/queue_driver.cpp)
+    target_link_libraries(queue_driver PRIVATE torrent_app)
+    foreach(scenario serial parallel stop remove collision)
+        add_test(NAME test_queue_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_queue.cjs" "$<TARGET_FILE:queue_driver>" ${scenario})
+        set_tests_properties(test_queue_${scenario} PROPERTIES TIMEOUT 30)
+    endforeach()
     add_executable(desktop_driver integration/desktop_driver.cpp)
     target_link_libraries(desktop_driver PRIVATE torrent_app)
     add_executable(desktop_partial integration/desktop_driver.cpp)

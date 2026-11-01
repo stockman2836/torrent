@@ -347,14 +347,13 @@ std::string LSD::buildAnnounceMessage(const std::vector<uint8_t>& info_hash) con
 bool LSD::createMulticastSocket() {
 #ifdef _WIN32
     // Initialize Winsock
-    static bool winsock_initialized = false;
-    if (!winsock_initialized) {
+    static const bool winsock_initialized = [] {
         WSADATA wsa_data;
-        if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-            LOG_ERROR("LSD: WSAStartup failed");
-            return false;
-        }
-        winsock_initialized = true;
+        return WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
+    }();
+    if (!winsock_initialized) {
+        LOG_ERROR("LSD: WSAStartup failed");
+        return false;
     }
 #endif
 

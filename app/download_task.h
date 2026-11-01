@@ -13,6 +13,7 @@ enum class DownloadState { Idle, Loading, Ready, Downloading, Stopping, Stopped,
 struct DownloadSnapshot {
     DownloadState state = DownloadState::Idle;
     std::string name;
+    std::string info_hash;
     std::string error;
     std::shared_ptr<const std::vector<FileInfo>> files;
     double progress = 0;

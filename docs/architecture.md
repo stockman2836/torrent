@@ -34,14 +34,26 @@ flowchart TD
 
 ## Application flow
 
-The desktop window issues commands to `app::DownloadTask` and polls an immutable
-file list plus a synchronized status snapshot. One background worker exclusively
+The desktop window issues commands to `app::DownloadQueue`. It owns independent
+`DownloadTask` instances with stable IDs, source paths, configurations and snapshots.
+The queue starts ready jobs in enqueue order up to a configurable limit. Jobs with
+overlapping output files wait until the writer finishes. Stopping keeps a slot
+occupied until engine cleanup completes. Removing an entry stops and unloads it
+asynchronously without deleting payload data. Task port pairs are distinct so
+their DHT sockets can coexist.
+
+Each task exposes an immutable file list plus a synchronized status snapshot.
+One background worker exclusively
 owns input resolution and the download session. Start, stop and close never join
 network workers on the window thread. Stop persists verified pieces; continuing
 creates a new session using existing files and resume data. Closing first stops
 the task and then releases metadata and DHT on the worker before destroying the
 window. File selections and priorities use the same `Config` fields as the CLI.
-The desktop target is Windows-only; the shared controller has no Win32 dependency.
+The list saves sources, destinations, file choices and the concurrency limit as
+versioned JSON using a temporary file and atomic replacement. Restored entries
+resolve metadata but remain outside the download queue until the user starts them.
+The original file is preserved when restoration fails. The desktop target is
+Windows-only; the shared queue supports Windows and POSIX file replacement.
 
 `app/main.cpp` calls `app::run`. The application parses and validates CLI values,
 loads configuration, resolves either input form to a `TorrentFile`, and starts

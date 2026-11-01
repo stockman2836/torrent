@@ -44,11 +44,8 @@ WebSeed::WebSeed(const std::string& url,
     , consecutive_errors_(0) {
 
     // Initialize CURL globally
-    static bool curl_initialized = false;
-    if (!curl_initialized) {
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-        curl_initialized = true;
-    }
+    static const auto curl_status = curl_global_init(CURL_GLOBAL_DEFAULT);
+    if (curl_status != CURLE_OK) throw std::runtime_error("CURL initialization failed");
 }
 
 WebSeed::~WebSeed() {

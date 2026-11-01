@@ -255,14 +255,13 @@ void UtpManager::initializeLibutp() {
 
 #ifdef _WIN32
     // Initialize Winsock
-    static bool winsock_initialized = false;
-    if (!winsock_initialized) {
+    static const bool winsock_initialized = [] {
         WSADATA wsa_data;
-        if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-            LOG_ERROR("uTP: WSAStartup failed");
-            return;
-        }
-        winsock_initialized = true;
+        return WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
+    }();
+    if (!winsock_initialized) {
+        LOG_ERROR("uTP: WSAStartup failed");
+        return;
     }
 #endif
 

@@ -7,7 +7,7 @@
 #include <uxtheme.h>
 // Win32's ERROR macro conflicts with the protocol and logger enum members.
 #undef ERROR
-#include "download_task.h"
+#include "download_queue.h"
 #include "torrent/core/logger.h"
 #include <algorithm>
 #include <filesystem>
@@ -60,7 +60,7 @@ std::wstring bytes(int64_t value) {
     return out.str();
 }
 enum Control { Source = 100, Browse, Read, Folder, ChooseFolder, Files, SelectAll, SelectNone,
-    Priority, Apply, Start, Stop, OpenFolder };
+    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit };
 const wchar_t* priorityName(FilePriority value) {
     switch (value) {
     case FilePriority::High: return L"Высокий";
@@ -74,7 +74,7 @@ class Window {
 public:
     HWND handle = nullptr;
     bool smoke = false;
-    std::wstring smokeSource, smokeFolder, smokeConfig;
+    std::wstring smokeSource, smokeSecond, smokeFolder, smokeConfig;
     int exitCode = 0;
 
     ~Window() { if (font_) DeleteObject(font_); if (heading_) DeleteObject(heading_); }
@@ -96,17 +96,19 @@ public:
     }
 
 private:
-    DownloadTask task_;
+    DownloadQueue queue_;
     Config config_;
-    fs::path settings_;
+    fs::path settings_, listPath_;
     HWND title_, subtitle_, source_, browse_, read_, folderLabel_, folder_, choose_, files_,
-        all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_;
+        all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_,
+        jobs_, jobsLabel_, remove_, limit_, limitLabel_;
     HFONT font_ = nullptr, heading_ = nullptr;
     std::shared_ptr<const std::vector<FileInfo>> displayed_;
     std::vector<FilePriority> priorities_;
-    bool filling_ = false, closing_ = false, unloading_ = false, smokeStarted_ = false;
+    bool filling_ = false, fillingJobs_ = false, closing_ = false, smokeStarted_ = false, dirty_ = false;
     ULONGLONG smokeDeadline_ = 0;
-    std::wstring loadedSource_;
+    DownloadId selected_ = 0, rendered_ = 0;
+    std::vector<QueueSnapshot> entries_;
     DownloadState previous_ = DownloadState::Idle;
 
     HWND control(const wchar_t* cls, const wchar_t* label, DWORD style, int id = 0) {
@@ -127,11 +129,27 @@ private:
             DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
         title_ = control(L"STATIC", L"TorrentClient", SS_LEFT);
         SendMessageW(title_, WM_SETFONT, reinterpret_cast<WPARAM>(heading_), TRUE);
-        subtitle_ = control(L"STATIC", L"Откройте торрент или вставьте magnet-ссылку и выберите файлы для загрузки", SS_LEFT);
+        subtitle_ = control(L"STATIC", L"Добавляйте торренты и управляйте загрузками в списке слева", SS_LEFT);
         source_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Source);
         SendMessageW(source_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Путь к .torrent или magnet-ссылка"));
         browse_ = control(L"BUTTON", L"Открыть .torrent", WS_TABSTOP, Browse);
-        read_ = control(L"BUTTON", L"Прочитать", WS_TABSTOP, Read);
+        read_ = control(L"BUTTON", L"Добавить", WS_TABSTOP, Read);
+        jobsLabel_ = control(L"STATIC", L"Загрузки", SS_LEFT);
+        jobs_ = control(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, Jobs);
+        ListView_SetExtendedListViewStyle(jobs_, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+        SetWindowTheme(jobs_, L"Explorer", nullptr);
+        const wchar_t* jobColumns[] = {L"Торрент", L"Состояние", L"%"};
+        for (int i = 0; i < 3; ++i) {
+            LVCOLUMNW column{}; column.mask = LVCF_TEXT | LVCF_WIDTH;
+            column.pszText = const_cast<PWSTR>(jobColumns[i]); column.cx = i == 0 ? 125 : (i == 1 ? 100 : 50);
+            ListView_InsertColumn(jobs_, i, &column);
+        }
+        remove_ = control(L"BUTTON", L"Удалить из списка", WS_TABSTOP, Remove);
+        limitLabel_ = control(L"STATIC", L"Одновременных загрузок", SS_LEFT);
+        limit_ = control(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST, Limit);
+        for (int i = 1; i <= 8; ++i)
+            SendMessageW(limit_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(std::to_wstring(i).c_str()));
+        SendMessageW(limit_, CB_SETCURSEL, 0, 0);
         folderLabel_ = control(L"STATIC", L"Папка загрузки", SS_LEFT);
         folder_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Folder);
         choose_ = control(L"BUTTON", L"Выбрать папку", WS_TABSTOP, ChooseFolder);
@@ -162,37 +180,59 @@ private:
         auto home = knownFolder(FOLDERID_LocalAppData) / L"TorrentClient";
         fs::create_directories(home);
         settings_ = home / L"config.json";
+        listPath_ = home / L"downloads.json";
         config_.download_dir = (knownFolder(FOLDERID_Downloads) / L"TorrentClient").u8string();
         config_.resume_dir = (home / L"resume").u8string();
         if (fs::exists(settings_)) config_.loadFromFile(settings_.u8string());
         if (smoke) {
             config_.loadFromFile(utf8(smokeConfig));
             settings_.clear();
+            listPath_.clear();
             config_.download_dir = utf8(smokeFolder);
             SetWindowTextW(source_, smokeSource.c_str());
         }
         // File logging is optional; a logging failure must not prevent opening the app.
         try { Logger::init((home / L"desktop.log").u8string(), Logger::Level::OFF); } catch (...) {}
         SetWindowTextW(folder_, wide(config_.download_dir).c_str());
+        if (!listPath_.empty() && fs::exists(listPath_)) {
+            try { queue_.restore(listPath_.u8string(), config_); }
+            catch (const std::exception& error) {
+                // Preserve the original file if it could not be fully restored.
+                listPath_.clear();
+                MessageBoxW(handle, wide(error.what()).c_str(), L"Не удалось восстановить список загрузок", MB_OK | MB_ICONERROR);
+            }
+        }
+        SendMessageW(limit_, CB_SETCURSEL, queue_.limit()-1, 0);
         SetTimer(handle, 1, 150, nullptr);
-        if (smoke) { smokeDeadline_ = GetTickCount64() + 45000; load(); }
+        if (smoke) {
+            smokeDeadline_ = GetTickCount64() + 45000;
+            if (smokeSecond.empty()) load();
+            else {
+                selected_ = queue_.add(utf8(smokeSource), config_);
+                queue_.add(utf8(smokeSecond), config_);
+                SetWindowTextW(source_, L"");
+            }
+        }
         refresh();
     }
     void layout() {
         if (!font_) return;
         RECT bounds{}; GetClientRect(handle, &bounds);
-        const int w = bounds.right, h = bounds.bottom, m = 24, bottom = h - 205;
+        const int w = bounds.right, h = bounds.bottom, m = 24, left = 328, bottom = h - 205;
         const auto move = [](HWND c, int x, int y, int width, int height) { MoveWindow(c, x, y, std::max(1, width), height, TRUE); };
         move(title_, m, 18, w-48, 42); move(subtitle_, m, 66, w-48, 25);
         move(source_, m, 107, w-320, 32); move(browse_, w-284, 106, 155, 34); move(read_, w-119, 106, 95, 34);
-        move(folderLabel_, m, 152, 170, 22); move(folder_, m, 178, w-220, 32); move(choose_, w-184, 177, 160, 34);
-        move(files_, m, 230, w-48, bottom-230);
-        ListView_SetColumnWidth(files_, 0, std::max(260, w-330));
-        move(all_, m, bottom+12, 125, 32); move(none_, 159, bottom+12, 125, 32);
-        move(priority_, w-430, bottom+12, 145, 240); move(apply_, w-275, bottom+11, 251, 34);
-        move(summary_, m, bottom+56, w-48, 23); move(progress_, m, bottom+85, w-48, 17);
-        move(status_, m, bottom+112, w/2, 25); move(speeds_, w/2, bottom+112, w/2-24, 25);
-        move(start_, m, h-53, 150, 34); move(stop_, 186, h-53, 140, 34); move(open_, w-184, h-53, 160, 34);
+        move(jobsLabel_, m, 158, 280, 22); move(jobs_, m, 188, 280, h-370);
+        move(limitLabel_, m, h-167, 280, 24); move(limit_, m, h-137, 90, 250);
+        move(remove_, m, h-91, 280, 34);
+        move(folderLabel_, left, 158, 170, 22); move(folder_, left, 188, w-left-196, 32); move(choose_, w-184, 187, 160, 34);
+        move(files_, left, 242, w-left-24, bottom-242);
+        ListView_SetColumnWidth(files_, 0, std::max(250, w-left-310));
+        move(all_, left, bottom+12, 110, 32); move(none_, left+120, bottom+12, 110, 32);
+        move(priority_, w-403, bottom+12, 125, 240); move(apply_, w-268, bottom+11, 244, 34);
+        move(summary_, left, bottom+56, w-left-24, 23); move(progress_, left, bottom+85, w-left-24, 17);
+        move(status_, left, bottom+112, w-left-275, 25); move(speeds_, w-270, bottom+112, 246, 25);
+        move(start_, left, h-53, 150, 34); move(stop_, left+162, h-53, 140, 34); move(open_, w-184, h-53, 160, 34);
     }
     void browse() {
         wchar_t path[32768]{};
@@ -220,56 +260,91 @@ private:
         dialog->Release();
     }
     void load() {
-        if (task_.busy()) return;
+        if (closing_) return;
         const auto source = text(source_);
         if (source.empty()) { SetFocus(source_); return; }
-        loadedSource_ = source;
-        task_.load(utf8(source), config_);
+        saveEdits();
+        selected_ = queue_.add(utf8(source), config_);
+        SetWindowTextW(source_, L"");
+        persist();
         refresh();
+    }
+    const QueueSnapshot* current() const {
+        for (const auto& entry : entries_) if (entry.id == selected_) return &entry;
+        return nullptr;
+    }
+    bool editable() const {
+        const auto entry = current();
+        return entry && !entry->busy && !entry->queued && !entry->removing && !closing_;
+    }
+    void saveEdits() {
+        if (!displayed_ || selected_ != rendered_ || !editable()) return;
+        if (text(folder_).empty()) return;
+        std::map<size_t, FilePriority> priorities;
+        for (size_t i = 0; i < priorities_.size(); ++i)
+            priorities[i] = ListView_GetCheckState(files_, i) ? priorities_[i] : FilePriority::Skip;
+        queue_.configure(selected_, utf8(text(folder_)), priorities);
+    }
+    void persist() {
+        dirty_ = false;
+        if (!listPath_.empty()) queue_.save(listPath_.u8string());
     }
     void start() {
-        if (task_.busy() || !displayed_) return;
-        if (text(source_) != loadedSource_) { load(); return; }
-        config_.download_dir = utf8(text(folder_));
-        if (config_.download_dir.empty()) throw std::runtime_error("Select a download folder");
-        config_.file_indices.clear(); config_.file_priorities.clear();
+        if (!editable()) return;
+        if (text(folder_).empty()) throw std::runtime_error("Select a download folder");
+        if (!displayed_) { queue_.enqueue(selected_); refresh(); return; }
         bool selected = false;
-        for (size_t i = 0; i < priorities_.size(); ++i) {
-            const bool checked = ListView_GetCheckState(files_, i) != 0;
-            selected |= checked;
-            config_.file_priorities[i] = checked ? priorities_[i] : FilePriority::Skip;
-        }
+        for (size_t i = 0; i < priorities_.size(); ++i) selected |= ListView_GetCheckState(files_, i) != 0;
         if (!selected) throw std::runtime_error("Select at least one file");
-        fs::create_directories(fs::u8path(config_.download_dir));
+        saveEdits();
+        config_.download_dir = utf8(text(folder_));
         if (!settings_.empty() && !config_.saveToFile(settings_.u8string()))
             throw std::runtime_error("Cannot save application settings");
-        task_.start(config_);
+        queue_.enqueue(selected_);
+        persist();
         refresh();
     }
-    void populate(const DownloadSnapshot& snapshot) {
+    void populate(const DownloadSnapshot& snapshot, const Config& config) {
         filling_ = true;
         ListView_DeleteAllItems(files_);
         displayed_ = snapshot.files;
         priorities_.assign(displayed_ ? displayed_->size() : 0, FilePriority::Normal);
         if (displayed_) for (size_t i = 0; i < displayed_->size(); ++i) {
+            auto priority = config.file_priorities.find(i);
+            if (priority != config.file_priorities.end()) priorities_[i] = priority->second;
+            if (!config.file_indices.empty() && std::find(config.file_indices.begin(), config.file_indices.end(), i) == config.file_indices.end())
+                priorities_[i] = FilePriority::Skip;
             const auto& file = (*displayed_)[i];
             auto path = wide(file.path), size = bytes(file.length);
             LVITEMW item{}; item.mask = LVIF_TEXT; item.iItem = static_cast<int>(i); item.pszText = path.data();
             ListView_InsertItem(files_, &item);
             ListView_SetItemText(files_, i, 1, size.data());
-            ListView_SetItemText(files_, i, 2, const_cast<PWSTR>(L"Обычный"));
-            ListView_SetCheckState(files_, i, TRUE);
+            ListView_SetItemText(files_, i, 2, const_cast<PWSTR>(priorityName(priorities_[i])));
+            ListView_SetCheckState(files_, i, priorities_[i] != FilePriority::Skip);
         }
         filling_ = false;
     }
     void refresh() {
-        const auto state = task_.snapshot();
-        const bool busy = task_.busy();
-        if (state.files != displayed_) populate(state);
-        for (HWND c : {source_, browse_, read_, folder_, choose_}) EnableWindow(c, !busy && !closing_);
-        for (HWND c : {all_, none_, priority_, apply_, start_}) EnableWindow(c, displayed_ && !busy && !closing_);
-        EnableWindow(stop_, busy && !closing_ && state.state != DownloadState::Stopping);
-        EnableWindow(open_, !text(folder_).empty());
+        if (dirty_) { dirty_ = false; saveEdits(); persist(); }
+        queue_.tick();
+        entries_ = queue_.snapshots();
+        if (!current()) selected_ = entries_.empty() ? 0 : entries_.front().id;
+        refreshJobs();
+        const auto entry = current();
+        const auto state = entry ? entry->download : DownloadSnapshot{};
+        const bool busy = entry && entry->busy;
+        if (selected_ != rendered_) {
+            rendered_ = selected_; previous_ = DownloadState::Idle;
+            SetWindowTextW(folder_, wide(entry ? entry->config.download_dir : config_.download_dir).c_str());
+            populate(state, entry ? entry->config : config_);
+        } else if (state.files != displayed_) populate(state, entry ? entry->config : config_);
+        for (HWND c : {source_, browse_, read_, limit_}) EnableWindow(c, !closing_);
+        for (HWND c : {folder_, choose_}) EnableWindow(c, editable());
+        for (HWND c : {all_, none_, priority_, apply_}) EnableWindow(c, displayed_ && editable());
+        EnableWindow(start_, editable());
+        EnableWindow(stop_, entry && (busy || entry->queued) && !closing_ && state.state != DownloadState::Stopping);
+        EnableWindow(remove_, entry && !entry->removing && !closing_);
+        EnableWindow(open_, entry && !text(folder_).empty());
         SetWindowTextW(start_, state.state == DownloadState::Stopped ? L"Продолжить" : L"Скачать");
         const wchar_t* label = L"Готов к работе";
         switch (state.state) {
@@ -282,6 +357,8 @@ private:
         case DownloadState::Failed: label = L"Ошибка — подробности в сообщении"; break;
         default: break;
         }
+        if (entry && entry->queued && !busy) label = L"В очереди — ожидание свободного места";
+        if (entry && entry->removing) label = L"Удаление из списка…";
         std::wostringstream status;
         status << label;
         if (state.state == DownloadState::Downloading || state.state == DownloadState::Complete)
@@ -298,10 +375,10 @@ private:
         if (state.state == DownloadState::Failed && previous_ != state.state && !smoke)
             MessageBoxW(handle, wide(state.error).c_str(), L"Ошибка загрузки", MB_OK | MB_ICONERROR);
         previous_ = state.state;
-        if (closing_ && !busy) {
-            if (!unloading_) { unloading_ = true; task_.unload(); }
-            else DestroyWindow(handle);
+        if (closing_ && queue_.closed()) {
+            DestroyWindow(handle);
         } else if (smoke && !closing_) {
+            if (!smokeSecond.empty()) { smokeQueue(); return; }
             if (!busy && state.state == DownloadState::Ready && !smokeStarted_) {
                 if (ListView_GetItemCount(files_) == 0) { exitCode = 1; close(); }
                 else { smokeStarted_ = true; SendMessageW(handle, WM_COMMAND, Start, 0); }
@@ -309,25 +386,106 @@ private:
             else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
         }
     }
-    void close() { closing_ = true; task_.stop(); }
+    void smokeQueue() {
+        if (GetTickCount64() > smokeDeadline_ || std::any_of(entries_.begin(), entries_.end(), [](const auto& entry) {
+            return entry.download.state == DownloadState::Failed;
+        })) { exitCode = 1; close(); return; }
+        if (!smokeStarted_) {
+            if (entries_.size() != 2 || std::any_of(entries_.begin(), entries_.end(), [](const auto& entry) { return entry.busy; })) return;
+            smokeStarted_ = true; // Command handlers refresh the window recursively.
+            ListView_SetItemState(files_, 0, LVIS_SELECTED, LVIS_SELECTED);
+            SendMessageW(priority_, CB_SETCURSEL, 1, 0);
+            SendMessageW(handle, WM_COMMAND, Apply, 0);
+            SendMessageW(handle, WM_COMMAND, Start, 0);
+            ListView_SetItemState(jobs_, 1, LVIS_SELECTED, LVIS_SELECTED);
+            ListView_SetItemState(files_, 0, LVIS_SELECTED, LVIS_SELECTED);
+            SendMessageW(priority_, CB_SETCURSEL, 2, 0);
+            SendMessageW(handle, WM_COMMAND, Apply, 0);
+            SendMessageW(handle, WM_COMMAND, Start, 0);
+            const auto entries = queue_.snapshots();
+            if (entries[0].config.file_priorities.at(0) != FilePriority::High ||
+                entries[1].config.file_priorities.at(0) != FilePriority::Low || !entries[1].queued) {
+                exitCode = 1; close();
+            }
+        } else if (std::all_of(entries_.begin(), entries_.end(), [](const auto& entry) {
+            return !entry.busy && entry.download.state == DownloadState::Complete;
+        })) close();
+    }
+    const wchar_t* jobState(const QueueSnapshot& entry) const {
+        if (entry.removing) return L"Удаление";
+        if (entry.queued && !entry.busy) return L"В очереди";
+        switch (entry.download.state) {
+        case DownloadState::Loading: return L"Метаданные";
+        case DownloadState::Ready: return L"Готов";
+        case DownloadState::Downloading: return L"Загрузка";
+        case DownloadState::Stopping: return L"Остановка";
+        case DownloadState::Stopped: return L"Остановлен";
+        case DownloadState::Complete: return L"Завершён";
+        case DownloadState::Failed: return L"Ошибка";
+        default: return L"Готов";
+        }
+    }
+    void refreshJobs() {
+        fillingJobs_ = true;
+        bool rebuild = ListView_GetItemCount(jobs_) != static_cast<int>(entries_.size());
+        if (!rebuild) for (size_t i = 0; i < entries_.size(); ++i) {
+            LVITEMW item{}; item.mask = LVIF_PARAM; item.iItem = static_cast<int>(i);
+            ListView_GetItem(jobs_, &item);
+            if (static_cast<DownloadId>(item.lParam) != entries_[i].id) rebuild = true;
+        }
+        if (rebuild) ListView_DeleteAllItems(jobs_);
+        for (size_t i = 0; i < entries_.size(); ++i) {
+            const auto& entry = entries_[i];
+            auto name = wide(entry.download.name.empty() ? entry.source : entry.download.name);
+            if (rebuild) {
+                LVITEMW item{}; item.mask = LVIF_TEXT | LVIF_PARAM; item.iItem = static_cast<int>(i);
+                item.pszText = name.data(); item.lParam = static_cast<LPARAM>(entry.id);
+                ListView_InsertItem(jobs_, &item);
+            } else ListView_SetItemText(jobs_, i, 0, name.data());
+            ListView_SetItemText(jobs_, i, 1, const_cast<PWSTR>(jobState(entry)));
+            auto progress = std::to_wstring(static_cast<int>(entry.download.progress));
+            ListView_SetItemText(jobs_, i, 2, progress.data());
+            ListView_SetItemState(jobs_, i, entry.id == selected_ ? LVIS_SELECTED : 0, LVIS_SELECTED);
+        }
+        fillingJobs_ = false;
+    }
+    void close() {
+        if (closing_) return;
+        // Persist before stopping so current edits are included in the saved list.
+        try { saveEdits(); persist(); } catch (const std::exception& error) {
+            if (!smoke) MessageBoxW(handle, wide(error.what()).c_str(), L"Не удалось сохранить список", MB_OK | MB_ICONERROR);
+            else exitCode = 1;
+        }
+        closing_ = true; queue_.close();
+    }
     LRESULT dispatch(UINT message, WPARAM wparam, LPARAM lparam) {
         switch (message) {
         case WM_CREATE: create(); return 0;
         case WM_SIZE: layout(); return 0;
         case WM_GETMINMAXINFO: {
-            auto info = reinterpret_cast<MINMAXINFO*>(lparam); info->ptMinTrackSize = {940, 710}; return 0;
+            auto info = reinterpret_cast<MINMAXINFO*>(lparam); info->ptMinTrackSize = {1050, 730}; return 0;
         }
         case WM_TIMER: refresh(); return 0;
         case WM_CLOSE: close(); return 0;
         case WM_DESTROY: KillTimer(handle, 1); PostQuitMessage(exitCode); return 0;
         case WM_NOTIFY: {
             auto header = reinterpret_cast<NMHDR*>(lparam);
+            if (header->idFrom == Jobs && header->code == LVN_ITEMCHANGED && !fillingJobs_ && !closing_) {
+                auto change = reinterpret_cast<NMLISTVIEW*>(lparam);
+                if ((change->uNewState & LVIS_SELECTED) && !(change->uOldState & LVIS_SELECTED)) {
+                    LVITEMW item{}; item.mask = LVIF_PARAM; item.iItem = change->iItem;
+                    ListView_GetItem(jobs_, &item);
+                    saveEdits(); selected_ = static_cast<DownloadId>(item.lParam);
+                    persist(); refresh();
+                }
+            }
             if (header->idFrom == Files && header->code == LVN_ITEMCHANGING && !filling_) {
                 auto change = reinterpret_cast<NMLISTVIEW*>(lparam);
-                if (((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) && task_.busy()) return TRUE;
+                if (((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) && !editable()) return TRUE;
             }
             if (header->idFrom == Files && header->code == LVN_ITEMCHANGED && !filling_) {
                 auto change = reinterpret_cast<NMLISTVIEW*>(lparam);
+                if ((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) dirty_ = true;
                 if (change->iItem >= 0 && static_cast<size_t>(change->iItem) < priorities_.size() &&
                     ListView_GetCheckState(files_, change->iItem) && priorities_[change->iItem] == FilePriority::Skip) {
                     priorities_[change->iItem] = FilePriority::Normal;
@@ -342,17 +500,24 @@ private:
             case Read: load(); break;
             case ChooseFolder: chooseFolder(); break;
             case Start: start(); break;
-            case Stop: task_.stop(); break;
+            case Stop: queue_.stop(selected_); refresh(); break;
+            case Remove: queue_.remove(selected_); persist(); refresh(); break;
+            case Limit:
+                if (HIWORD(wparam) == CBN_SELCHANGE) {
+                    queue_.setLimit(static_cast<size_t>(SendMessageW(limit_, CB_GETCURSEL, 0, 0)) + 1);
+                    persist(); refresh();
+                }
+                break;
             case OpenFolder: {
                 const auto directory = fs::absolute(fs::u8path(utf8(text(folder_))));
                 fs::create_directories(directory);
                 ShellExecuteW(handle, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
             }
             case SelectAll: case SelectNone:
-                if (!task_.busy()) for (size_t i = 0; i < priorities_.size(); ++i) ListView_SetCheckState(files_, i, LOWORD(wparam) == SelectAll);
+                if (editable()) for (size_t i = 0; i < priorities_.size(); ++i) ListView_SetCheckState(files_, i, LOWORD(wparam) == SelectAll);
                 break;
             case Apply:
-                if (!task_.busy()) {
+                if (editable()) {
                     const FilePriority values[] = {FilePriority::Normal, FilePriority::High, FilePriority::Low, FilePriority::Skip};
                     const auto selection = SendMessageW(priority_, CB_GETCURSEL, 0, 0);
                     if (selection < 0 || selection > 3) break;
@@ -361,6 +526,7 @@ private:
                         ListView_SetCheckState(files_, i, values[selection] != FilePriority::Skip);
                         ListView_SetItemText(files_, i, 2, const_cast<PWSTR>(priorityName(values[selection])));
                     }
+                    dirty_ = true;
                 }
                 break;
             }
@@ -381,6 +547,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (argv && argc == 5 && std::wstring(argv[1]) == L"--ui-test") {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeFolder = argv[3]; window.smokeConfig = argv[4];
     }
+    if (argv && argc == 6 && std::wstring(argv[1]) == L"--ui-queue-test") {
+        window.smoke = true; window.smokeSource = argv[2]; window.smokeSecond = argv[3];
+        window.smokeFolder = argv[4]; window.smokeConfig = argv[5];
+    }
     if (argv) LocalFree(argv);
     WNDCLASSEXW cls{}; cls.cbSize = sizeof(cls); cls.hInstance = instance;
     cls.lpfnWndProc = Window::procedure; cls.lpszClassName = L"TorrentClientWindow";
@@ -388,7 +558,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
     RegisterClassExW(&cls);
     HWND hwnd = CreateWindowExW(0, cls.lpszClassName, L"TorrentClient", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1050, 790, nullptr, nullptr, instance, &window);
+        CW_USEDEFAULT, CW_USEDEFAULT, 1200, 850, nullptr, nullptr, instance, &window);
     if (!hwnd) { OleUninitialize(); return 1; }
     ShowWindow(hwnd, window.smoke ? SW_HIDE : show);
     MSG message{};
