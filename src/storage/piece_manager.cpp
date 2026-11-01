@@ -19,6 +19,7 @@ PieceManager::PieceManager(size_t num_pieces,
     , piece_hashes_(piece_hashes)
     , bitfield_(num_pieces, false)
     , wanted_(num_pieces, true)
+    , priorities_(num_pieces, FilePriority::Normal)
     , pieces_downloaded_(0) {
 }
 
@@ -44,15 +45,16 @@ void PieceManager::markPieceComplete(uint32_t piece_index) {
 int32_t PieceManager::getNextPiece(const std::vector<bool>& peer_has_pieces) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Simple strategy: sequential download
-    // TODO: Implement rarest-first or random-first strategies
+    int32_t selected = -1;
+    auto priority = FilePriority::Skip;
     for (size_t i = 0; i < num_pieces_; ++i) {
-        if (wanted_[i] && !bitfield_[i] && i < peer_has_pieces.size() && peer_has_pieces[i]) {
-            return static_cast<int32_t>(i);
+        if (wanted_[i] && !bitfield_[i] && i < peer_has_pieces.size() && peer_has_pieces[i] && priorities_[i] > priority) {
+            selected = static_cast<int32_t>(i);
+            priority = priorities_[i];
         }
     }
 
-    return -1;  // No piece to download
+    return selected;
 }
 
 std::vector<Block> PieceManager::getBlocksForPiece(uint32_t piece_index) const {
@@ -212,6 +214,25 @@ void PieceManager::setWantedPieces(const std::vector<bool>& wanted) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (wanted.size() != num_pieces_) throw std::invalid_argument("Invalid wanted piece mask");
     wanted_ = wanted;
+    for (size_t i = 0; i < num_pieces_; ++i) {
+        if (!wanted[i]) priorities_[i] = FilePriority::Skip;
+        else if (priorities_[i] == FilePriority::Skip) priorities_[i] = FilePriority::Normal;
+    }
+}
+
+void PieceManager::setPiecePriorities(const std::vector<FilePriority>& priorities) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (priorities.size() != num_pieces_) throw std::invalid_argument("Invalid piece priority count");
+    for (const auto priority : priorities) {
+        if (priority > FilePriority::High) throw std::invalid_argument("Invalid piece priority");
+    }
+    priorities_ = priorities;
+    for (size_t i = 0; i < num_pieces_; ++i) wanted_[i] = priorities[i] != FilePriority::Skip;
+}
+
+FilePriority PieceManager::piecePriority(uint32_t index) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return index < priorities_.size() ? priorities_[index] : FilePriority::Skip;
 }
 
 size_t PieceManager::numPiecesRemaining() const {
@@ -357,14 +378,17 @@ int32_t PieceManager::getNextPieceRarestFirst(
     // Find rarest piece that this peer has and we need
     int32_t best_piece = -1;
     int min_rarity = INT_MAX;
+    auto best_priority = FilePriority::Skip;
 
     for (size_t i = 0; i < num_pieces_; ++i) {
         if (wanted_[i] && !bitfield_[i] &&  // We don't have it
             pieces_in_progress_.find(i) == pieces_in_progress_.end() &&  // Not in assembly
             in_download.find(i) == in_download.end() &&  // Not being downloaded
             i < peer_has_pieces.size() && peer_has_pieces[i] &&  // Peer has it
-            rarity[i] < min_rarity && rarity[i] > 0) {  // Rarer than current best
+            rarity[i] > 0 && (priorities_[i] > best_priority ||
+                (priorities_[i] == best_priority && rarity[i] < min_rarity))) {
 
+            best_priority = priorities_[i];
             min_rarity = rarity[i];
             best_piece = static_cast<int32_t>(i);
         }
@@ -390,11 +414,17 @@ int32_t PieceManager::getNextPieceRandomFirst(
 
     // Collect available pieces
     std::vector<uint32_t> available;
+    auto best_priority = FilePriority::Skip;
     for (size_t i = 0; i < num_pieces_; ++i) {
         if (wanted_[i] && !bitfield_[i] &&
             pieces_in_progress_.find(i) == pieces_in_progress_.end() &&
             in_download.find(i) == in_download.end() &&
             i < peer_has_pieces.size() && peer_has_pieces[i]) {
+            if (priorities_[i] > best_priority) {
+                available.clear();
+                best_priority = priorities_[i];
+            }
+            if (priorities_[i] < best_priority) continue;
             available.push_back(i);
         }
     }
@@ -417,17 +447,19 @@ int32_t PieceManager::getNextPieceSequential(
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Select first piece that we need and peer has
+    int32_t selected = -1;
+    auto best_priority = FilePriority::Skip;
     for (size_t i = 0; i < num_pieces_; ++i) {
         if (wanted_[i] && !bitfield_[i] &&
             pieces_in_progress_.find(i) == pieces_in_progress_.end() &&
             in_download.find(i) == in_download.end() &&
-            i < peer_has_pieces.size() && peer_has_pieces[i]) {
-            return static_cast<int32_t>(i);
+            i < peer_has_pieces.size() && peer_has_pieces[i] && priorities_[i] > best_priority) {
+            selected = static_cast<int32_t>(i);
+            best_priority = priorities_[i];
         }
     }
 
-    return -1;
+    return selected;
 }
 
 // Resume capability methods

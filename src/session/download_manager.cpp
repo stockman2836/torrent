@@ -46,9 +46,10 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     );
 
     piece_manager_->setSequentialMode(config.sequential_download);
-    piece_manager_->setWantedPieces(FileSelection(torrent_, config.file_indices).pieces());
+    const FileSelection selection(torrent_, config.file_indices, config.file_priorities);
+    piece_manager_->setPiecePriorities(selection.piecePriorities());
 
-    file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_, config.file_indices);
+    file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_, selection);
 
     tracker_client_ = std::make_unique<TrackerClient>(
         torrent_.announce(),

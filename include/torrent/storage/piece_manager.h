@@ -10,6 +10,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include "torrent/core/file_priority.h"
 
 namespace torrent {
 
@@ -61,6 +62,8 @@ public:
     void setSequentialMode(bool sequential) { sequential_mode_ = sequential; }
     bool isSequentialMode() const { return sequential_mode_; }
     void setWantedPieces(const std::vector<bool>& wanted);
+    void setPiecePriorities(const std::vector<FilePriority>& priorities);
+    FilePriority piecePriority(uint32_t index) const;
     size_t numPiecesRemaining() const;
 
     // Block management
@@ -98,6 +101,7 @@ private:
 
     std::vector<bool> bitfield_;  // Which pieces we have
     std::vector<bool> wanted_;
+    std::vector<FilePriority> priorities_;
     size_t pieces_downloaded_;
 
     // Pieces in progress (being assembled)

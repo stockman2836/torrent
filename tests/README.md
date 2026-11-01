@@ -53,6 +53,14 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_selection_changed` | Change selection and reuse previously verified data | CLI executable |
 | `test_selection_invalid` | Reject out-of-range IDs before payload initialization | CLI executable |
 | `test_selection_preserve` | Leave an existing skipped file unchanged across resume | CLI executable |
+| `test_priority_order` | High then normal then low requests with sequential tie-breaking | CLI executable |
+| `test_priority_default` | Priority order through random-first and rarest-first | CLI executable |
+| `test_priority_boundary` | High-priority tail before lower-priority boundary pieces | CLI executable |
+| `test_priority_allskip` | Skip everything without payload files or network activity | CLI executable |
+| `test_priority_invalid` | Reject nonexistent priority file IDs before initialization | CLI executable |
+| `test_priority_outside` | Reject priorities that expand an explicit file selection | CLI executable |
+| `test_priority_resume` | Change startup priorities and reuse verified data | CLI executable |
+| `test_priority_list` | Preview effective priorities without payload activity | CLI executable |
 
 Each unit suite has a 30-second timeout. The integration test has a 55-second
 CTest timeout and kills the child client after 45 seconds if it does not exit.
@@ -66,6 +74,8 @@ timeout. Their slow seed never supplies its held blocks normally, so completing
 the file requires an endgame request to another seed.
 Selection fixtures have a 12-second child timeout and 30-second CTest timeout.
 Artifacts remain under `build/tests/selection-*`.
+Priority fixtures use the same 12-second child/30-second CTest timeouts and
+retain artifacts under `build/tests/priority-*`.
 
 The integration test downloads two pieces split into multiple 16-KiB blocks,
 checks the info hash in the handshake, validates block requests and compares
@@ -103,6 +113,16 @@ Run individual suites with `ctest --test-dir build -R test_command_line -V` or
 Run transfer scenarios with `ctest --test-dir build -R test_transfer --output-on-failure`.
 
 ## Adding tests
+
+Priority integration checks inspect the order of actual wire requests from one
+peer. They verify final file bytes, skipped paths, tracker totals, boundary
+pieces and restarting with changed priorities. Unit tests check maximum-overlap
+priority mapping and each strategy's tie-break behavior. These checks cover
+startup selection, not changing priorities in a running session.
+
+```sh
+ctest --test-dir build -R test_priority --output-on-failure
+```
 
 Add `unit/test_<module>.cpp` and register it with `add_unit_test` in
 `tests/CMakeLists.txt`, linking the narrowest module that provides the behavior.

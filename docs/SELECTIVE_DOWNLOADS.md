@@ -20,6 +20,11 @@ Comma-separated positive numbers are accepted; duplicates are deduplicated.
 Ranges and an empty list are not accepted. Out-of-range numbers fail before
 payload initialization. Existing skipped files are left unchanged.
 
+Use `--priority "2:high,4:low"` to order files within the selected set, or
+`--priority "2:skip"` to exclude a file. Priorities do not expand an explicit
+`--files` selection. Effective values are shown by `--list-files`. See
+[priority rules](FILE_PRIORITIES.md).
+
 CLI numbers are one-based. The `Config::file_indices` API uses zero-based
 metadata indices, with an empty vector meaning all files. This runtime choice
 is not serialized into the JSON configuration file.

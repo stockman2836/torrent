@@ -564,6 +564,36 @@ TEST_F(PieceManagerTest, EmptyWantedMaskCompletesWithoutDownloadingAnything) {
     EXPECT_THROW(manager_->setWantedPieces({true}), std::invalid_argument);
 }
 
+TEST_F(PieceManagerTest, EveryStrategyPrefersHighestEligiblePriority) {
+    std::vector<FilePriority> priorities(num_pieces_, FilePriority::Low);
+    priorities[0] = FilePriority::Skip;
+    priorities[3] = FilePriority::Normal;
+    priorities[7] = FilePriority::High;
+    manager_->setPiecePriorities(priorities);
+    const std::vector<bool> available(num_pieces_, true);
+    EXPECT_EQ(manager_->getNextPiece(available), 7);
+    EXPECT_EQ(manager_->getNextPieceSequential(available, {}), 7);
+    EXPECT_EQ(manager_->getNextPieceRandomFirst(available, {}), 7);
+    EXPECT_EQ(manager_->getNextPieceRarestFirst({available}, available, {}), 7);
+    EXPECT_EQ(manager_->getNextPieceSequential(available, {7}), 3);
+    manager_->markPieceComplete(7);
+    EXPECT_EQ(manager_->getNextPieceRandomFirst(available, {}), 3);
+    manager_->markPieceComplete(3);
+    EXPECT_EQ(manager_->getNextPieceSequential(available, {}), 1);
+    EXPECT_TRUE(manager_->getMissingBlocks(0).empty());
+}
+
+TEST_F(PieceManagerTest, RarityBreaksTiesWithinTheSamePriority) {
+    std::vector<FilePriority> priorities(num_pieces_, FilePriority::Low);
+    priorities[7] = priorities[8] = FilePriority::High;
+    manager_->setPiecePriorities(priorities);
+    const std::vector<bool> available(num_pieces_, true);
+    auto second = available; second[8] = false;
+    EXPECT_EQ(manager_->getNextPieceRarestFirst({available, second}, available, {}), 8);
+    EXPECT_EQ(manager_->getNextPieceSequential(available, {}), 7);
+    EXPECT_THROW(manager_->setPiecePriorities({FilePriority::High}), std::invalid_argument);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

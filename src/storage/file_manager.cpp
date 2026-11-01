@@ -12,7 +12,12 @@ namespace torrent {
 
 FileManager::FileManager(const TorrentFile& torrent, const std::string& directory,
                          const std::vector<size_t>& selected)
-    : torrent_(torrent), download_dir_(directory), selected_files_(FileSelection(torrent, selected).files()) {}
+    : FileManager(torrent, directory, FileSelection(torrent, selected)) {}
+
+FileManager::FileManager(const TorrentFile& torrent, const std::string& directory, const FileSelection& selection)
+    : torrent_(torrent), download_dir_(directory), selected_files_(selection.files()) {
+    if (selected_files_.size() != torrent.files().size()) throw std::invalid_argument("Invalid file selection size");
+}
 
 FileManager::~FileManager() { closeFiles(); }
 

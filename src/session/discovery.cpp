@@ -280,62 +280,14 @@ void DownloadManager::webseedLoop() {
 }
 
 void DownloadManager::updateWebSeeds() {
-    if (!enable_webseeds_ || !webseed_manager_ || !webseed_manager_->hasWebSeeds()) {
-        return;
-    }
-
-    // Find pieces that need to be downloaded
-    // Prefer sequential gaps for web seeds (BEP 19 optimization)
+    if (!enable_webseeds_ || !webseed_manager_ || !webseed_manager_->hasWebSeeds()) return;
     std::lock_guard<std::mutex> lock(pieces_mutex_);
-
-    // Get bitfield to see what pieces we need
-    auto bitfield = piece_manager_->getBitfield();
-    size_t num_pieces = bitfield.size();
-
-    // Look for gaps (consecutive missing pieces) to download from web seeds
-    // This optimizes HTTP range requests
-    uint32_t gap_start = UINT32_MAX;
-    uint32_t gap_length = 0;
-
-    for (size_t i = 0; i < num_pieces; ++i) {
-        if (!bitfield[i] && !piece_manager_->getMissingBlocks(i).empty() && pieces_in_download_.find(i) == pieces_in_download_.end()) {
-            // Found a missing piece not being downloaded
-            if (gap_start == UINT32_MAX) {
-                gap_start = i;
-                gap_length = 1;
-            } else {
-                gap_length++;
-            }
-
-            // If gap is large enough (4+ pieces), start downloading from web seed
-            if (gap_length >= 4) {
-                // Download from gap_start
-                if (webseed_manager_->downloadFullPiece(gap_start)) {
-                    pieces_in_download_.insert(gap_start);
-                    LOG_DEBUG("WebSeed: Requested piece {} from web seed", gap_start);
-                }
-                gap_start++;
-                gap_length--;
-            }
-        } else {
-            // Reset gap
-            gap_start = UINT32_MAX;
-            gap_length = 0;
-        }
-    }
-
-    // Also download random missing pieces if no gaps found
-    // This helps with the last few pieces
-    if (gap_start == UINT32_MAX) {
-        for (size_t i = 0; i < num_pieces; ++i) {
-            if (!bitfield[i] && !piece_manager_->getMissingBlocks(i).empty() && pieces_in_download_.find(i) == pieces_in_download_.end()) {
-                if (webseed_manager_->downloadFullPiece(i)) {
-                    pieces_in_download_.insert(i);
-                    LOG_DEBUG("WebSeed: Requested piece {} from web seed", i);
-                    break;  // Only request one piece at a time
-                }
-            }
-        }
+    const std::vector<bool> available(torrent_.numPieces(), true);
+    // Sequential order within the highest priority keeps HTTP reads predictable.
+    for (size_t pending = 0; pending < 4; ++pending) {
+        const auto index = piece_manager_->getNextPieceSequential(available, pieces_in_download_);
+        if (index < 0 || !webseed_manager_->downloadFullPiece(index)) break;
+        pieces_in_download_.insert(index);
     }
 }
 

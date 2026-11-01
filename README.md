@@ -91,6 +91,7 @@ working directory. CLI values override configuration values.
 ./build/app/torrent_client example.torrent --download-dir ./downloads --max-download 500
 ./build/app/torrent_client example.torrent --list-files
 ./build/app/torrent_client example.torrent --files 2,4
+./build/app/torrent_client example.torrent --priority "2:high,4:low,5:skip"
 ./build/app/torrent_client --help
 ```
 
@@ -102,6 +103,13 @@ values produce an error before the download starts.
 starting payload downloads. `--files 2,4` downloads only those files; omitting
 it downloads everything. Magnet inputs support the same flags after metadata
 acquisition. Skipped payload files are not created or modified.
+
+`--priority "2:high,4:low,5:skip"` assigns startup priorities; unmentioned files
+default to `normal`. `--list-files` also displays effective priorities. When
+combined with `--files`, priorities apply within that selection; they cannot
+silently enable an excluded file. Pieces shared by multiple selected files use
+their highest priority. Existing in-flight work is not preempted. See
+[file priorities](docs/FILE_PRIORITIES.md).
 
 Pieces overlapping selected and skipped files must still be downloaded and
 SHA1-verified in full. Their data is retained in a hidden per-torrent boundary
@@ -117,7 +125,7 @@ ctest --test-dir build -R test_download --output-on-failure
 
 Eight unit-test executables cover metadata parsing, file selection, piece
 management, file I/O, CLI parsing, extension dispatch and metadata exchange.
-With Node.js installed, twenty-six integration scenarios run against
+With Node.js installed, thirty-four integration scenarios run against
 local trackers and TCP seeds: basic download, multiple peers, partial download
 followed by restart, corrupted saved data, peer disconnect and multi-file piece
 boundaries. The multi-peer check rejects duplicate block requests. Each result

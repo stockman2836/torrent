@@ -63,3 +63,18 @@ TEST(CommandLine, RejectsMalformedFileSelections) {
     }
     EXPECT_THROW(parse({"file.torrent", "--files"}), std::invalid_argument);
 }
+
+TEST(CommandLine, ParsesNamedPrioritiesAndLastOverrideWins) {
+    const auto options = parse({"file.torrent", "--priority", "2:high,4:low,1:skip", "--priority", "4:normal"});
+    EXPECT_EQ(options.file_priorities.at(1), torrent::FilePriority::High);
+    EXPECT_EQ(options.file_priorities.at(3), torrent::FilePriority::Normal);
+    EXPECT_EQ(options.file_priorities.at(0), torrent::FilePriority::Skip);
+}
+
+TEST(CommandLine, RejectsMalformedPrioritySpecifications) {
+    for (const auto* value : {"", "0:high", "-1:low", "2", "2:", ":high", "2:urgent", "1:HIGH",
+                              "1:high,", "1:high,,2:low", "1:high:low"}) {
+        EXPECT_THROW(parse({"file.torrent", "--priority", value}), std::invalid_argument) << value;
+    }
+    EXPECT_THROW(parse({"file.torrent", "--priority"}), std::invalid_argument);
+}

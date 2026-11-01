@@ -68,3 +68,22 @@ TEST(FileSelection, RejectsMissingPieceHashesInsteadOfCompletingAnEmptyMask) {
     const auto torrent = TorrentFile::fromData({encoded.begin(), encoded.end()});
     EXPECT_THROW((void)FileSelection(torrent), std::invalid_argument);
 }
+
+TEST(FileSelection, SharedPiecesInheritTheHighestFilePriority) {
+    const auto torrent = metadata({10007, 40009, 65536, 777, 0});
+    const FileSelection selection(torrent, {}, {{0, FilePriority::Low}, {1, FilePriority::High},
+                                               {2, FilePriority::Skip}, {3, FilePriority::Low}});
+    EXPECT_EQ(selection.piecePriorities(), (std::vector<FilePriority>{FilePriority::High, FilePriority::High,
+        FilePriority::High, FilePriority::High, FilePriority::Skip, FilePriority::Skip, FilePriority::Skip, FilePriority::Low}));
+    EXPECT_EQ(selection.files(), (std::vector<bool>{true, true, false, true, true}));
+    EXPECT_EQ(selection.selectedBytes(), 10007 + 40009 + 777);
+}
+
+TEST(FileSelection, ExplicitSelectionCannotBeExpandedByPriority) {
+    const auto torrent = metadata({16384, 16384});
+    EXPECT_THROW((FileSelection(torrent, {0}, {{1, FilePriority::High}})), std::invalid_argument);
+    EXPECT_THROW((FileSelection(torrent, {}, {{2, FilePriority::Skip}})), std::invalid_argument);
+    const FileSelection none(torrent, {0}, {{0, FilePriority::Skip}});
+    EXPECT_EQ(none.selectedBytes(), 0);
+    EXPECT_EQ(none.piecePriorities(), (std::vector<FilePriority>{FilePriority::Skip, FilePriority::Skip}));
+}

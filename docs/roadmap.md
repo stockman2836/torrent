@@ -25,12 +25,14 @@ This document tracks the development roadmap for the BitTorrent client.
 - [x] List files and select one or multiple files through the CLI.
 - [x] Preserve verified boundary pieces without creating skipped payload files.
 - [x] Resume selected downloads and recover changed data after restarting.
+- [x] Startup file priorities (skip, low, normal, high) with CLI preview.
+- [x] Priority-aware sequential, random-first, rarest-first and endgame selection.
 
-Verification: eight unit suites and twenty-six offline integration scenarios pass.
+Verification: eight unit suites and thirty-four offline integration scenarios pass.
 The historical completed-feature checklist below describes implementation scope,
 not comprehensive interoperability coverage for every extension.
 
-Next: file priorities and multi-torrent session management. DHT-only magnet coverage,
+Next: multi-torrent session management. DHT-only magnet coverage,
 public swarm checks and UPnP/NAT-PMP remain later milestones.
 
 ### Completed Features 
@@ -215,14 +217,14 @@ Graphical selection, large public-swarm checks and priorities remain separate wo
 ### 3.3 File Priority System
 
 **Priority: Medium**
-**Status: TODO**
+**Status: Startup priorities complete; live adjustment TODO**
 
 Prioritize important files for download.
 
-- [ ] Add priority levels (skip, low, normal, high)
-- [ ] Implement priority-based piece selection
+- [x] Add priority levels (skip, low, normal, high)
+- [x] Implement priority-based piece selection
 - [ ] Add runtime priority adjustment
-- [ ] Update CLI for priority management
+- [x] Add startup CLI overrides and effective-priority listing
 
 **Files to modify:**
 

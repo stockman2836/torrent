@@ -11,6 +11,7 @@ struct CommandLine {
     bool help = false;
     bool list_files = false;
     std::vector<size_t> file_indices;
+    std::map<size_t, FilePriority> file_priorities;
     std::string input;
     std::string config_file = "./config.json";
     std::optional<std::string> download_dir;

@@ -70,6 +70,17 @@ valid cache from masking modified selected content. Existing skipped files can
 be read without being modified when verifying earlier selections. See
 [selective downloads](SELECTIVE_DOWNLOADS.md).
 
+`FilePriority` is a small core value type. `FileSelection` resolves the explicit
+selection and priority overrides into effective file priorities, storage masks
+and maximum-overlap piece priorities. The same resolved selection initializes
+storage and the piece manager, including the all-skipped case.
+
+Sequential and random-first strategies apply their own ordering within the
+highest eligible priority. Rarest-first compares priority before availability
+count. Endgame compares priority among eligible rescue blocks. Web-seed
+candidate selection reuses the sequential priority-aware selector. Priorities
+are chosen before starting a session; runtime changes are not exposed yet.
+
 The coordinator's implementation is divided by responsibility:
 
 - `download_manager.cpp`: construction, lifecycle and status.

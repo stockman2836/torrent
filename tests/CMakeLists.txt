@@ -63,6 +63,12 @@ if(NODE_EXECUTABLE)
             "$<TARGET_FILE:torrent_client>")
         set_tests_properties(test_selection_${scenario} PROPERTIES TIMEOUT 30)
     endforeach()
+    foreach(scenario order default boundary allskip invalid outside resume list)
+        add_test(NAME test_priority_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_priority.cjs" ${scenario}
+            "$<TARGET_FILE:torrent_client>")
+        set_tests_properties(test_priority_${scenario} PROPERTIES TIMEOUT 30)
+    endforeach()
 endif()
 
 # Optional: Add coverage flags if needed

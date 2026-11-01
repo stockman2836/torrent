@@ -65,8 +65,10 @@ void DownloadManager::requestEndgameBlock(ActivePeerInfo& peer) {
             const bool available = index < peer.available_pieces.size() && peer.available_pieces[index];
             if (owners == 0) {
                 all_requested = false;
-                if (available && pieces_in_download_.count(index) && !unassigned) unassigned = block;
-            } else if (available && owners < 2 && !peer.pending_blocks.count(key) && !duplicate &&
+                if (available && pieces_in_download_.count(index) && (!unassigned ||
+                    piece_manager_->piecePriority(index) > piece_manager_->piecePriority(unassigned->piece_index))) unassigned = block;
+            } else if (available && owners < 2 && !peer.pending_blocks.count(key) &&
+                       (!duplicate || piece_manager_->piecePriority(index) > piece_manager_->piecePriority(duplicate->piece_index)) &&
                        now - oldest >= std::chrono::milliseconds(500)) {
                 duplicate = block;
             }

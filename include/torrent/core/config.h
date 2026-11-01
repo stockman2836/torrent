@@ -5,6 +5,8 @@
 #include <optional>
 #include <vector>
 #include <cstddef>
+#include <map>
+#include "torrent/core/file_priority.h"
 
 namespace torrent {
 
@@ -25,6 +27,7 @@ struct Config {
     // Runtime CLI/API selection, not persisted in the configuration file.
     // Zero-based file indices; empty means all files.
     std::vector<size_t> file_indices;
+    std::map<size_t, FilePriority> file_priorities; // Runtime overrides, also zero-based.
 
     // Upload/Seeding settings
     bool seed_after_download = true;

@@ -8,10 +8,13 @@
 
 namespace torrent {
 
+class FileSelection;
+
 class FileManager {
 public:
     FileManager(const TorrentFile& torrent, const std::string& download_dir,
                 const std::vector<size_t>& selected_files = {});
+    FileManager(const TorrentFile& torrent, const std::string& download_dir, const FileSelection& selection);
     ~FileManager();
 
     // Initialize files (create/allocate space)
