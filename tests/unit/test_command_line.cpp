@@ -50,3 +50,16 @@ TEST(CommandLine, RejectsInvalidAndOverflowingSpeedLimits) {
         EXPECT_THROW(parse({"file.torrent", "--max-download", value}), std::invalid_argument) << value;
     }
 }
+
+TEST(CommandLine, ListsFilesAndConvertsOneBasedNumbers) {
+    const auto options = parse({"file.torrent", "--list-files", "--files", "4,2,2"});
+    EXPECT_TRUE(options.list_files);
+    EXPECT_EQ(options.file_indices, (std::vector<size_t>{1, 3}));
+}
+
+TEST(CommandLine, RejectsMalformedFileSelections) {
+    for (const auto* value : {"", "0", "-1", "1,", ",2", "1,,2", "2-4", "abc", "99999999999999999999999"}) {
+        EXPECT_THROW(parse({"file.torrent", "--files", value}), std::invalid_argument) << value;
+    }
+    EXPECT_THROW(parse({"file.torrent", "--files"}), std::invalid_argument);
+}

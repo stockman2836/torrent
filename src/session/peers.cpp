@@ -289,7 +289,7 @@ void DownloadManager::connectToPeers() {
         // If peer supports Fast Extension, send optimized messages
         if (connection->peerSupportsFastExtension()) {
             // Check if we're a seeder or have no pieces
-            bool is_seeder = piece_manager_->percentComplete() >= 100.0;
+            bool is_seeder = bytesRemaining() == 0;
             size_t pieces_have = 0;
             for (bool have : our_bitfield) {
                 if (have) pieces_have++;

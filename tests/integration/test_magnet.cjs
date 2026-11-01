@@ -51,7 +51,7 @@ const listen = server => new Promise((resolve, reject) => {
 
 async function main() {
   const [scenario, program] = process.argv.slice(2);
-  assert.ok(['download', 'reject', 'hash', 'tracker', 'invalid', 'stall'].includes(scenario));
+  assert.ok(['download', 'reject', 'hash', 'tracker', 'invalid', 'stall', 'list'].includes(scenario));
   const work = fs.mkdtempSync(path.join(process.cwd(), `magnet-${scenario}-`));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; ++i) data[i] = (i * 37 + Math.floor(i / 32768) * 19) % 256;
@@ -152,7 +152,7 @@ async function main() {
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: false, enable_pex: false,
       enable_lsd: false, enable_webseeds: false, enable_utp: false, enable_encryption: false,
       download_dir: './files', log_file: './client.log', listen_port: 16881 }));
-    child = spawn(path.resolve(program), [uri, '--config', 'config.json'], { cwd: work });
+    child = spawn(path.resolve(program), [uri, '--config', 'config.json', ...(scenario === 'list' ? ['--list-files'] : [])], { cwd: work });
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     const timer = setTimeout(() => child.kill(), 20000);
@@ -161,7 +161,12 @@ async function main() {
       child.once('close', resolve);
     }).finally(() => clearTimeout(timer));
     if (protocolError) throw protocolError;
-    if (scenario === 'invalid') {
+    if (scenario === 'list') {
+      assert.equal(code, 0, output);
+      assert.ok(output.includes('ID\tBytes\tPath') && output.includes('payload.bin'));
+      assert.ok(!fs.existsSync(path.join(work, 'files')));
+      assert.equal(requests.filter(r => r.kind === 'data').length, 0);
+    } else if (scenario === 'invalid') {
       assert.equal(code, 1, output);
       assert.ok(!fs.existsSync(path.join(work, 'files')), 'Unverified metadata must not start file downloading');
       assert.ok(!requests.some(r => r.kind === 'data'));

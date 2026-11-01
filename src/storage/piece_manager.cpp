@@ -18,6 +18,7 @@ PieceManager::PieceManager(size_t num_pieces,
     , total_length_(total_length)
     , piece_hashes_(piece_hashes)
     , bitfield_(num_pieces, false)
+    , wanted_(num_pieces, true)
     , pieces_downloaded_(0) {
 }
 
@@ -46,7 +47,7 @@ int32_t PieceManager::getNextPiece(const std::vector<bool>& peer_has_pieces) {
     // Simple strategy: sequential download
     // TODO: Implement rarest-first or random-first strategies
     for (size_t i = 0; i < num_pieces_; ++i) {
-        if (!bitfield_[i] && i < peer_has_pieces.size() && peer_has_pieces[i]) {
+        if (wanted_[i] && !bitfield_[i] && i < peer_has_pieces.size() && peer_has_pieces[i]) {
             return static_cast<int32_t>(i);
         }
     }
@@ -83,7 +84,7 @@ std::vector<Block> PieceManager::getBlocksForPiece(uint32_t piece_index) const {
 
 std::vector<Block> PieceManager::getMissingBlocks(uint32_t index) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (index >= num_pieces_ || bitfield_[index]) return {};
+    if (index >= num_pieces_ || !wanted_[index] || bitfield_[index]) return {};
     auto blocks = getBlocksForPiece(index);
     const auto piece = pieces_in_progress_.find(index);
     if (piece != pieces_in_progress_.end()) {
@@ -200,10 +201,24 @@ bool PieceManager::verifyPiece(uint32_t piece_index, const std::vector<uint8_t>&
 
 double PieceManager::percentComplete() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (num_pieces_ == 0) {
-        return 0.0;
+    size_t total = 0, complete = 0;
+    for (size_t i = 0; i < num_pieces_; ++i) {
+        if (wanted_[i]) { ++total; if (bitfield_[i]) ++complete; }
     }
-    return (static_cast<double>(pieces_downloaded_) / num_pieces_) * 100.0;
+    return total == 0 ? 100.0 : 100.0 * complete / total;
+}
+
+void PieceManager::setWantedPieces(const std::vector<bool>& wanted) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (wanted.size() != num_pieces_) throw std::invalid_argument("Invalid wanted piece mask");
+    wanted_ = wanted;
+}
+
+size_t PieceManager::numPiecesRemaining() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t remaining = 0;
+    for (size_t i = 0; i < num_pieces_; ++i) if (wanted_[i] && !bitfield_[i]) ++remaining;
+    return remaining;
 }
 
 std::vector<bool> PieceManager::getBitfield() const {
@@ -295,7 +310,7 @@ size_t PieceManager::numPiecesDownloaded() const {
 PieceManager::BlockResult PieceManager::receiveBlock(uint32_t index, uint32_t offset,
     const std::vector<uint8_t>& data, FileManager* files) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (index >= num_pieces_ || bitfield_[index]) return BlockResult::Rejected;
+    if (index >= num_pieces_ || !wanted_[index] || bitfield_[index]) return BlockResult::Rejected;
     const auto existing = pieces_in_progress_.find(index);
     if (existing != pieces_in_progress_.end() && offset % BLOCK_SIZE == 0 &&
         offset / BLOCK_SIZE < existing->second->total_blocks &&
@@ -344,7 +359,7 @@ int32_t PieceManager::getNextPieceRarestFirst(
     int min_rarity = INT_MAX;
 
     for (size_t i = 0; i < num_pieces_; ++i) {
-        if (!bitfield_[i] &&  // We don't have it
+        if (wanted_[i] && !bitfield_[i] &&  // We don't have it
             pieces_in_progress_.find(i) == pieces_in_progress_.end() &&  // Not in assembly
             in_download.find(i) == in_download.end() &&  // Not being downloaded
             i < peer_has_pieces.size() && peer_has_pieces[i] &&  // Peer has it
@@ -376,7 +391,7 @@ int32_t PieceManager::getNextPieceRandomFirst(
     // Collect available pieces
     std::vector<uint32_t> available;
     for (size_t i = 0; i < num_pieces_; ++i) {
-        if (!bitfield_[i] &&
+        if (wanted_[i] && !bitfield_[i] &&
             pieces_in_progress_.find(i) == pieces_in_progress_.end() &&
             in_download.find(i) == in_download.end() &&
             i < peer_has_pieces.size() && peer_has_pieces[i]) {
@@ -404,7 +419,7 @@ int32_t PieceManager::getNextPieceSequential(
 
     // Select first piece that we need and peer has
     for (size_t i = 0; i < num_pieces_; ++i) {
-        if (!bitfield_[i] &&
+        if (wanted_[i] && !bitfield_[i] &&
             pieces_in_progress_.find(i) == pieces_in_progress_.end() &&
             in_download.find(i) == in_download.end() &&
             i < peer_has_pieces.size() && peer_has_pieces[i]) {

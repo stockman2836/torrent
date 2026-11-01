@@ -122,7 +122,7 @@ int32_t DownloadManager::selectNextPiece(ActivePeerInfo* peer) {
 }
 
 bool DownloadManager::isEndgameMode() const {
-    const auto remaining = torrent_.numPieces() - piece_manager_->numPiecesDownloaded();
+    const auto remaining = piece_manager_->numPiecesRemaining();
     return remaining > 0 && remaining <= 5;
 }
 

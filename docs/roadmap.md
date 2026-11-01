@@ -7,7 +7,7 @@
 
 This document tracks the development roadmap for the BitTorrent client.
 
-### Current checkpoint — 2026-10-23
+### Current checkpoint — 2026-11-01
 
 - [x] Structural refactor with explicit module dependencies.
 - [x] Offline basic TCP download integration check.
@@ -22,12 +22,15 @@ This document tracks the development roadmap for the BitTorrent client.
 - [x] Fall back from an unavailable magnet tracker.
 - [x] Bounded redundant endgame block requests with CANCEL.
 - [x] Ignore late cancelled blocks and retain shared data after disconnects.
+- [x] List files and select one or multiple files through the CLI.
+- [x] Preserve verified boundary pieces without creating skipped payload files.
+- [x] Resume selected downloads and recover changed data after restarting.
 
-Verification: seven unit suites and sixteen offline integration scenarios pass.
+Verification: eight unit suites and twenty-six offline integration scenarios pass.
 The historical completed-feature checklist below describes implementation scope,
 not comprehensive interoperability coverage for every extension.
 
-Next: selective file downloading through the CLI. DHT-only magnet coverage,
+Next: file priorities and multi-torrent session management. DHT-only magnet coverage,
 public swarm checks and UPnP/NAT-PMP remain later milestones.
 
 ### Completed Features 
@@ -189,15 +192,17 @@ Download multiple torrents simultaneously.
 ### 3.2 Selective File Download
 
 **Priority: High**
-**Status: TODO**
+**Status: DONE (CLI and offline verification)**
 
 Choose which files to download from multi-file torrents.
 
-- [ ] Add file selection UI/CLI
-- [ ] Implement piece filtering based on file selection
-- [ ] Update piece manager for selective download
-- [ ] Add file priority system
-- [ ] Test with large multi-file torrents
+- [x] Add CLI listing and one-based file selection
+- [x] Filter piece selection without inventing verified data for skipped files
+- [x] Separate selected progress from tracker totals and full-seed status
+- [x] Retain boundary data for SHA1 verification and resume
+- [x] Test disjoint files, zero-length files, boundaries, resume and changed selections
+
+Graphical selection, large public-swarm checks and priorities remain separate work.
 
 **Files to modify:**
 

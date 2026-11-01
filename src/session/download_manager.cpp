@@ -1,5 +1,6 @@
 #include "torrent/session/download_manager.h"
 #include "peer_state.h"
+#include "torrent/metainfo/file_selection.h"
 #include "torrent/core/logger.h"
 #include "torrent/core/utils.h"
 #include "torrent/network/discovery/pex_manager.h"
@@ -45,8 +46,9 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     );
 
     piece_manager_->setSequentialMode(config.sequential_download);
+    piece_manager_->setWantedPieces(FileSelection(torrent_, config.file_indices).pieces());
 
-    file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_);
+    file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_, config.file_indices);
 
     tracker_client_ = std::make_unique<TrackerClient>(
         torrent_.announce(),
@@ -109,6 +111,9 @@ void DownloadManager::start() {
 
     running_ = true;
     paused_ = false;
+    // A completed subset has nothing to fetch. A complete nonempty torrent may
+    // still start its existing seeding lifecycle when used through the session API.
+    if (progress() >= 100.0 && (bytesRemaining() > 0 || torrent_.totalLength() == 0)) return;
 
     std::cout << "Contacting tracker...\n";
     updateTracker();
@@ -199,7 +204,7 @@ void DownloadManager::stop() {
 
     // Notify tracker we're stopping
     int64_t left = bytesRemaining();
-    tracker_client_->announce(
+    if (!first_announce_) tracker_client_->announce(
         total_uploaded_,
         total_downloaded_,
         left,
@@ -319,7 +324,7 @@ void DownloadManager::downloadLoop() {
         printStatus();
 
         // Check if download complete and transition to seeding
-        if (!seeding_mode_ && progress() >= 100.0) {
+        if (!seeding_mode_ && progress() >= 100.0 && bytesRemaining() == 0) {
             std::cout << "\n========================================\n";
             std::cout << "Download complete! Transitioning to seeding mode...\n";
             std::cout << "========================================\n";

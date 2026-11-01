@@ -6,7 +6,8 @@ if(WIN32)
     target_link_libraries(torrent_core PUBLIC ws2_32)
 endif()
 
-add_library(torrent_metainfo STATIC metainfo/bencode.cpp metainfo/torrent_file.cpp metainfo/magnet_uri.cpp)
+add_library(torrent_metainfo STATIC metainfo/bencode.cpp metainfo/torrent_file.cpp metainfo/magnet_uri.cpp
+    metainfo/file_selection.cpp)
 torrent_target(torrent_metainfo Metainfo)
 target_link_libraries(torrent_metainfo PUBLIC Torrent::Core)
 

@@ -2,7 +2,7 @@
 
 A C++17 command-line BitTorrent client. Supports torrent metadata, HTTP/UDP
 trackers, TCP peer transfers, piece verification, multi-file storage and resume
-state. Additional modules implement DHT, magnet metadata exchange, PEX, MSE,
+state and selective file downloads. Additional modules implement DHT, magnet metadata exchange, PEX, MSE,
 Fast Extension, IPv6, local discovery, web seeds and optional uTP.
 
 The automated integration test covers the ordinary `.torrent` TCP download
@@ -89,12 +89,24 @@ working directory. CLI values override configuration values.
 ./build/app/torrent_client "magnet:?xt=urn:btih:..."
 ./build/app/torrent_client example.torrent --config config/examples/minimal.json
 ./build/app/torrent_client example.torrent --download-dir ./downloads --max-download 500
+./build/app/torrent_client example.torrent --list-files
+./build/app/torrent_client example.torrent --files 2,4
 ./build/app/torrent_client --help
 ```
 
 Options: `--config`, `--download-dir`, `--max-download` and `--max-upload` (KB/s,
 zero means unlimited), `--port`, `--log-level` and `--help`. Invalid numeric
 values produce an error before the download starts.
+
+`--list-files` prints one-based file numbers, byte sizes and paths without
+starting payload downloads. `--files 2,4` downloads only those files; omitting
+it downloads everything. Magnet inputs support the same flags after metadata
+acquisition. Skipped payload files are not created or modified.
+
+Pieces overlapping selected and skipped files must still be downloaded and
+SHA1-verified in full. Their data is retained in a hidden per-torrent boundary
+cache for resume verification and reads, without creating skipped payload files.
+See [selective downloads](docs/SELECTIVE_DOWNLOADS.md).
 
 ## Verification
 
@@ -103,9 +115,9 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R test_download --output-on-failure
 ```
 
-Seven unit-test executables cover metadata parsing, piece management, file I/O,
-CLI parsing, extension dispatch and metadata exchange. With Node.js installed,
-sixteen integration scenarios run against
+Eight unit-test executables cover metadata parsing, file selection, piece
+management, file I/O, CLI parsing, extension dispatch and metadata exchange.
+With Node.js installed, twenty-six integration scenarios run against
 local trackers and TCP seeds: basic download, multiple peers, partial download
 followed by restart, corrupted saved data, peer disconnect and multi-file piece
 boundaries. The multi-peer check rejects duplicate block requests. Each result

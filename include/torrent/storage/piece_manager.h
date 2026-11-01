@@ -60,6 +60,8 @@ public:
     // Configuration
     void setSequentialMode(bool sequential) { sequential_mode_ = sequential; }
     bool isSequentialMode() const { return sequential_mode_; }
+    void setWantedPieces(const std::vector<bool>& wanted);
+    size_t numPiecesRemaining() const;
 
     // Block management
     std::vector<Block> getBlocksForPiece(uint32_t piece_index) const;
@@ -95,6 +97,7 @@ private:
     std::vector<uint8_t> piece_hashes_;  // SHA1 hashes
 
     std::vector<bool> bitfield_;  // Which pieces we have
+    std::vector<bool> wanted_;
     size_t pieces_downloaded_;
 
     // Pieces in progress (being assembled)

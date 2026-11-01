@@ -298,7 +298,7 @@ void DownloadManager::updateWebSeeds() {
     uint32_t gap_length = 0;
 
     for (size_t i = 0; i < num_pieces; ++i) {
-        if (!bitfield[i] && pieces_in_download_.find(i) == pieces_in_download_.end()) {
+        if (!bitfield[i] && !piece_manager_->getMissingBlocks(i).empty() && pieces_in_download_.find(i) == pieces_in_download_.end()) {
             // Found a missing piece not being downloaded
             if (gap_start == UINT32_MAX) {
                 gap_start = i;
@@ -328,7 +328,7 @@ void DownloadManager::updateWebSeeds() {
     // This helps with the last few pieces
     if (gap_start == UINT32_MAX) {
         for (size_t i = 0; i < num_pieces; ++i) {
-            if (!bitfield[i] && pieces_in_download_.find(i) == pieces_in_download_.end()) {
+            if (!bitfield[i] && !piece_manager_->getMissingBlocks(i).empty() && pieces_in_download_.find(i) == pieces_in_download_.end()) {
                 if (webseed_manager_->downloadFullPiece(i)) {
                     pieces_in_download_.insert(i);
                     LOG_DEBUG("WebSeed: Requested piece {} from web seed", i);

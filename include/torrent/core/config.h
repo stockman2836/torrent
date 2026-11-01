@@ -3,6 +3,8 @@
 #include <string>
 #include <cstdint>
 #include <optional>
+#include <vector>
+#include <cstddef>
 
 namespace torrent {
 
@@ -20,6 +22,9 @@ struct Config {
     std::string download_dir = "./downloads";
     bool sequential_download = false;
     int piece_timeout_seconds = 30;
+    // Runtime CLI/API selection, not persisted in the configuration file.
+    // Zero-based file indices; empty means all files.
+    std::vector<size_t> file_indices;
 
     // Upload/Seeding settings
     bool seed_after_download = true;

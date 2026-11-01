@@ -3,6 +3,7 @@
 #include "input.h"
 #include "torrent/core/logger.h"
 #include "torrent/session/download_manager.h"
+#include "torrent/metainfo/file_selection.h"
 #include <chrono>
 #include <iostream>
 #include <stdexcept>
@@ -31,6 +32,16 @@ int run(int argc, char* argv[]) {
         Logger::init(config.log_file, logLevel(config.log_level), Logger::Level::DEBUG,
                      config.log_max_size, config.log_max_files);
         auto input = resolveInput(options.input, config);
+        const FileSelection selection(input.torrent, config.file_indices);
+        if (options.list_files) {
+            std::cout << "ID\tBytes\tPath\n";
+            for (size_t i = 0; i < input.torrent.files().size(); ++i) {
+                const auto& file = input.torrent.files()[i];
+                std::cout << i + 1 << '\t' << file.length << '\t' << file.path << '\n';
+            }
+            return 0;
+        }
+        if (!config.file_indices.empty()) std::cout << "Selected file bytes: " << selection.selectedBytes() << '\n';
         DownloadManager download(std::move(input.torrent), config, std::move(input.dht));
         download.start();
         while (download.isRunning() && download.progress() < 100.0) {
@@ -38,7 +49,8 @@ int run(int argc, char* argv[]) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         const bool complete = download.progress() >= 100.0;
-        if (complete) std::cout << "\n=== Download complete! ===\n";
+        if (complete) std::cout << (config.file_indices.empty()
+            ? "\n=== Download complete! ===\n" : "\n=== Selected files complete! ===\n");
         download.stop();
         return complete ? 0 : 1;
     } catch (const std::exception& error) {

@@ -4,6 +4,8 @@
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
+#include <set>
+#include <sstream>
 
 namespace torrent::app {
 namespace {
@@ -29,8 +31,9 @@ CommandLine CommandLine::parse(int argc, char* argv[]) {
     options.input = argv[1];
     for (int i = 2; i < argc; ++i) {
         const std::string arg = argv[i];
+        if (arg == "--list-files") { options.list_files = true; continue; }
         if (arg != "--config" && arg != "--download-dir" && arg != "--max-download" &&
-            arg != "--max-upload" && arg != "--port" && arg != "--log-level") {
+            arg != "--max-upload" && arg != "--port" && arg != "--log-level" && arg != "--files") {
             throw std::invalid_argument("Unknown option: " + arg);
         }
         if (++i >= argc) throw std::invalid_argument("Missing value for " + arg);
@@ -38,6 +41,18 @@ CommandLine CommandLine::parse(int argc, char* argv[]) {
         if (arg == "--config") options.config_file = value;
         else if (arg == "--download-dir") options.download_dir = value;
         else if (arg == "--log-level") options.log_level = value;
+        else if (arg == "--files") {
+            if (value.empty() || value.back() == ',') throw std::invalid_argument("Expected file numbers separated by commas");
+            std::istringstream input(value);
+            std::string token;
+            std::set<size_t> indices;
+            while (std::getline(input, token, ',')) {
+                const auto id = number(token, arg, std::numeric_limits<int64_t>::max());
+                if (id == 0) throw std::invalid_argument("File numbers start at 1");
+                indices.insert(static_cast<size_t>(id - 1));
+            }
+            options.file_indices.assign(indices.begin(), indices.end());
+        }
         else if (arg == "--port") {
             const auto port = number(value, arg, 65535);
             if (port == 0) throw std::invalid_argument("Port must be between 1 and 65535");
@@ -55,6 +70,7 @@ Config CommandLine::loadConfig() const {
     Config config;
     if (!config.loadFromFile(config_file)) config = Config::loadDefault();
     config.mergeWithCLI(download_dir, max_download_speed, max_upload_speed, listen_port, log_level);
+    config.file_indices = file_indices;
     if (!config.validate()) throw std::invalid_argument("Invalid configuration");
     return config;
 }
@@ -67,6 +83,8 @@ void printUsage(std::ostream& out, const char* program) {
         << "  --max-upload <KB/s>    Upload limit (0 = unlimited)\n"
         << "  --port <port>         Listen port\n"
         << "  --log-level <level>   trace, debug, info, warn or error\n"
+        << "  --list-files          List file numbers, sizes and paths without downloading\n"
+        << "  --files <1,3,...>      Download only these file numbers (default: all files)\n"
         << "  --help               Show this help\n\n"
         << "CLI options override configuration file settings.\n";
 }

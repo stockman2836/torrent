@@ -1,6 +1,8 @@
 #include "torrent/storage/file_manager.h"
+#include "torrent/metainfo/file_selection.h"
 #include "torrent/core/utils.h"
 #include "torrent/core/logger.h"
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 
@@ -8,208 +10,163 @@ namespace fs = std::filesystem;
 
 namespace torrent {
 
-FileManager::FileManager(const TorrentFile& torrent, const std::string& download_dir)
-    : torrent_(torrent)
-    , download_dir_(download_dir) {
-}
+FileManager::FileManager(const TorrentFile& torrent, const std::string& directory,
+                         const std::vector<size_t>& selected)
+    : torrent_(torrent), download_dir_(directory), selected_files_(FileSelection(torrent, selected).files()) {}
 
-FileManager::~FileManager() {
-    closeFiles();
-}
+FileManager::~FileManager() { closeFiles(); }
 
 bool FileManager::initialize() {
     try {
-        LOG_INFO("Initializing file manager in directory: {}", download_dir_);
-
-        // Create download directory if it doesn't exist
+        closeFiles();
+        file_handles_.clear();
         fs::create_directories(download_dir_);
-
-        // Create file handles
-        int64_t current_offset = 0;
-        for (const auto& file_info : torrent_.files()) {
+        int64_t offset = 0;
+        for (size_t index = 0; index < torrent_.files().size(); ++index) {
+            const auto& file = torrent_.files()[index];
             FileHandle handle;
-            handle.path = download_dir_ + "/" + file_info.path;
-            handle.offset = current_offset;
-            handle.length = file_info.length;
-
-            // Create parent directories
-            fs::path file_path(handle.path);
-            if (file_path.has_parent_path()) {
-                fs::create_directories(file_path.parent_path());
-            }
-
-            LOG_DEBUG("Created file handle: {} (size: {} bytes)", handle.path, handle.length);
+            handle.path = (fs::path(download_dir_) / file.path).string();
+            handle.offset = offset;
+            handle.length = file.length;
+            handle.selected = selected_files_[index];
+            if (handle.selected) fs::create_directories(fs::path(handle.path).parent_path());
             file_handles_.push_back(std::move(handle));
-            current_offset += file_info.length;
+            offset += file.length;
         }
-
         openFiles();
-        LOG_INFO("File manager initialized successfully with {} files", file_handles_.size());
         return true;
-
-    } catch (const std::exception& e) {
-        LOG_ERROR("Failed to initialize files: {}", e.what());
+    } catch (const std::exception& error) {
+        LOG_ERROR("Failed to initialize files: {}", error.what());
         return false;
     }
 }
 
 void FileManager::openFiles() {
     for (auto& handle : file_handles_) {
-        handle.stream.open(handle.path,
-                          std::ios::in | std::ios::out | std::ios::binary);
-
+        if (!handle.selected) continue;
+        handle.stream.open(handle.path, std::ios::in | std::ios::out | std::ios::binary);
         if (!handle.stream.is_open()) {
-            // Try creating the file
-            handle.stream.open(handle.path,
-                             std::ios::out | std::ios::binary);
-            handle.stream.close();
-
-            // Reopen in read/write mode
-            handle.stream.open(handle.path,
-                             std::ios::in | std::ios::out | std::ios::binary);
+            handle.stream.clear();
+            { std::ofstream create(handle.path, std::ios::binary); }
+            handle.stream.open(handle.path, std::ios::in | std::ios::out | std::ios::binary);
         }
-
-        if (!handle.stream.is_open()) {
-            throw std::runtime_error("Failed to open file: " + handle.path);
-        }
-        if (fs::file_size(handle.path) < static_cast<uintmax_t>(handle.length)) {
-            fs::resize_file(handle.path, handle.length);
-        }
+        if (!handle.stream) throw std::runtime_error("Failed to open file: " + handle.path);
+        if (fs::file_size(handle.path) < static_cast<uintmax_t>(handle.length)) fs::resize_file(handle.path, handle.length);
     }
 }
 
 void FileManager::closeFiles() {
-    for (auto& handle : file_handles_) {
-        if (handle.stream.is_open()) {
-            handle.stream.close();
-        }
-    }
+    for (auto& handle : file_handles_) if (handle.stream.is_open()) handle.stream.close();
 }
 
-bool FileManager::writePiece(uint32_t piece_index, const std::vector<uint8_t>& data) {
+std::string FileManager::cachePath(uint32_t index) const {
+    return (fs::path(download_dir_) / (".parts_" + utils::toHex(torrent_.infoHash())) /
+            (std::to_string(index) + ".bin")).string();
+}
+
+bool FileManager::needsCache(uint32_t index) const {
+    const int64_t start = static_cast<int64_t>(index) * torrent_.pieceLength();
+    const int64_t end = std::min(start + torrent_.pieceLength(), torrent_.totalLength());
+    return std::any_of(file_handles_.begin(), file_handles_.end(), [&](const FileHandle& file) {
+        return !file.selected && file.offset < end && file.offset + file.length > start;
+    });
+}
+
+bool FileManager::writePiece(uint32_t index, const std::vector<uint8_t>& data) {
     std::lock_guard<std::mutex> lock(mutex_);
-
-    if (piece_index >= torrent_.numPieces()) return false;
-    const auto expected_size = std::min<int64_t>(torrent_.pieceLength(),
-        torrent_.totalLength() - static_cast<int64_t>(piece_index) * torrent_.pieceLength());
-    if (data.size() != static_cast<size_t>(expected_size)) return false;
-
+    if (index >= torrent_.numPieces()) return false;
+    const int64_t start = static_cast<int64_t>(index) * torrent_.pieceLength();
+    const int64_t size = std::min(torrent_.pieceLength(), torrent_.totalLength() - start);
+    if (data.size() != static_cast<size_t>(size)) return false;
     try {
-        int64_t piece_offset = static_cast<int64_t>(piece_index) * torrent_.pieceLength();
-        int64_t remaining = data.size();
-        int64_t data_offset = 0;
-
-        // Write to appropriate file(s)
-        for (auto& handle : file_handles_) {
-            if (piece_offset >= handle.offset + handle.length) {
-                continue;  // This piece starts after this file
-            }
-
-            if (piece_offset + static_cast<int64_t>(data.size()) <= handle.offset) {
-                break;  // This piece ends before this file
-            }
-
-            // Calculate write position in this file
-            int64_t file_write_offset = std::max(0LL, piece_offset - handle.offset);
-            int64_t write_start = std::max(piece_offset, handle.offset);
-            int64_t write_end = std::min(piece_offset + static_cast<int64_t>(data.size()),
-                                        handle.offset + handle.length);
-            int64_t write_size = write_end - write_start;
-
-            if (write_size > 0) {
-                handle.stream.clear();
-                handle.stream.seekp(file_write_offset);
-                handle.stream.write(reinterpret_cast<const char*>(data.data() + data_offset),
-                                  write_size);
-                handle.stream.flush();
-                if (!handle.stream) return false;
-                data_offset += write_size;
-                remaining -= write_size;
-            }
+        int64_t written = 0;
+        for (auto& file : file_handles_) {
+            if (!file.selected) continue;
+            const auto begin = std::max(start, file.offset);
+            const auto end = std::min(start + size, file.offset + file.length);
+            if (begin >= end) continue;
+            file.stream.clear();
+            file.stream.seekp(begin - file.offset);
+            file.stream.write(reinterpret_cast<const char*>(data.data() + (begin - start)), end - begin);
+            file.stream.flush();
+            if (!file.stream) return false;
+            written += end - begin;
         }
-
-        return remaining == 0;
-
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to write piece " << piece_index << ": " << e.what() << "\n";
+        if (written == 0) return false;
+        if (needsCache(index)) {
+            const auto path = cachePath(index);
+            fs::create_directories(fs::path(path).parent_path());
+            std::ofstream cache(path, std::ios::binary | std::ios::trunc);
+            cache.write(reinterpret_cast<const char*>(data.data()), data.size());
+            cache.flush();
+            if (!cache) return false;
+        }
+        return true;
+    } catch (const std::exception& error) {
+        LOG_ERROR("Failed to write piece {}: {}", index, error.what());
         return false;
     }
 }
 
-std::vector<uint8_t> FileManager::readPiece(uint32_t piece_index) {
+std::vector<uint8_t> FileManager::readPiece(uint32_t index) {
     std::lock_guard<std::mutex> lock(mutex_);
-
-    if (piece_index >= torrent_.numPieces()) return {};
-
+    if (index >= torrent_.numPieces()) return {};
+    const int64_t start = static_cast<int64_t>(index) * torrent_.pieceLength();
+    const int64_t size = std::min(torrent_.pieceLength(), torrent_.totalLength() - start);
+    std::vector<uint8_t> data(size);
+    bool cached = false;
+    {
+        std::ifstream cache(cachePath(index), std::ios::binary);
+        if (cache) {
+            cache.read(reinterpret_cast<char*>(data.data()), size);
+            cached = cache.gcount() == size;
+        }
+    }
     try {
-        int64_t piece_offset = static_cast<int64_t>(piece_index) * torrent_.pieceLength();
-
-        // Determine piece size
-        size_t piece_size = torrent_.pieceLength();
-        if (piece_index == torrent_.numPieces() - 1) {
-            size_t last_piece_size = torrent_.totalLength() % torrent_.pieceLength();
-            if (last_piece_size != 0) {
-                piece_size = last_piece_size;
+        int64_t covered = 0;
+        for (auto& file : file_handles_) {
+            const auto begin = std::max(start, file.offset);
+            const auto end = std::min(start + size, file.offset + file.length);
+            if (begin >= end) continue;
+            std::vector<uint8_t> bytes(end - begin);
+            bool read = false;
+            if (file.selected) {
+                file.stream.clear();
+                file.stream.seekg(begin - file.offset);
+                file.stream.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+                if (!file.stream) return {};
+                read = true;
+            } else if (!cached) {
+                // Previously selected files may exist. Read them without opening for writing.
+                std::ifstream existing(file.path, std::ios::binary);
+                if (existing) {
+                    existing.seekg(begin - file.offset);
+                    existing.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+                    read = static_cast<bool>(existing);
+                }
             }
+            if (read) std::copy(bytes.begin(), bytes.end(), data.begin() + (begin - start));
+            else if (!cached) return {};
+            covered += end - begin;
         }
-
-        std::vector<uint8_t> data(piece_size);
-        int64_t remaining = piece_size;
-        int64_t data_offset = 0;
-
-        // Read from appropriate file(s)
-        for (auto& handle : file_handles_) {
-            if (piece_offset >= handle.offset + handle.length) {
-                continue;
-            }
-
-            if (piece_offset + piece_size <= handle.offset) {
-                break;
-            }
-
-            int64_t file_read_offset = std::max(0LL, piece_offset - handle.offset);
-            int64_t read_start = std::max(piece_offset, handle.offset);
-            int64_t read_end = std::min(piece_offset + static_cast<int64_t>(piece_size),
-                                       handle.offset + handle.length);
-            int64_t read_size = read_end - read_start;
-
-            if (read_size > 0) {
-                handle.stream.clear();
-                handle.stream.seekg(file_read_offset);
-                handle.stream.read(reinterpret_cast<char*>(data.data() + data_offset),
-                                 read_size);
-                if (!handle.stream) return {};
-                data_offset += read_size;
-                remaining -= read_size;
-            }
-        }
-
-        return remaining == 0 ? data : std::vector<uint8_t>{};
-
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to read piece " << piece_index << ": " << e.what() << "\n";
+        return covered == size ? data : std::vector<uint8_t>{};
+    } catch (const std::exception& error) {
+        LOG_ERROR("Failed to read piece {}: {}", index, error.what());
         return {};
     }
 }
 
 bool FileManager::verifyExistingFiles() {
-    // TODO: Implement verification of existing files
-    return false;
+    for (size_t index = 0; index < torrent_.numPieces(); ++index) {
+        const auto offset = index * 20;
+        if (!verifyPiece(index, {torrent_.pieces().begin() + offset, torrent_.pieces().begin() + offset + 20})) return false;
+    }
+    return true;
 }
 
-bool FileManager::verifyPiece(uint32_t piece_index, const std::vector<uint8_t>& expected_hash) {
-    // Read piece from disk
-    std::vector<uint8_t> piece_data = readPiece(piece_index);
-
-    if (piece_data.empty()) {
-        return false;
-    }
-
-    // Calculate SHA1 hash
-    std::vector<uint8_t> actual_hash = utils::sha1(piece_data);
-
-    // Compare with expected hash
-    return actual_hash == expected_hash;
+bool FileManager::verifyPiece(uint32_t index, const std::vector<uint8_t>& expected) {
+    const auto data = readPiece(index);
+    return !data.empty() && utils::sha1(data) == expected;
 }
 
 } // namespace torrent

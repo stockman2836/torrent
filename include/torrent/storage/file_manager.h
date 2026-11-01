@@ -10,7 +10,8 @@ namespace torrent {
 
 class FileManager {
 public:
-    FileManager(const TorrentFile& torrent, const std::string& download_dir);
+    FileManager(const TorrentFile& torrent, const std::string& download_dir,
+                const std::vector<size_t>& selected_files = {});
     ~FileManager();
 
     // Initialize files (create/allocate space)
@@ -32,14 +33,18 @@ private:
         std::fstream stream;
         int64_t offset;  // Offset in the combined file space
         int64_t length;
+        bool selected;
     };
 
     void openFiles();
     void closeFiles();
+    bool needsCache(uint32_t piece_index) const;
+    std::string cachePath(uint32_t piece_index) const;
 
     const TorrentFile& torrent_;
     std::string download_dir_;
     std::vector<FileHandle> file_handles_;
+    std::vector<bool> selected_files_;
 
     mutable std::mutex mutex_;
 };

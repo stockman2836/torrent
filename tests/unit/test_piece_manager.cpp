@@ -537,6 +537,33 @@ TEST(PieceReceiveRegression, DiscardMakesEveryBlockAvailableAgain) {
     EXPECT_EQ(manager.getMissingBlocks(0).size(), 2);
 }
 
+TEST_F(PieceManagerTest, AllStrategiesRespectWantedPiecesWithoutInventingVerifiedData) {
+    std::vector<bool> wanted(num_pieces_, false), available(num_pieces_, true);
+    wanted[3] = true;
+    manager_->setWantedPieces(wanted);
+    EXPECT_EQ(manager_->getNextPiece(available), 3);
+    EXPECT_EQ(manager_->getNextPieceSequential(available, {}), 3);
+    EXPECT_EQ(manager_->getNextPieceRandomFirst(available, {}), 3);
+    EXPECT_EQ(manager_->getNextPieceRarestFirst({available}, available, {}), 3);
+    EXPECT_TRUE(manager_->getMissingBlocks(0).empty());
+    EXPECT_EQ(manager_->receiveBlock(0, 0, std::vector<uint8_t>(BLOCK_SIZE), nullptr), PieceManager::BlockResult::Rejected);
+    manager_->markPieceComplete(0);
+    EXPECT_DOUBLE_EQ(manager_->percentComplete(), 0.0);
+    EXPECT_EQ(manager_->numPiecesRemaining(), 1);
+    manager_->markPieceComplete(3);
+    EXPECT_DOUBLE_EQ(manager_->percentComplete(), 100.0);
+    EXPECT_EQ(manager_->numPiecesRemaining(), 0);
+    EXPECT_FALSE(manager_->hasPiece(1));
+}
+
+TEST_F(PieceManagerTest, EmptyWantedMaskCompletesWithoutDownloadingAnything) {
+    manager_->setWantedPieces(std::vector<bool>(num_pieces_, false));
+    EXPECT_DOUBLE_EQ(manager_->percentComplete(), 100.0);
+    EXPECT_EQ(manager_->numPiecesDownloaded(), 0);
+    EXPECT_EQ(manager_->numPiecesRemaining(), 0);
+    EXPECT_THROW(manager_->setWantedPieces({true}), std::invalid_argument);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

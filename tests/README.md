@@ -26,6 +26,7 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_command_line` | Help, overrides, invalid numbers and overflow rejection | Application |
 | `test_extension_protocol` | Payload framing, ID dispatch and extension disable updates | Network |
 | `test_metadata_exchange` | Binary assembly, size validation, rejects and callback locking | Network |
+| `test_file_selection` | File-to-piece masks, boundaries, empty files and invalid metadata | Metainfo |
 | `test_download` | Actual CLI download from a loopback tracker and TCP peer | CLI executable |
 | `test_transfer_multi` | Two contributing seeds without duplicate block requests | CLI executable |
 | `test_transfer_resume` | Stop a partial session and retain verified pieces after restart | Session + CLI |
@@ -38,10 +39,20 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_magnet_tracker` | Fall back from an unavailable tracker | CLI executable |
 | `test_magnet_invalid` | Invalid metadata never starts a file download | CLI executable |
 | `test_magnet_stall` | Fall back from an idle metadata peer after its deadline | CLI executable |
+| `test_magnet_list` | Acquire metadata and list files without payload requests | CLI executable |
 | `test_endgame_cancel` | Rescue a stalled block and send a matching CANCEL | CLI executable |
 | `test_endgame_late` | Ignore a late cancelled response without corrupting assembly | CLI executable |
 | `test_endgame_cap` | Limit concurrent block copies with three connected seeds | CLI executable |
 | `test_endgame_disconnect` | Retain valid partial data when a shared owner disconnects | CLI executable |
+| `test_selection_list` | List IDs, sizes and paths without tracker or payload activity | CLI executable |
+| `test_selection_single` | Download a middle file crossing skipped-file boundaries | CLI executable |
+| `test_selection_multiple` | Combine disjoint files and skip unrelated pieces | CLI executable |
+| `test_selection_zero` | Create a selected empty file without network activity | CLI executable |
+| `test_selection_resume` | Reuse verified selected pieces after restarting | CLI executable |
+| `test_selection_corrupt` | Detect modified selected bytes despite a valid boundary cache | CLI executable |
+| `test_selection_changed` | Change selection and reuse previously verified data | CLI executable |
+| `test_selection_invalid` | Reject out-of-range IDs before payload initialization | CLI executable |
+| `test_selection_preserve` | Leave an existing skipped file unchanged across resume | CLI executable |
 
 Each unit suite has a 30-second timeout. The integration test has a 55-second
 CTest timeout and kills the child client after 45 seconds if it does not exit.
@@ -53,6 +64,8 @@ timeout. Each TCP metadata peer attempt has a 10-second deadline.
 Endgame checks have an 8-second child-process timeout and a 15-second CTest
 timeout. Their slow seed never supplies its held blocks normally, so completing
 the file requires an endgame request to another seed.
+Selection fixtures have a 12-second child timeout and 30-second CTest timeout.
+Artifacts remain under `build/tests/selection-*`.
 
 The integration test downloads two pieces split into multiple 16-KiB blocks,
 checks the info hash in the handshake, validates block requests and compares

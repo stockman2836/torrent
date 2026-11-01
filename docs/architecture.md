@@ -10,7 +10,7 @@ Includes always name their module, for example
 | Directory / target | Responsibility | Internal dependencies |
 | --- | --- | --- |
 | `core` / `Torrent::Core` | Configuration, logging, hashing, encoding, bandwidth helpers | None |
-| `metainfo` / `Torrent::Metainfo` | Bencode, torrent metadata, magnet URIs and block descriptions | Core |
+| `metainfo` / `Torrent::Metainfo` | Bencode, metadata, file-to-piece selection and block descriptions | Core |
 | `storage` / `Torrent::Storage` | Piece assembly, integrity checks, files and resume bitfields | Metainfo |
 | `network` / `Torrent::Network` | Trackers, peer protocol, DHT, discovery and transports | Metainfo |
 | `session` / `Torrent::Session` | Coordinate one torrent and own its workers and services | Storage, Network |
@@ -57,6 +57,18 @@ type; no factories, dependency-injection containers or abstract service layers
 are required.
 
 ## Session implementation
+
+`FileSelection` maps zero-based metadata file indices to an immutable file mask
+and required-piece mask. The CLI exposes one-based numbers. `PieceManager`
+keeps required pieces separate from its verified bitfield: progress and
+scheduling use the former; tracker totals and seed status use the latter.
+
+`FileManager` opens only selected payload files for writing. Verified pieces
+crossing skipped spans are retained in a per-torrent boundary cache. Readback
+overlays actual selected-file bytes before hash verification, preventing a
+valid cache from masking modified selected content. Existing skipped files can
+be read without being modified when verifying earlier selections. See
+[selective downloads](SELECTIVE_DOWNLOADS.md).
 
 The coordinator's implementation is divided by responsibility:
 

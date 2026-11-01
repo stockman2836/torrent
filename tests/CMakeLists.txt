@@ -26,9 +26,11 @@ add_unit_test(test_file_manager Torrent::Storage)
 add_unit_test(test_command_line torrent_app)
 add_unit_test(test_extension_protocol Torrent::Network)
 add_unit_test(test_metadata_exchange Torrent::Network)
+add_unit_test(test_file_selection Torrent::Metainfo)
 
 set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file_manager test_command_line
     test_extension_protocol test_metadata_exchange
+    test_file_selection
     PROPERTIES TIMEOUT 30)
 find_program(NODE_EXECUTABLE NAMES node)
 if(NODE_EXECUTABLE)
@@ -43,7 +45,7 @@ if(NODE_EXECUTABLE)
             "$<TARGET_FILE:torrent_client>" "$<TARGET_FILE:partial_download>")
         set_tests_properties(test_transfer_${scenario} PROPERTIES TIMEOUT 40)
     endforeach()
-    foreach(scenario download reject hash tracker invalid stall)
+    foreach(scenario download reject hash tracker invalid stall list)
         add_test(NAME test_magnet_${scenario} COMMAND "${NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_magnet.cjs" ${scenario}
             "$<TARGET_FILE:torrent_client>")
@@ -54,6 +56,12 @@ if(NODE_EXECUTABLE)
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_endgame.cjs" ${scenario}
             "$<TARGET_FILE:torrent_client>")
         set_tests_properties(test_endgame_${scenario} PROPERTIES TIMEOUT 15)
+    endforeach()
+    foreach(scenario list single multiple zero resume corrupt changed invalid preserve)
+        add_test(NAME test_selection_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_selection.cjs" ${scenario}
+            "$<TARGET_FILE:torrent_client>")
+        set_tests_properties(test_selection_${scenario} PROPERTIES TIMEOUT 30)
     endforeach()
 endif()
 

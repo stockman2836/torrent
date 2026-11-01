@@ -52,7 +52,7 @@ protected:
         info["name"] = BencodeValue(std::string("test_folder"));
         info["piece length"] = BencodeValue(int64_t(262144));
 
-        std::string pieces_data(60, 'y');
+        std::string pieces_data(80, 'y'); // ceil(800000 / 262144) = four pieces
         info["pieces"] = BencodeValue(pieces_data);
 
         BencodeValue::List files;
@@ -352,7 +352,7 @@ TEST_F(FileManagerTest, HandleZeroLengthFile) {
     BencodeValue::Dictionary info;
     info["name"] = BencodeValue(std::string("empty.txt"));
     info["piece length"] = BencodeValue(int64_t(262144));
-    info["pieces"] = BencodeValue(std::string(20, 'x'));
+    info["pieces"] = BencodeValue(std::string{});
     info["length"] = BencodeValue(int64_t(0));
 
     root["info"] = BencodeValue(info);
