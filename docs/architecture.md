@@ -49,6 +49,13 @@ network workers on the window thread. Stop persists verified pieces; continuing
 creates a new session using existing files and resume data. Closing first stops
 the task and then releases metadata and DHT on the worker before destroying the
 window. File selections and priorities use the same `Config` fields as the CLI.
+Speed limits also use the existing byte-per-second `Config` fields. Queue changes
+update saved configuration and send a synchronized request to the task worker,
+which applies it to the session's token buckets. The window never owns a session
+pointer. Downloads share one bucket across peer and web seed delivery within a
+session; uploads use a separate bucket. Waits consume large blocks incrementally,
+wake when a rate changes and check shutdown while waiting. UI values use KiB/s
+and convert to bytes/s without losing the precision of stored integer limits.
 The list saves sources, destinations, file choices and the concurrency limit as
 versioned JSON using a temporary file and atomic replacement. Restored entries
 resolve metadata but remain outside the download queue until the user starts them.

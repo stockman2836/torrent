@@ -121,7 +121,6 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                 // Late responses to cancelled requests must not alter assembly or statistics.
                 if (!requested) continue;
                 if (!valid_size) break;
-                download_limiter_.waitAndConsume(block.data.size());
                 receiveBlock(block.piece_index, block.offset, block.data);
             }
         }
@@ -171,7 +170,7 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                         conn_ptr->addPendingUpload(req_msg.piece_index, req_msg.offset, req_msg.length);
 
                         // Apply upload rate limiting
-                        upload_limiter_.waitAndConsume(block_data.size());
+                        if (!upload_limiter_.waitAndConsume(block_data.size(), [this] { return !running_.load(); })) break;
 
                         // Send PIECE message
                         if (conn_ptr->sendPiece(req_msg.piece_index, req_msg.offset, block_data)) {

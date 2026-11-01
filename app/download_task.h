@@ -29,6 +29,7 @@ public:
     bool start(Config config);
     bool unload();
     void stop();
+    void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
     void wait();
     bool busy() const { return busy_.load(); }
     DownloadSnapshot snapshot() const;
@@ -39,6 +40,8 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable wake_;
     DownloadSnapshot snapshot_;
+    int64_t download_limit_ = 0;
+    int64_t upload_limit_ = 0;
     std::unique_ptr<ResolvedInput> input_;
     std::atomic<bool> busy_{false};
     std::atomic<bool> cancelled_{false};

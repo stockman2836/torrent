@@ -8,6 +8,8 @@
 #include <chrono>
 #include <mutex>
 #include <deque>
+#include <condition_variable>
+#include <functional>
 
 namespace torrent {
 namespace utils {
@@ -70,11 +72,12 @@ public:
     // Returns true if allowed, false if rate limit exceeded
     bool tryConsume(size_t bytes);
 
-    // Wait until tokens are available (blocks)
-    void waitAndConsume(size_t bytes);
+    // Consume incrementally, including requests larger than the burst capacity.
+    // Returns false on cancellation; waits check cancellation at least every 50 ms.
+    bool waitAndConsume(size_t bytes, const std::function<bool()>& cancelled = {});
 
     // Get current rate limit
-    int64_t getRate() const { return rate_; }
+    int64_t getRate() const;
 
     // Update rate limit (0 = unlimited)
     void setRate(int64_t rate_bytes_per_sec);
@@ -82,9 +85,10 @@ public:
 private:
     int64_t rate_;        // Bytes per second (0 = unlimited)
     double tokens_;       // Available tokens
-    int64_t capacity_;    // Maximum tokens
+    double capacity_;    // Maximum tokens; double avoids overflow at large rates.
     std::chrono::steady_clock::time_point last_update_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
+    std::condition_variable changed_;
 
     void refill();
 };

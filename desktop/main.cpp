@@ -8,6 +8,7 @@
 // Win32's ERROR macro conflicts with the protocol and logger enum members.
 #undef ERROR
 #include "download_queue.h"
+#include "speed_limits.h"
 #include "torrent/core/logger.h"
 #include <algorithm>
 #include <filesystem>
@@ -60,7 +61,7 @@ std::wstring bytes(int64_t value) {
     return out.str();
 }
 enum Control { Source = 100, Browse, Read, Folder, ChooseFolder, Files, SelectAll, SelectNone,
-    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit };
+    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits };
 const wchar_t* priorityName(FilePriority value) {
     switch (value) {
     case FilePriority::High: return L"Высокий";
@@ -101,7 +102,8 @@ private:
     fs::path settings_, listPath_;
     HWND title_, subtitle_, source_, browse_, read_, folderLabel_, folder_, choose_, files_,
         all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_,
-        jobs_, jobsLabel_, remove_, limit_, limitLabel_;
+        jobs_, jobsLabel_, remove_, limit_, limitLabel_, rateLabel_, downloadLabel_, uploadLabel_,
+        downloadLimit_, uploadLimit_, applyLimits_;
     HFONT font_ = nullptr, heading_ = nullptr;
     std::shared_ptr<const std::vector<FileInfo>> displayed_;
     std::vector<FilePriority> priorities_;
@@ -153,6 +155,14 @@ private:
         folderLabel_ = control(L"STATIC", L"Папка загрузки", SS_LEFT);
         folder_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Folder);
         choose_ = control(L"BUTTON", L"Выбрать папку", WS_TABSTOP, ChooseFolder);
+        rateLabel_ = control(L"STATIC", L"Лимиты скорости (КиБ/с) · 0 — без ограничений", SS_LEFT);
+        downloadLabel_ = control(L"STATIC", L"Скачивание", SS_LEFT);
+        uploadLabel_ = control(L"STATIC", L"Отдача", SS_LEFT);
+        downloadLimit_ = control(WC_EDITW, L"0", WS_TABSTOP | ES_AUTOHSCROLL, DownloadLimit);
+        uploadLimit_ = control(WC_EDITW, L"0", WS_TABSTOP | ES_AUTOHSCROLL, UploadLimit);
+        SendMessageW(downloadLimit_, EM_SETLIMITTEXT, 32, 0);
+        SendMessageW(uploadLimit_, EM_SETLIMITTEXT, 32, 0);
+        applyLimits_ = control(L"BUTTON", L"Применить лимиты", WS_TABSTOP, ApplyLimits);
         files_ = control(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS, Files);
         ListView_SetExtendedListViewStyle(files_, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         SetWindowTheme(files_, L"Explorer", nullptr);
@@ -226,7 +236,11 @@ private:
         move(limitLabel_, m, h-167, 280, 24); move(limit_, m, h-137, 90, 250);
         move(remove_, m, h-91, 280, 34);
         move(folderLabel_, left, 158, 170, 22); move(folder_, left, 188, w-left-196, 32); move(choose_, w-184, 187, 160, 34);
-        move(files_, left, 242, w-left-24, bottom-242);
+        move(rateLabel_, left, 231, w-left-24, 23);
+        move(downloadLabel_, left, 268, 100, 24); move(downloadLimit_, left+103, 260, 95, 32);
+        move(uploadLabel_, left+217, 268, 75, 24); move(uploadLimit_, left+292, 260, 95, 32);
+        move(applyLimits_, left+407, 259, 180, 34);
+        move(files_, left, 306, w-left-24, bottom-306);
         ListView_SetColumnWidth(files_, 0, std::max(250, w-left-310));
         move(all_, left, bottom+12, 110, 32); move(none_, left+120, bottom+12, 110, 32);
         move(priority_, w-403, bottom+12, 125, 240); move(apply_, w-268, bottom+11, 244, 34);
@@ -289,9 +303,27 @@ private:
         dirty_ = false;
         if (!listPath_.empty()) queue_.save(listPath_.u8string());
     }
+    void applySpeedLimits() {
+        const auto entry = current();
+        if (!entry || closing_ || entry->removing) return;
+        int64_t download, upload;
+        try {
+            download = parseSpeedLimit(utf8(text(downloadLimit_)));
+            upload = parseSpeedLimit(utf8(text(uploadLimit_)));
+        } catch (const std::invalid_argument&) {
+            throw std::invalid_argument(u8"Введите неотрицательные лимиты в КиБ/с. Допустимы дробные значения. 0 — без ограничений.");
+        }
+        if (queue_.setSpeedLimits(selected_, download, upload)) {
+            saveEdits();
+            SetWindowTextW(downloadLimit_, wide(formatSpeedLimit(download)).c_str());
+            SetWindowTextW(uploadLimit_, wide(formatSpeedLimit(upload)).c_str());
+            persist();
+        }
+    }
     void start() {
         if (!editable()) return;
         if (text(folder_).empty()) throw std::runtime_error("Select a download folder");
+        applySpeedLimits();
         if (!displayed_) { queue_.enqueue(selected_); refresh(); return; }
         bool selected = false;
         for (size_t i = 0; i < priorities_.size(); ++i) selected |= ListView_GetCheckState(files_, i) != 0;
@@ -336,10 +368,14 @@ private:
         if (selected_ != rendered_) {
             rendered_ = selected_; previous_ = DownloadState::Idle;
             SetWindowTextW(folder_, wide(entry ? entry->config.download_dir : config_.download_dir).c_str());
+            SetWindowTextW(downloadLimit_, wide(formatSpeedLimit(entry ? entry->config.max_download_speed : 0)).c_str());
+            SetWindowTextW(uploadLimit_, wide(formatSpeedLimit(entry ? entry->config.max_upload_speed : 0)).c_str());
             populate(state, entry ? entry->config : config_);
         } else if (state.files != displayed_) populate(state, entry ? entry->config : config_);
         for (HWND c : {source_, browse_, read_, limit_}) EnableWindow(c, !closing_);
         for (HWND c : {folder_, choose_}) EnableWindow(c, editable());
+        for (HWND c : {downloadLimit_, uploadLimit_, applyLimits_})
+            EnableWindow(c, entry && !closing_ && !entry->removing && state.state != DownloadState::Stopping);
         for (HWND c : {all_, none_, priority_, apply_}) EnableWindow(c, displayed_ && editable());
         EnableWindow(start_, editable());
         EnableWindow(stop_, entry && (busy || entry->queued) && !closing_ && state.state != DownloadState::Stopping);
@@ -393,18 +429,24 @@ private:
         if (!smokeStarted_) {
             if (entries_.size() != 2 || std::any_of(entries_.begin(), entries_.end(), [](const auto& entry) { return entry.busy; })) return;
             smokeStarted_ = true; // Command handlers refresh the window recursively.
+            SetWindowTextW(downloadLimit_, L"32"); SetWindowTextW(uploadLimit_, L"16");
+            SendMessageW(handle, WM_COMMAND, ApplyLimits, 0);
             ListView_SetItemState(files_, 0, LVIS_SELECTED, LVIS_SELECTED);
             SendMessageW(priority_, CB_SETCURSEL, 1, 0);
             SendMessageW(handle, WM_COMMAND, Apply, 0);
             SendMessageW(handle, WM_COMMAND, Start, 0);
             ListView_SetItemState(jobs_, 1, LVIS_SELECTED, LVIS_SELECTED);
+            SetWindowTextW(downloadLimit_, L"64"); SetWindowTextW(uploadLimit_, L"0");
+            SendMessageW(handle, WM_COMMAND, ApplyLimits, 0);
             ListView_SetItemState(files_, 0, LVIS_SELECTED, LVIS_SELECTED);
             SendMessageW(priority_, CB_SETCURSEL, 2, 0);
             SendMessageW(handle, WM_COMMAND, Apply, 0);
             SendMessageW(handle, WM_COMMAND, Start, 0);
             const auto entries = queue_.snapshots();
             if (entries[0].config.file_priorities.at(0) != FilePriority::High ||
-                entries[1].config.file_priorities.at(0) != FilePriority::Low || !entries[1].queued) {
+                entries[1].config.file_priorities.at(0) != FilePriority::Low || !entries[1].queued ||
+                entries[0].config.max_download_speed != 32768 || entries[0].config.max_upload_speed != 16384 ||
+                entries[1].config.max_download_speed != 65536 || entries[1].config.max_upload_speed != 0) {
                 exitCode = 1; close();
             }
         } else if (std::all_of(entries_.begin(), entries_.end(), [](const auto& entry) {
@@ -500,6 +542,7 @@ private:
             case Read: load(); break;
             case ChooseFolder: chooseFolder(); break;
             case Start: start(); break;
+            case ApplyLimits: applySpeedLimits(); refresh(); break;
             case Stop: queue_.stop(selected_); refresh(); break;
             case Remove: queue_.remove(selected_); persist(); refresh(); break;
             case Limit:

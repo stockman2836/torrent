@@ -103,6 +103,14 @@ automatically. Existing pieces are checked when the session starts. Keep origina
 `.torrent` files available so their metadata can be read again. Magnet metadata
 is resolved again when the saved list is opened.
 
+Each torrent has separate download and upload limits in **KiB/s** (1 KiB = 1024
+bytes). Enter a non-negative number and click **Apply limits**; `0` means
+unlimited. Decimal values accept a dot or comma. Limits can be changed while a
+torrent is downloading or waiting in the queue. Starting a torrent also applies
+the values currently entered in its fields. Applied limits are saved with the
+download list and restored independently for each torrent. Limits apply to
+payload data; short bursts and protocol traffic can exceed the displayed value.
+
 Preferences and the desktop log live in `%LOCALAPPDATA%/TorrentClient`; the default
 download folder is `%USERPROFILE%/Downloads/TorrentClient`. Resume data stays with
 the downloaded files. The Windows interface uses system controls and requires no

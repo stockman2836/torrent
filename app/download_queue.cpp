@@ -46,6 +46,13 @@ size_t savedIndex(const json& value) {
         throw std::invalid_argument("Invalid saved file index");
     return value.get<size_t>();
 }
+int64_t savedSpeed(const json& item, const char* key, int64_t fallback) {
+    if (!item.contains(key)) return fallback;
+    if (!item.at(key).is_number_integer()) throw std::invalid_argument("Invalid saved speed limit");
+    const auto value = item.at(key).get<int64_t>();
+    if (value < 0) throw std::invalid_argument("Invalid saved speed limit");
+    return value;
+}
 }
 
 DownloadQueue::~DownloadQueue() {
@@ -104,6 +111,17 @@ bool DownloadQueue::enqueue(DownloadId id) {
     if (!entry->task.busy() && !entry->task.snapshot().files) entry->task.load(entry->source, entry->config);
     entry->queued = true;
     pending_.push_back(id);
+    return true;
+}
+
+bool DownloadQueue::setSpeedLimits(DownloadId id, int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec) {
+    if (download_bytes_per_sec < 0 || upload_bytes_per_sec < 0)
+        throw std::invalid_argument("Speed limits must be non-negative");
+    auto entry = find(id);
+    if (closing_ || !entry || entry->removing) return false;
+    entry->task.setSpeedLimits(download_bytes_per_sec, upload_bytes_per_sec);
+    entry->config.max_download_speed = download_bytes_per_sec;
+    entry->config.max_upload_speed = upload_bytes_per_sec;
     return true;
 }
 
@@ -206,7 +224,8 @@ void DownloadQueue::save(const std::string& path) const {
         for (auto [index, priority] : entry->config.file_priorities)
             priorities.push_back({{"index", index}, {"priority", filePriorityName(priority)}});
         document["downloads"].push_back({{"source", entry->source}, {"directory", entry->config.download_dir},
-            {"files", entry->config.file_indices}, {"priorities", priorities}});
+            {"files", entry->config.file_indices}, {"priorities", priorities},
+            {"max_download_speed", entry->config.max_download_speed}, {"max_upload_speed", entry->config.max_upload_speed}});
     }
     const auto destination = fs::u8path(path);
     auto temporary = destination; temporary += ".tmp";
@@ -238,6 +257,10 @@ void DownloadQueue::restore(const std::string& path, const Config& defaults) {
         auto source = item.at("source").get<std::string>();
         Config config = defaults;
         config.download_dir = item.at("directory").get<std::string>();
+        config.max_download_speed = savedSpeed(item, "max_download_speed", defaults.max_download_speed);
+        config.max_upload_speed = savedSpeed(item, "max_upload_speed", defaults.max_upload_speed);
+        if (config.max_download_speed < 0 || config.max_upload_speed < 0)
+            throw std::invalid_argument("Invalid saved speed limits");
         config.file_indices.clear();
         if (!item.at("files").is_array() || !item.at("priorities").is_array())
             throw std::invalid_argument("Invalid saved file choices");

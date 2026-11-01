@@ -66,20 +66,30 @@ bool DownloadTask::load(const std::string& source, Config config) {
 }
 
 bool DownloadTask::start(Config config) {
+    if (config.max_download_speed < 0 || config.max_upload_speed < 0)
+        throw std::invalid_argument("Speed limits must be non-negative");
     if (busy_ || !input_ || !begin(DownloadState::Downloading)) return false;
+    setSpeedLimits(config.max_download_speed, config.max_upload_speed);
     worker_ = std::thread([this, config] {
         try {
             DownloadManager manager(input_->torrent, config, std::move(input_->dht));
+            auto download_limit = config.max_download_speed, upload_limit = config.max_upload_speed;
             if (!cancelled_) manager.start();
             while (!cancelled_ && manager.isRunning()) {
                 const double progress = manager.progress();
                 {
                     std::unique_lock<std::mutex> lock(mutex_);
+                    if (download_limit != download_limit_ || upload_limit != upload_limit_) {
+                        download_limit = download_limit_; upload_limit = upload_limit_;
+                        manager.setSpeedLimits(download_limit, upload_limit);
+                    }
                     snapshot_.progress = progress;
                     snapshot_.download_speed = manager.downloadSpeed();
                     snapshot_.upload_speed = manager.uploadSpeed();
                     if (progress >= 100) break;
-                    wake_.wait_for(lock, std::chrono::milliseconds(150), [this] { return cancelled_.load(); });
+                    wake_.wait_for(lock, std::chrono::milliseconds(150), [this, download_limit, upload_limit] {
+                        return cancelled_.load() || download_limit_ != download_limit || upload_limit_ != upload_limit;
+                    });
                 }
             }
             const double progress = manager.progress();
@@ -96,6 +106,17 @@ bool DownloadTask::start(Config config) {
         busy_ = false;
     });
     return true;
+}
+
+void DownloadTask::setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec) {
+    if (download_bytes_per_sec < 0 || upload_bytes_per_sec < 0)
+        throw std::invalid_argument("Speed limits must be non-negative");
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        download_limit_ = download_bytes_per_sec;
+        upload_limit_ = upload_bytes_per_sec;
+    }
+    wake_.notify_all();
 }
 
 void DownloadTask::stop() {

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -163,19 +164,16 @@ int calculateBackoffDelay(int attempt, int base_delay_ms, int max_delay_ms) {
 TokenBucket::TokenBucket(int64_t rate_bytes_per_sec)
     : rate_(rate_bytes_per_sec)
     , tokens_(rate_bytes_per_sec)
-    , capacity_(rate_bytes_per_sec * 2)  // Allow burst up to 2 seconds worth
+    , capacity_(static_cast<double>(rate_bytes_per_sec) * 2)  // Allow a two-second burst.
     , last_update_(std::chrono::steady_clock::now()) {
-    if (rate_ <= 0) {
-        rate_ = 0;  // 0 means unlimited
-        capacity_ = 0;
-    }
+    if (rate_ < 0) throw std::invalid_argument("Speed limit must be non-negative");
 }
 
 void TokenBucket::refill() {
     if (rate_ <= 0) return;  // Unlimited
 
     auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_update_).count() / 1000.0;
+    const auto elapsed = std::chrono::duration<double>(now - last_update_).count();
 
     // Add tokens based on elapsed time
     tokens_ += elapsed * rate_;
@@ -189,9 +187,8 @@ void TokenBucket::refill() {
 }
 
 bool TokenBucket::tryConsume(size_t bytes) {
-    if (rate_ <= 0) return true;  // Unlimited
-
     std::lock_guard<std::mutex> lock(mutex_);
+    if (rate_ == 0) return true;
     refill();
 
     if (tokens_ >= static_cast<double>(bytes)) {
@@ -202,27 +199,27 @@ bool TokenBucket::tryConsume(size_t bytes) {
     return false;
 }
 
-void TokenBucket::waitAndConsume(size_t bytes) {
-    if (rate_ <= 0) return;  // Unlimited
-
-    while (true) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            refill();
-
-            if (tokens_ >= static_cast<double>(bytes)) {
-                tokens_ -= bytes;
-                return;
-            }
-        }
-
-        // Sleep for a short time before retry
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+bool TokenBucket::waitAndConsume(size_t bytes, const std::function<bool()>& cancelled) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    double remaining = static_cast<double>(bytes);
+    while (remaining > 0) {
+        if (cancelled && cancelled()) return false;
+        if (rate_ == 0) return true;
+        refill();
+        const auto consumed = std::min(tokens_, remaining);
+        tokens_ -= consumed;
+        remaining -= consumed;
+        if (remaining <= 0) return true;
+        const auto delay = std::chrono::duration<double>(std::min(0.05, remaining / rate_));
+        changed_.wait_for(lock, delay);
     }
+    return !(cancelled && cancelled());
 }
 
 void TokenBucket::setRate(int64_t rate_bytes_per_sec) {
+    if (rate_bytes_per_sec < 0) throw std::invalid_argument("Speed limit must be non-negative");
     std::lock_guard<std::mutex> lock(mutex_);
+    refill();
     rate_ = rate_bytes_per_sec;
 
     if (rate_ <= 0) {
@@ -230,11 +227,17 @@ void TokenBucket::setRate(int64_t rate_bytes_per_sec) {
         capacity_ = 0;
         tokens_ = 0;
     } else {
-        capacity_ = rate_ * 2;
+        capacity_ = static_cast<double>(rate_) * 2;
         tokens_ = std::min(tokens_, static_cast<double>(capacity_));
     }
 
     last_update_ = std::chrono::steady_clock::now();
+    changed_.notify_all();
+}
+
+int64_t TokenBucket::getRate() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return rate_;
 }
 
 // SpeedTracker implementation

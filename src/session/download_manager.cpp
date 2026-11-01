@@ -266,6 +266,13 @@ void DownloadManager::pause() {
     paused_ = true;
 }
 
+void DownloadManager::setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec) {
+    if (download_bytes_per_sec < 0 || upload_bytes_per_sec < 0)
+        throw std::invalid_argument("Speed limits must be non-negative");
+    download_limiter_.setRate(download_bytes_per_sec);
+    upload_limiter_.setRate(upload_bytes_per_sec);
+}
+
 void DownloadManager::waitForStop(std::chrono::milliseconds delay) {
     std::unique_lock<std::mutex> lock(stop_mutex_);
     stop_cv_.wait_for(lock, delay, [this] { return !running_; });

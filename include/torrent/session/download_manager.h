@@ -35,6 +35,7 @@ public:
     void stop();
     void pause();
     void resume();
+    void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
 
     // Status
     bool isRunning() const { return running_; }
