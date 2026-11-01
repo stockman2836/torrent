@@ -25,16 +25,16 @@ bool FileManager::initialize() {
     try {
         closeFiles();
         file_handles_.clear();
-        fs::create_directories(download_dir_);
+        fs::create_directories(fs::u8path(download_dir_));
         int64_t offset = 0;
         for (size_t index = 0; index < torrent_.files().size(); ++index) {
             const auto& file = torrent_.files()[index];
             FileHandle handle;
-            handle.path = (fs::path(download_dir_) / file.path).string();
+            handle.path = (fs::u8path(download_dir_) / fs::u8path(file.path)).u8string();
             handle.offset = offset;
             handle.length = file.length;
             handle.selected = selected_files_[index];
-            if (handle.selected) fs::create_directories(fs::path(handle.path).parent_path());
+            if (handle.selected) fs::create_directories(fs::u8path(handle.path).parent_path());
             file_handles_.push_back(std::move(handle));
             offset += file.length;
         }
@@ -49,14 +49,14 @@ bool FileManager::initialize() {
 void FileManager::openFiles() {
     for (auto& handle : file_handles_) {
         if (!handle.selected) continue;
-        handle.stream.open(handle.path, std::ios::in | std::ios::out | std::ios::binary);
+        handle.stream.open(fs::u8path(handle.path), std::ios::in | std::ios::out | std::ios::binary);
         if (!handle.stream.is_open()) {
             handle.stream.clear();
-            { std::ofstream create(handle.path, std::ios::binary); }
-            handle.stream.open(handle.path, std::ios::in | std::ios::out | std::ios::binary);
+            { std::ofstream create(fs::u8path(handle.path), std::ios::binary); }
+            handle.stream.open(fs::u8path(handle.path), std::ios::in | std::ios::out | std::ios::binary);
         }
         if (!handle.stream) throw std::runtime_error("Failed to open file: " + handle.path);
-        if (fs::file_size(handle.path) < static_cast<uintmax_t>(handle.length)) fs::resize_file(handle.path, handle.length);
+        if (fs::file_size(fs::u8path(handle.path)) < static_cast<uintmax_t>(handle.length)) fs::resize_file(fs::u8path(handle.path), handle.length);
     }
 }
 
@@ -65,8 +65,8 @@ void FileManager::closeFiles() {
 }
 
 std::string FileManager::cachePath(uint32_t index) const {
-    return (fs::path(download_dir_) / (".parts_" + utils::toHex(torrent_.infoHash())) /
-            (std::to_string(index) + ".bin")).string();
+    return (fs::u8path(download_dir_) / (".parts_" + utils::toHex(torrent_.infoHash())) /
+            (std::to_string(index) + ".bin")).u8string();
 }
 
 bool FileManager::needsCache(uint32_t index) const {
@@ -100,8 +100,8 @@ bool FileManager::writePiece(uint32_t index, const std::vector<uint8_t>& data) {
         if (written == 0) return false;
         if (needsCache(index)) {
             const auto path = cachePath(index);
-            fs::create_directories(fs::path(path).parent_path());
-            std::ofstream cache(path, std::ios::binary | std::ios::trunc);
+            fs::create_directories(fs::u8path(path).parent_path());
+            std::ofstream cache(fs::u8path(path), std::ios::binary | std::ios::trunc);
             cache.write(reinterpret_cast<const char*>(data.data()), data.size());
             cache.flush();
             if (!cache) return false;
@@ -121,7 +121,7 @@ std::vector<uint8_t> FileManager::readPiece(uint32_t index) {
     std::vector<uint8_t> data(size);
     bool cached = false;
     {
-        std::ifstream cache(cachePath(index), std::ios::binary);
+        std::ifstream cache(fs::u8path(cachePath(index)), std::ios::binary);
         if (cache) {
             cache.read(reinterpret_cast<char*>(data.data()), size);
             cached = cache.gcount() == size;
@@ -143,7 +143,7 @@ std::vector<uint8_t> FileManager::readPiece(uint32_t index) {
                 read = true;
             } else if (!cached) {
                 // Previously selected files may exist. Read them without opening for writing.
-                std::ifstream existing(file.path, std::ios::binary);
+                std::ifstream existing(fs::u8path(file.path), std::ios::binary);
                 if (existing) {
                     existing.seekg(begin - file.offset);
                     existing.read(reinterpret_cast<char*>(bytes.data()), bytes.size());

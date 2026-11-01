@@ -25,6 +25,7 @@ function packet(id, payload = Buffer.alloc(0)) {
 
 async function main() {
   const executable = path.resolve(process.argv[2]);
+  const desktopUI = process.argv[3] === '--desktop-ui';
   const work = fs.mkdtempSync(path.join(process.cwd(), 'download-test-'));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; i++) data[i] = (i * 37 + 11) % 256;
@@ -93,7 +94,10 @@ async function main() {
       enable_dht: false, enable_pex: false, enable_lsd: false,
       enable_webseeds: false, enable_utp: false, enable_encryption: false,
       download_dir: './files', log_file: './client.log', listen_port: 16881 }));
-    child = spawn(executable, ['test.torrent', '--config', 'config.json'], { cwd: work });
+    const args = desktopUI
+      ? ['--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
+      : ['test.torrent', '--config', 'config.json'];
+    child = spawn(executable, args, { cwd: work, windowsHide: true });
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     const timer = setTimeout(() => child.kill(), 45000);
@@ -105,7 +109,7 @@ async function main() {
     assert.equal(code, 0, `Client failed or timed out:\n${output}`);
     assert.ok(requests >= 4, 'Expected requests spanning multiple pieces and blocks');
     assert.deepEqual(fs.readFileSync(path.join(work, 'files', 'payload.bin')), data);
-    assert.ok(output.includes('Download complete!'), output);
+    if (!desktopUI) assert.ok(output.includes('Download complete!'), output);
     console.log(`PASS: ${data.length} bytes downloaded through local tracker and peer; exact contents verified (${requests} block requests).`);
   } finally {
     if (child && child.exitCode === null) child.kill();

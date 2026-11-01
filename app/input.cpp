@@ -8,7 +8,10 @@
 
 namespace torrent::app {
 
-ResolvedInput resolveInput(const std::string& input, const Config& config) {
+ResolvedInput resolveInput(const std::string& input, const Config& config,
+                           const std::function<bool()>& cancelled) {
+    const auto check = [&] { return cancelled && cancelled(); };
+    if (check()) throw std::runtime_error("Cancelled");
     if (!MagnetURI::isMagnetURI(input)) return {TorrentFile::fromFile(input), nullptr};
 
     const auto magnet = MagnetURI::parse(input);
@@ -19,8 +22,10 @@ ResolvedInput resolveInput(const std::string& input, const Config& config) {
         result.dht = std::make_unique<dht::DHTManager>(config.dht_port);
         result.dht->start();
         result.dht->bootstrap({});
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        for (int i = 0; i < 50 && !check(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    if (check()) throw std::runtime_error("Cancelled");
 
     // Keep callback state alive until the metadata worker has joined.
     std::atomic<bool> ready{false};
@@ -30,10 +35,11 @@ ResolvedInput resolveInput(const std::string& input, const Config& config) {
         ready = true;
     });
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-    while (metadata.isRunning() && !ready && std::chrono::steady_clock::now() < deadline) {
+    while (metadata.isRunning() && !ready && !check() && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     metadata.stop();
+    if (check()) throw std::runtime_error("Cancelled");
     if (!ready) throw std::runtime_error(std::chrono::steady_clock::now() >= deadline
         ? "Magnet metadata download timed out" : "Failed to download verified magnet metadata");
     return result;

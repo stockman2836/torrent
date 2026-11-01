@@ -2,6 +2,7 @@
 #include "torrent/core/logger.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 
 using json = nlohmann::json;
@@ -10,7 +11,7 @@ namespace torrent {
 
 bool Config::loadFromFile(const std::string& filepath) {
     try {
-        std::ifstream file(filepath);
+        std::ifstream file(std::filesystem::u8path(filepath));
         if (!file.is_open()) {
             LOG_WARN("Config file not found: {}. Using defaults.", filepath);
             return false;
@@ -177,7 +178,7 @@ bool Config::saveToFile(const std::string& filepath) const {
         j["enable_utp"] = enable_utp;
         j["prefer_utp"] = prefer_utp;
 
-        std::ofstream file(filepath);
+        std::ofstream file(std::filesystem::u8path(filepath));
         if (!file.is_open()) {
             LOG_ERROR("Failed to open config file for writing: {}", filepath);
             return false;

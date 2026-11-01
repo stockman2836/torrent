@@ -5,6 +5,7 @@
 #include "torrent/core/logger.h"
 #include <algorithm>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 
 namespace torrent {
@@ -468,7 +469,7 @@ bool PieceManager::saveStateToDisk(const std::string& resume_file_path) const {
     std::lock_guard<std::mutex> lock(mutex_);
 
     try {
-        std::ofstream file(resume_file_path, std::ios::binary);
+        std::ofstream file(std::filesystem::u8path(resume_file_path), std::ios::binary);
         if (!file.is_open()) {
             std::cerr << "Failed to open resume file for writing: " << resume_file_path << "\n";
             return false;
@@ -517,7 +518,7 @@ bool PieceManager::loadStateFromDisk(const std::string& resume_file_path) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     try {
-        std::ifstream file(resume_file_path, std::ios::binary);
+        std::ifstream file(std::filesystem::u8path(resume_file_path), std::ios::binary);
         if (!file.is_open()) {
             // File doesn't exist - not an error, just no resume data
             return false;

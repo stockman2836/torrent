@@ -1,6 +1,6 @@
 # BitTorrent Client
 
-A C++17 command-line BitTorrent client. Supports torrent metadata, HTTP/UDP
+A C++17 BitTorrent client with a native Windows desktop application and CLI. Supports torrent metadata, HTTP/UDP
 trackers, TCP peer transfers, piece verification, multi-file storage and resume
 state and selective file downloads. Additional modules implement DHT, magnet metadata exchange, PEX, MSE,
 Fast Extension, IPv6, local discovery, web seeds and optional uTP.
@@ -11,7 +11,8 @@ path. The additional protocols still require broader interoperability testing.
 ## Project structure
 
 ```text
-app/                     CLI parsing, input resolution and application lifecycle
+app/                     Shared background controller, CLI and input resolution
+desktop/                 Native Windows interface without a console window
 include/torrent/         Public headers organized by module
   core/                  Configuration, logging, crypto and shared helpers
   metainfo/              Bencode, torrent metadata, magnet URIs and block types
@@ -37,7 +38,7 @@ rules.
 
 ## Requirements
 
-- CMake 3.15+ and a C++17 compiler (MSVC, GCC or Clang).
+- CMake 3.16+ and a C++17 compiler (MSVC, GCC or Clang).
 - OpenSSL, libcurl and platform thread/socket libraries.
 - spdlog, nlohmann/json and Google Test: installed CMake packages are preferred;
   missing packages are fetched at the pinned versions during configuration.
@@ -73,12 +74,38 @@ with non-ASCII dependency paths.
 | `BUILD_EXAMPLES` | `OFF` | Standalone API examples |
 | `BUILD_TOOLS` | `OFF` | Manual HTTP, socket and handshake diagnostics |
 | `ENABLE_UTP` | `OFF` | Link libutp and enable its transport implementation |
+| `BUILD_DESKTOP` | `ON` on Windows | Build the native Windows application |
 
 An explicit `ENABLE_UTP=ON` requires libutp to be found; configuration fails with
 an explanation if it is missing. Compile definitions and library settings apply
 only to their owning targets.
 
 ## Usage
+
+On Windows, open `build/desktop/TorrentClient.exe` (or
+`build/desktop/Release/TorrentClient.exe` with Visual Studio). Select a `.torrent`
+file or paste a magnet link, read its metadata, select a destination and check the
+files to download. Select rows and apply a priority using the dropdown. The window
+shows progress and transfer speeds. **Stop** saves verified pieces; **Continue**
+starts a session that verifies and reuses them. Closing the window waits for this
+cleanup; network timeouts can delay stopping. This first interface manages one
+torrent at a time and stops when the selected files finish.
+
+Preferences and the desktop log live in `%LOCALAPPDATA%/TorrentClient`; the default
+download folder is `%USERPROFILE%/Downloads/TorrentClient`. Resume data stays with
+the downloaded files. The Windows interface uses system controls and requires no
+additional GUI framework. MinGW builds link the C++ runtime statically and copy
+remaining third-party DLLs beside the executable. Keep these DLLs with the app
+when moving it to another folder.
+
+The desktop controller is covered by unit tests and local tracker/peer integration
+tests in CTest. To exercise the actual window in hidden mode, run:
+
+```powershell
+node tests/integration/test_download.cjs build/desktop/TorrentClient.exe --desktop-ui
+```
+
+The remaining examples below use the CLI.
 
 The executable is built under `build/app/` (or `build/app/Release/` with Visual
 Studio). The default configuration path remains `./config.json`, relative to the

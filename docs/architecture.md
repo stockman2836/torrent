@@ -14,7 +14,8 @@ Includes always name their module, for example
 | `storage` / `Torrent::Storage` | Piece assembly, integrity checks, files and resume bitfields | Metainfo |
 | `network` / `Torrent::Network` | Trackers, peer protocol, DHT, discovery and transports | Metainfo |
 | `session` / `Torrent::Session` | Coordinate one torrent and own its workers and services | Storage, Network |
-| `app` / `torrent_app` | CLI parsing, input resolution and application lifecycle | Session |
+| `app` / `torrent_app` | CLI parsing, input resolution and background download lifecycle | Session |
+| `desktop` / `torrent_desktop` | Native Win32 controls and user interactions | App |
 
 Storage and networking are independent targets. Neither depends on the CLI or
 session. Tests link only the modules they exercise. Dependencies, include paths,
@@ -32,6 +33,15 @@ flowchart TD
 ```
 
 ## Application flow
+
+The desktop window issues commands to `app::DownloadTask` and polls an immutable
+file list plus a synchronized status snapshot. One background worker exclusively
+owns input resolution and the download session. Start, stop and close never join
+network workers on the window thread. Stop persists verified pieces; continuing
+creates a new session using existing files and resume data. Closing first stops
+the task and then releases metadata and DHT on the worker before destroying the
+window. File selections and priorities use the same `Config` fields as the CLI.
+The desktop target is Windows-only; the shared controller has no Win32 dependency.
 
 `app/main.cpp` calls `app::run`. The application parses and validates CLI values,
 loads configuration, resolves either input form to a `TorrentFile`, and starts

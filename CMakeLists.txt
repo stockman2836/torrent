@@ -1,10 +1,11 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.16)
 project(TorrentClient VERSION 1.0.0 LANGUAGES CXX)
 
 option(BUILD_TESTS "Build automated tests" ON)
 option(BUILD_EXAMPLES "Build standalone examples" OFF)
 option(BUILD_TOOLS "Build manual network diagnostics" OFF)
 option(ENABLE_UTP "Enable uTP transport (requires libutp)" OFF)
+option(BUILD_DESKTOP "Build the native Windows desktop application" ${WIN32})
 
 include(cmake/Dependencies.cmake)
 
@@ -22,6 +23,13 @@ endfunction()
 
 add_subdirectory(src)
 add_subdirectory(app)
+if(BUILD_DESKTOP)
+    if(NOT WIN32)
+        message(FATAL_ERROR "The desktop application currently requires Windows")
+    endif()
+    enable_language(RC)
+    add_subdirectory(desktop)
+endif()
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

@@ -27,6 +27,8 @@ add_unit_test(test_command_line torrent_app)
 add_unit_test(test_extension_protocol Torrent::Network)
 add_unit_test(test_metadata_exchange Torrent::Network)
 add_unit_test(test_file_selection Torrent::Metainfo)
+add_unit_test(test_download_task torrent_app)
+set_tests_properties(test_download_task PROPERTIES TIMEOUT 30)
 
 set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file_manager test_command_line
     test_extension_protocol test_metadata_exchange
@@ -34,6 +36,26 @@ set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file
     PROPERTIES TIMEOUT 30)
 find_program(NODE_EXECUTABLE NAMES node)
 if(NODE_EXECUTABLE)
+    add_executable(desktop_driver integration/desktop_driver.cpp)
+    target_link_libraries(desktop_driver PRIVATE torrent_app)
+    add_executable(desktop_partial integration/desktop_driver.cpp)
+    target_compile_definitions(desktop_partial PRIVATE TASK_PARTIAL)
+    target_link_libraries(desktop_partial PRIVATE torrent_app)
+    foreach(scenario resume corrupt)
+        add_test(NAME test_desktop_stop_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_transfer.cjs" ${scenario}
+            "$<TARGET_FILE:desktop_driver>" "$<TARGET_FILE:desktop_partial>")
+        set_tests_properties(test_desktop_stop_${scenario} PROPERTIES TIMEOUT 40)
+    endforeach()
+    add_test(NAME test_desktop_download COMMAND "${NODE_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_download.cjs" "$<TARGET_FILE:desktop_driver>")
+    set_tests_properties(test_desktop_download PROPERTIES TIMEOUT 55)
+    foreach(scenario single multiple zero resume corrupt changed invalid preserve)
+        add_test(NAME test_desktop_selection_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_selection.cjs" ${scenario}
+            "$<TARGET_FILE:desktop_driver>")
+        set_tests_properties(test_desktop_selection_${scenario} PROPERTIES TIMEOUT 30)
+    endforeach()
     add_executable(partial_download integration/partial_download.cpp)
     target_link_libraries(partial_download PRIVATE Torrent::Session)
     add_test(NAME test_download COMMAND "${NODE_EXECUTABLE}"

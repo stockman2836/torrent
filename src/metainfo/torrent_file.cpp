@@ -1,13 +1,14 @@
 #include "torrent/metainfo/torrent_file.h"
 #include "torrent/core/utils.h"
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 
 namespace torrent {
 
 TorrentFile TorrentFile::fromFile(const std::string& filepath) {
-    std::ifstream file(filepath, std::ios::binary);
+    std::ifstream file(std::filesystem::u8path(filepath), std::ios::binary);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open file: " + filepath);
     }

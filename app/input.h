@@ -5,6 +5,7 @@
 #include "torrent/network/dht/dht_manager.h"
 #include <memory>
 #include <string>
+#include <functional>
 
 namespace torrent::app {
 
@@ -13,6 +14,7 @@ struct ResolvedInput {
     std::unique_ptr<dht::DHTManager> dht;
 };
 
-ResolvedInput resolveInput(const std::string& input, const Config& config);
+ResolvedInput resolveInput(const std::string& input, const Config& config,
+                           const std::function<bool()>& cancelled = {});
 
 } // namespace torrent::app

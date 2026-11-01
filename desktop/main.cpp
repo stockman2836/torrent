@@ -1,0 +1,400 @@
+#include <winsock2.h>
+#include <windows.h>
+#include <commctrl.h>
+#include <commdlg.h>
+#include <shlobj.h>
+#include <shellapi.h>
+#include <uxtheme.h>
+// Win32's ERROR macro conflicts with the protocol and logger enum members.
+#undef ERROR
+#include "download_task.h"
+#include "torrent/core/logger.h"
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <stdexcept>
+
+namespace fs = std::filesystem;
+using namespace torrent;
+using namespace torrent::app;
+
+namespace {
+std::string utf8(const std::wstring& value) {
+    if (value.empty()) return {};
+    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+        static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (!size) throw std::runtime_error("Invalid Unicode text");
+    std::string result(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr);
+    return result;
+}
+std::wstring wide(const std::string& value) {
+    if (value.empty()) return {};
+    const int size = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
+    std::wstring result(size, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), size);
+    return result;
+}
+std::wstring text(HWND window) {
+    std::wstring value(GetWindowTextLengthW(window) + 1, L'\0');
+    const int size = GetWindowTextW(window, value.data(), static_cast<int>(value.size()));
+    value.resize(size);
+    return value;
+}
+fs::path knownFolder(REFKNOWNFOLDERID id) {
+    PWSTR value = nullptr;
+    if (FAILED(SHGetKnownFolderPath(id, 0, nullptr, &value))) throw std::runtime_error("Cannot locate user folder");
+    fs::path result(value);
+    CoTaskMemFree(value);
+    return result;
+}
+std::wstring bytes(int64_t value) {
+    const wchar_t* units[] = {L"Б", L"КиБ", L"МиБ", L"ГиБ", L"ТиБ"};
+    double amount = static_cast<double>(value);
+    int unit = 0;
+    while (amount >= 1024 && unit < 4) { amount /= 1024; ++unit; }
+    std::wostringstream out;
+    out << std::fixed << std::setprecision(unit ? 1 : 0) << amount << L" " << units[unit];
+    return out.str();
+}
+enum Control { Source = 100, Browse, Read, Folder, ChooseFolder, Files, SelectAll, SelectNone,
+    Priority, Apply, Start, Stop, OpenFolder };
+const wchar_t* priorityName(FilePriority value) {
+    switch (value) {
+    case FilePriority::High: return L"Высокий";
+    case FilePriority::Low: return L"Низкий";
+    case FilePriority::Skip: return L"Пропустить";
+    default: return L"Обычный";
+    }
+}
+
+class Window {
+public:
+    HWND handle = nullptr;
+    bool smoke = false;
+    std::wstring smokeSource, smokeFolder, smokeConfig;
+    int exitCode = 0;
+
+    ~Window() { if (font_) DeleteObject(font_); if (heading_) DeleteObject(heading_); }
+    static LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+        Window* self = reinterpret_cast<Window*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (message == WM_NCCREATE) {
+            self = static_cast<Window*>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams);
+            self->handle = hwnd;
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+        }
+        if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
+        try { return self->dispatch(message, wparam, lparam); }
+        catch (const std::exception& error) {
+            if (!self->smoke) MessageBoxW(hwnd, wide(error.what()).c_str(), L"TorrentClient", MB_OK | MB_ICONERROR);
+            else { self->exitCode = 1; self->close(); }
+            if (message == WM_CREATE) return -1;
+            return 0;
+        }
+    }
+
+private:
+    DownloadTask task_;
+    Config config_;
+    fs::path settings_;
+    HWND title_, subtitle_, source_, browse_, read_, folderLabel_, folder_, choose_, files_,
+        all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_;
+    HFONT font_ = nullptr, heading_ = nullptr;
+    std::shared_ptr<const std::vector<FileInfo>> displayed_;
+    std::vector<FilePriority> priorities_;
+    bool filling_ = false, closing_ = false, unloading_ = false, smokeStarted_ = false;
+    ULONGLONG smokeDeadline_ = 0;
+    std::wstring loadedSource_;
+    DownloadState previous_ = DownloadState::Idle;
+
+    HWND control(const wchar_t* cls, const wchar_t* label, DWORD style, int id = 0) {
+        HWND child = CreateWindowExW(cls == WC_EDITW ? WS_EX_CLIENTEDGE : 0, cls, label,
+            WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, handle,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
+        if (!child) throw std::runtime_error("Cannot create window control");
+        SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+        return child;
+    }
+    void create() {
+        HDC dc = GetDC(handle);
+        const int dpi = GetDeviceCaps(dc, LOGPIXELSY);
+        ReleaseDC(handle, dc);
+        font_ = CreateFontW(-MulDiv(10, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        heading_ = CreateFontW(-MulDiv(21, dpi, 72), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        title_ = control(L"STATIC", L"TorrentClient", SS_LEFT);
+        SendMessageW(title_, WM_SETFONT, reinterpret_cast<WPARAM>(heading_), TRUE);
+        subtitle_ = control(L"STATIC", L"Откройте торрент или вставьте magnet-ссылку и выберите файлы для загрузки", SS_LEFT);
+        source_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Source);
+        SendMessageW(source_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Путь к .torrent или magnet-ссылка"));
+        browse_ = control(L"BUTTON", L"Открыть .torrent", WS_TABSTOP, Browse);
+        read_ = control(L"BUTTON", L"Прочитать", WS_TABSTOP, Read);
+        folderLabel_ = control(L"STATIC", L"Папка загрузки", SS_LEFT);
+        folder_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Folder);
+        choose_ = control(L"BUTTON", L"Выбрать папку", WS_TABSTOP, ChooseFolder);
+        files_ = control(WC_LISTVIEWW, L"", WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS, Files);
+        ListView_SetExtendedListViewStyle(files_, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+        SetWindowTheme(files_, L"Explorer", nullptr);
+        const wchar_t* columns[] = {L"Файл", L"Размер", L"Приоритет"};
+        for (int i = 0; i < 3; ++i) {
+            LVCOLUMNW col{}; col.mask = LVCF_TEXT | LVCF_WIDTH; col.pszText = const_cast<PWSTR>(columns[i]);
+            col.cx = i == 0 ? 550 : 130;
+            ListView_InsertColumn(files_, i, &col);
+        }
+        all_ = control(L"BUTTON", L"Выбрать все", WS_TABSTOP, SelectAll);
+        none_ = control(L"BUTTON", L"Снять выбор", WS_TABSTOP, SelectNone);
+        priority_ = control(WC_COMBOBOXW, L"", WS_TABSTOP | CBS_DROPDOWNLIST, Priority);
+        for (auto label : {L"Обычный", L"Высокий", L"Низкий", L"Пропустить"})
+            SendMessageW(priority_, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
+        SendMessageW(priority_, CB_SETCURSEL, 0, 0);
+        apply_ = control(L"BUTTON", L"Применить к выделенным", WS_TABSTOP, Apply);
+        summary_ = control(L"STATIC", L"Файлы появятся после чтения метаданных", SS_LEFT);
+        progress_ = control(PROGRESS_CLASSW, L"", 0);
+        SendMessageW(progress_, PBM_SETRANGE32, 0, 1000);
+        status_ = control(L"STATIC", L"Готов к работе", SS_LEFT);
+        speeds_ = control(L"STATIC", L"", SS_RIGHT);
+        start_ = control(L"BUTTON", L"Скачать", WS_TABSTOP | BS_DEFPUSHBUTTON, Start);
+        stop_ = control(L"BUTTON", L"Остановить", WS_TABSTOP, Stop);
+        open_ = control(L"BUTTON", L"Открыть папку", WS_TABSTOP, OpenFolder);
+        auto home = knownFolder(FOLDERID_LocalAppData) / L"TorrentClient";
+        fs::create_directories(home);
+        settings_ = home / L"config.json";
+        config_.download_dir = (knownFolder(FOLDERID_Downloads) / L"TorrentClient").u8string();
+        config_.resume_dir = (home / L"resume").u8string();
+        if (fs::exists(settings_)) config_.loadFromFile(settings_.u8string());
+        if (smoke) {
+            config_.loadFromFile(utf8(smokeConfig));
+            settings_.clear();
+            config_.download_dir = utf8(smokeFolder);
+            SetWindowTextW(source_, smokeSource.c_str());
+        }
+        // File logging is optional; a logging failure must not prevent opening the app.
+        try { Logger::init((home / L"desktop.log").u8string(), Logger::Level::OFF); } catch (...) {}
+        SetWindowTextW(folder_, wide(config_.download_dir).c_str());
+        SetTimer(handle, 1, 150, nullptr);
+        if (smoke) { smokeDeadline_ = GetTickCount64() + 45000; load(); }
+        refresh();
+    }
+    void layout() {
+        if (!font_) return;
+        RECT bounds{}; GetClientRect(handle, &bounds);
+        const int w = bounds.right, h = bounds.bottom, m = 24, bottom = h - 205;
+        const auto move = [](HWND c, int x, int y, int width, int height) { MoveWindow(c, x, y, std::max(1, width), height, TRUE); };
+        move(title_, m, 18, w-48, 42); move(subtitle_, m, 66, w-48, 25);
+        move(source_, m, 107, w-320, 32); move(browse_, w-284, 106, 155, 34); move(read_, w-119, 106, 95, 34);
+        move(folderLabel_, m, 152, 170, 22); move(folder_, m, 178, w-220, 32); move(choose_, w-184, 177, 160, 34);
+        move(files_, m, 230, w-48, bottom-230);
+        ListView_SetColumnWidth(files_, 0, std::max(260, w-330));
+        move(all_, m, bottom+12, 125, 32); move(none_, 159, bottom+12, 125, 32);
+        move(priority_, w-430, bottom+12, 145, 240); move(apply_, w-275, bottom+11, 251, 34);
+        move(summary_, m, bottom+56, w-48, 23); move(progress_, m, bottom+85, w-48, 17);
+        move(status_, m, bottom+112, w/2, 25); move(speeds_, w/2, bottom+112, w/2-24, 25);
+        move(start_, m, h-53, 150, 34); move(stop_, 186, h-53, 140, 34); move(open_, w-184, h-53, 160, 34);
+    }
+    void browse() {
+        wchar_t path[32768]{};
+        OPENFILENAMEW dialog{}; dialog.lStructSize = sizeof(dialog); dialog.hwndOwner = handle;
+        dialog.lpstrFilter = L"Торренты (*.torrent)\0*.torrent\0Все файлы\0*.*\0";
+        dialog.lpstrFile = path; dialog.nMaxFile = 32768; dialog.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&dialog)) { SetWindowTextW(source_, path); load(); }
+    }
+    void chooseFolder() {
+        IFileOpenDialog* dialog = nullptr;
+        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+            throw std::runtime_error("Cannot open folder picker");
+        DWORD flags = 0; dialog->GetOptions(&flags);
+        dialog->SetOptions(flags | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        if (SUCCEEDED(dialog->Show(handle))) {
+            IShellItem* item = nullptr;
+            if (SUCCEEDED(dialog->GetResult(&item))) {
+                PWSTR path = nullptr;
+                if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                    SetWindowTextW(folder_, path); CoTaskMemFree(path);
+                }
+                item->Release();
+            }
+        }
+        dialog->Release();
+    }
+    void load() {
+        if (task_.busy()) return;
+        const auto source = text(source_);
+        if (source.empty()) { SetFocus(source_); return; }
+        loadedSource_ = source;
+        task_.load(utf8(source), config_);
+        refresh();
+    }
+    void start() {
+        if (task_.busy() || !displayed_) return;
+        if (text(source_) != loadedSource_) { load(); return; }
+        config_.download_dir = utf8(text(folder_));
+        if (config_.download_dir.empty()) throw std::runtime_error("Select a download folder");
+        config_.file_indices.clear(); config_.file_priorities.clear();
+        bool selected = false;
+        for (size_t i = 0; i < priorities_.size(); ++i) {
+            const bool checked = ListView_GetCheckState(files_, i) != 0;
+            selected |= checked;
+            config_.file_priorities[i] = checked ? priorities_[i] : FilePriority::Skip;
+        }
+        if (!selected) throw std::runtime_error("Select at least one file");
+        fs::create_directories(fs::u8path(config_.download_dir));
+        if (!settings_.empty() && !config_.saveToFile(settings_.u8string()))
+            throw std::runtime_error("Cannot save application settings");
+        task_.start(config_);
+        refresh();
+    }
+    void populate(const DownloadSnapshot& snapshot) {
+        filling_ = true;
+        ListView_DeleteAllItems(files_);
+        displayed_ = snapshot.files;
+        priorities_.assign(displayed_ ? displayed_->size() : 0, FilePriority::Normal);
+        if (displayed_) for (size_t i = 0; i < displayed_->size(); ++i) {
+            const auto& file = (*displayed_)[i];
+            auto path = wide(file.path), size = bytes(file.length);
+            LVITEMW item{}; item.mask = LVIF_TEXT; item.iItem = static_cast<int>(i); item.pszText = path.data();
+            ListView_InsertItem(files_, &item);
+            ListView_SetItemText(files_, i, 1, size.data());
+            ListView_SetItemText(files_, i, 2, const_cast<PWSTR>(L"Обычный"));
+            ListView_SetCheckState(files_, i, TRUE);
+        }
+        filling_ = false;
+    }
+    void refresh() {
+        const auto state = task_.snapshot();
+        const bool busy = task_.busy();
+        if (state.files != displayed_) populate(state);
+        for (HWND c : {source_, browse_, read_, folder_, choose_}) EnableWindow(c, !busy && !closing_);
+        for (HWND c : {all_, none_, priority_, apply_, start_}) EnableWindow(c, displayed_ && !busy && !closing_);
+        EnableWindow(stop_, busy && !closing_ && state.state != DownloadState::Stopping);
+        EnableWindow(open_, !text(folder_).empty());
+        SetWindowTextW(start_, state.state == DownloadState::Stopped ? L"Продолжить" : L"Скачать");
+        const wchar_t* label = L"Готов к работе";
+        switch (state.state) {
+        case DownloadState::Loading: label = L"Чтение метаданных…"; break;
+        case DownloadState::Ready: label = L"Выберите файлы и нажмите «Скачать»"; break;
+        case DownloadState::Downloading: label = L"Загрузка…"; break;
+        case DownloadState::Stopping: label = L"Остановка и сохранение прогресса…"; break;
+        case DownloadState::Stopped: label = L"Остановлено — можно продолжить загрузку"; break;
+        case DownloadState::Complete: label = L"Загрузка завершена"; break;
+        case DownloadState::Failed: label = L"Ошибка — подробности в сообщении"; break;
+        default: break;
+        }
+        std::wostringstream status;
+        status << label;
+        if (state.state == DownloadState::Downloading || state.state == DownloadState::Complete)
+            status << L"  " << std::fixed << std::setprecision(1) << state.progress << L"%";
+        SetWindowTextW(status_, status.str().c_str());
+        SendMessageW(progress_, PBM_SETPOS, static_cast<WPARAM>(std::clamp(state.progress, 0.0, 100.0)*10), 0);
+        SetWindowTextW(speeds_, (L"↓ " + bytes(state.download_speed) + L"/с    ↑ " + bytes(state.upload_speed) + L"/с").c_str());
+        if (displayed_) {
+            size_t count = 0; int64_t size = 0;
+            for (size_t i = 0; i < displayed_->size(); ++i) if (ListView_GetCheckState(files_, i)) { ++count; size += (*displayed_)[i].length; }
+            SetWindowTextW(summary_, (wide(state.name) + L"  ·  Выбрано " + std::to_wstring(count) + L" из " +
+                std::to_wstring(displayed_->size()) + L"  ·  " + bytes(size)).c_str());
+        } else SetWindowTextW(summary_, L"Файлы появятся после чтения метаданных");
+        if (state.state == DownloadState::Failed && previous_ != state.state && !smoke)
+            MessageBoxW(handle, wide(state.error).c_str(), L"Ошибка загрузки", MB_OK | MB_ICONERROR);
+        previous_ = state.state;
+        if (closing_ && !busy) {
+            if (!unloading_) { unloading_ = true; task_.unload(); }
+            else DestroyWindow(handle);
+        } else if (smoke && !closing_) {
+            if (!busy && state.state == DownloadState::Ready && !smokeStarted_) {
+                if (ListView_GetItemCount(files_) == 0) { exitCode = 1; close(); }
+                else { smokeStarted_ = true; SendMessageW(handle, WM_COMMAND, Start, 0); }
+            } else if (!busy && state.state == DownloadState::Complete) close();
+            else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
+        }
+    }
+    void close() { closing_ = true; task_.stop(); }
+    LRESULT dispatch(UINT message, WPARAM wparam, LPARAM lparam) {
+        switch (message) {
+        case WM_CREATE: create(); return 0;
+        case WM_SIZE: layout(); return 0;
+        case WM_GETMINMAXINFO: {
+            auto info = reinterpret_cast<MINMAXINFO*>(lparam); info->ptMinTrackSize = {940, 710}; return 0;
+        }
+        case WM_TIMER: refresh(); return 0;
+        case WM_CLOSE: close(); return 0;
+        case WM_DESTROY: KillTimer(handle, 1); PostQuitMessage(exitCode); return 0;
+        case WM_NOTIFY: {
+            auto header = reinterpret_cast<NMHDR*>(lparam);
+            if (header->idFrom == Files && header->code == LVN_ITEMCHANGING && !filling_) {
+                auto change = reinterpret_cast<NMLISTVIEW*>(lparam);
+                if (((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) && task_.busy()) return TRUE;
+            }
+            if (header->idFrom == Files && header->code == LVN_ITEMCHANGED && !filling_) {
+                auto change = reinterpret_cast<NMLISTVIEW*>(lparam);
+                if (change->iItem >= 0 && static_cast<size_t>(change->iItem) < priorities_.size() &&
+                    ListView_GetCheckState(files_, change->iItem) && priorities_[change->iItem] == FilePriority::Skip) {
+                    priorities_[change->iItem] = FilePriority::Normal;
+                    ListView_SetItemText(files_, change->iItem, 2, const_cast<PWSTR>(L"Обычный"));
+                }
+            }
+            return 0;
+        }
+        case WM_COMMAND:
+            switch (LOWORD(wparam)) {
+            case Browse: browse(); break;
+            case Read: load(); break;
+            case ChooseFolder: chooseFolder(); break;
+            case Start: start(); break;
+            case Stop: task_.stop(); break;
+            case OpenFolder: {
+                const auto directory = fs::absolute(fs::u8path(utf8(text(folder_))));
+                fs::create_directories(directory);
+                ShellExecuteW(handle, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
+            }
+            case SelectAll: case SelectNone:
+                if (!task_.busy()) for (size_t i = 0; i < priorities_.size(); ++i) ListView_SetCheckState(files_, i, LOWORD(wparam) == SelectAll);
+                break;
+            case Apply:
+                if (!task_.busy()) {
+                    const FilePriority values[] = {FilePriority::Normal, FilePriority::High, FilePriority::Low, FilePriority::Skip};
+                    const auto selection = SendMessageW(priority_, CB_GETCURSEL, 0, 0);
+                    if (selection < 0 || selection > 3) break;
+                    for (int i = -1; (i = ListView_GetNextItem(files_, i, LVNI_SELECTED)) != -1;) {
+                        priorities_[i] = values[selection];
+                        ListView_SetCheckState(files_, i, values[selection] != FilePriority::Skip);
+                        ListView_SetItemText(files_, i, 2, const_cast<PWSTR>(priorityName(values[selection])));
+                    }
+                }
+                break;
+            }
+            return 0;
+        }
+        return DefWindowProcW(handle, message, wparam, lparam);
+    }
+};
+} // namespace
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
+    OleInitialize(nullptr);
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS | ICC_STANDARD_CLASSES};
+    InitCommonControlsEx(&controls);
+    Window window;
+    int argc = 0;
+    auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv && argc == 5 && std::wstring(argv[1]) == L"--ui-test") {
+        window.smoke = true; window.smokeSource = argv[2]; window.smokeFolder = argv[3]; window.smokeConfig = argv[4];
+    }
+    if (argv) LocalFree(argv);
+    WNDCLASSEXW cls{}; cls.cbSize = sizeof(cls); cls.hInstance = instance;
+    cls.lpfnWndProc = Window::procedure; cls.lpszClassName = L"TorrentClientWindow";
+    cls.hCursor = LoadCursorW(nullptr, IDC_ARROW); cls.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);
+    RegisterClassExW(&cls);
+    HWND hwnd = CreateWindowExW(0, cls.lpszClassName, L"TorrentClient", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+        CW_USEDEFAULT, CW_USEDEFAULT, 1050, 790, nullptr, nullptr, instance, &window);
+    if (!hwnd) { OleUninitialize(); return 1; }
+    ShowWindow(hwnd, window.smoke ? SW_HIDE : show);
+    MSG message{};
+    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+        if (!IsDialogMessageW(hwnd, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
+    }
+    OleUninitialize();
+    return static_cast<int>(message.wParam);
+}

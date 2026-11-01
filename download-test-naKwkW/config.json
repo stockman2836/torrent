@@ -1,0 +1,1 @@
+{"enable_dht":false,"enable_pex":false,"enable_lsd":false,"enable_webseeds":false,"enable_utp":false,"enable_encryption":false,"download_dir":"./files","log_file":"./client.log","listen_port":16881}
