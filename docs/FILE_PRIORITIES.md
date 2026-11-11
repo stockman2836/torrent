@@ -34,19 +34,57 @@ higher-priority work is already reserved or unavailable from that peer.
 
 Endgame rescue respects priorities among eligible blocks while retaining its
 request-copy limits and cancellation policy. Web-seed candidate selection also
-uses the priority-aware selector. Existing requests are not preempted.
+uses the priority-aware selector. Raising or lowering priority does not preempt
+already requested pieces; excluding whole pieces cancels their requests as
+described below.
 
-The CLI accepts priorities at session startup. To change them, restart with new
-flags; verified resume data is reused. Live reprioritization and changes to
-storage masks during an active session are not exposed yet.
+The CLI accepts priorities at session startup. To change CLI priorities, restart
+with new flags; verified resume data is reused.
+
+## Live desktop changes
+
+While a torrent is downloading, select file rows and apply a priority using the
+dropdown, or tick/untick files. These controls also work for ready queued jobs
+and seeding sessions; destination folders remain locked during a session. The
+desktop saves the new choices with the download list. The worker applies the
+latest requested selection without recreating peer connections, and shows a
+pending status while doing so.
+
+Changing high/normal/low affects the next eligible requests. Already requested
+pieces may finish first. Skipping a whole piece removes its session requests,
+queues TCP CANCEL messages for every outstanding copy and discards unverified
+assembly. Late replies cannot write excluded files. A skipped block also stops
+waiting for a download-speed allowance, allowing the peer to request wanted data.
+Shared boundary pieces remain wanted when they overlap another selected file.
+Already queued HTTP seed requests may finish; unwanted results are discarded.
+
+Verified pieces and existing payload files are retained. Enabling a file restores
+its verified boundary bytes from the cache before treating them as available;
+it does not download them again. Disabling a file closes its writable handle and
+preserves shared verified boundaries. Whole skipped files stay on disk without
+being copied wholesale into the cache. Progress is recalculated over the current
+selection, so adding missing files can lower its percentage. Skipping all remaining
+work completes the selected target; seeding policy remains independent of download
+priorities.
+
+Each active queue job retains ownership of paths selected during that session
+until it stops. A live change that would write a path owned by another active job
+is rejected. Queued writers wait until existing owners finish, including paths
+just deselected while a worker is applying changes. Storage errors or changed
+verified source bytes fail that job while preserving its data; restarting checks
+the saved pieces again.
 
 The API uses zero-based `Config::file_priorities` overrides with the `FilePriority`
 enum. Like `file_indices`, these runtime overrides are not serialized into JSON.
+The desktop list persists them separately. `DownloadQueue::setFilePriorities`
+and `DownloadTask::setFilePriorities` accept zero-based overrides for the complete
+file list; unmentioned files default to normal and replace an earlier selection.
 
 ## Verification
 
 ```sh
 ctest --test-dir build -R "test_priority|test_file_selection|test_piece_manager|test_command_line" --output-on-failure
+ctest --test-dir build -R "test_live_priorities|test_live_selection" --output-on-failure
 ```
 
 Offline TCP tests check actual request order for sequential and default strategy
@@ -54,3 +92,8 @@ modes, boundary overlap, skipped files, an empty target, CLI validation, preview
 and restarting with changed priorities. Unit tests cover rarity tie-breaking
 and all strategy priority rules. Public-swarm behavior and web-seed transport
 interoperability require broader integration coverage.
+
+Live tests inspect wire request order, cancellation and late data, re-enabling
+files, cached-boundary restoration, stop/resume, conflicting queue ownership,
+endgame duplicates and cancellation while throttled at 1 B/s. A native-window
+fixture changes a priority and unticks another file during an actual transfer.

@@ -5,7 +5,10 @@
 namespace torrent {
 
 bool DownloadManager::receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data) {
-    if (!download_limiter_.waitAndConsume(data.size(), [this] { return !running_.load(); })) return false;
+    if (!download_limiter_.waitAndConsume(data.size(), [this, index] {
+        return !running_.load() || piece_manager_->piecePriority(index) == FilePriority::Skip;
+    })) return false;
+    std::lock_guard<std::mutex> selection_lock(selection_mutex_);
     const auto result = piece_manager_->receiveBlock(index, offset, data, file_manager_.get());
     if (result == PieceManager::BlockResult::Rejected) return false;
     total_downloaded_ += data.size();

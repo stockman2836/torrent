@@ -47,6 +47,17 @@ size_t savedIndex(const json& value) {
         throw std::invalid_argument("Invalid saved file index");
     return value.get<size_t>();
 }
+std::set<std::string> selectedPaths(const Config& config, const DownloadSnapshot& state) {
+    std::set<std::string> result;
+    if (!state.files) return result;
+    for (size_t i = 0; i < state.files->size(); ++i) {
+        if (!config.file_indices.empty() && std::find(config.file_indices.begin(), config.file_indices.end(), i) == config.file_indices.end()) continue;
+        const auto priority = config.file_priorities.find(i);
+        if (priority != config.file_priorities.end() && priority->second == FilePriority::Skip) continue;
+        result.insert(pathKey((fs::u8path(config.download_dir) / fs::u8path((*state.files)[i].path)).u8string()));
+    }
+    return result;
+}
 int64_t savedSpeed(const json& item, const char* key, int64_t fallback) {
     if (!item.contains(key)) return fallback;
     if (!item.at(key).is_number_integer()) throw std::invalid_argument("Invalid saved speed limit");
@@ -164,6 +175,31 @@ bool DownloadQueue::setSeedingOptions(DownloadId id, const SeedingOptions& optio
     return true;
 }
 
+bool DownloadQueue::setFilePriorities(DownloadId id, const std::map<size_t, FilePriority>& priorities) {
+    auto entry = find(id);
+    if (closing_ || !entry || entry->removing) return false;
+    const auto state = entry->task.snapshot();
+    if (!state.files) return false;
+    for (const auto& [index, priority] : priorities) {
+        if (index >= state.files->size() || priority > FilePriority::High)
+            throw std::invalid_argument("Invalid file priority");
+    }
+    auto config = entry->config;
+    config.file_indices.clear(); config.file_priorities = priorities;
+    auto paths = selectedPaths(config, state);
+    if (entry->task.busy()) {
+        if (state.state != DownloadState::Downloading && state.state != DownloadState::Seeding) return false;
+        for (const auto& other : entries_) if (other.get() != entry && other->transferring) {
+            if (std::any_of(paths.begin(), paths.end(), [&](const auto& path) { return other->owned_paths.count(path); }))
+                throw std::invalid_argument("A selected file is used by another active torrent");
+        }
+        if (!entry->task.setFilePriorities(priorities)) return false;
+        entry->owned_paths.insert(paths.begin(), paths.end());
+    }
+    entry->config = std::move(config);
+    return true;
+}
+
 void DownloadQueue::dequeue(DownloadId id) {
     pending_.erase(std::remove(pending_.begin(), pending_.end(), id), pending_.end());
     if (auto entry = find(id)) entry->queued = false;
@@ -195,24 +231,18 @@ bool DownloadQueue::conflicts(const Entry& candidate, const Entry& active) const
     const auto first = candidate.task.snapshot();
     const auto second = active.task.snapshot();
     if (!first.files || !second.files) return false;
-    std::set<std::string> paths;
-    const auto selected = [](const Entry& entry, size_t i) {
-        if (!entry.config.file_indices.empty() && std::find(entry.config.file_indices.begin(),
-            entry.config.file_indices.end(), i) == entry.config.file_indices.end()) return false;
-        auto priority = entry.config.file_priorities.find(i);
-        return priority == entry.config.file_priorities.end() || priority->second != FilePriority::Skip;
-    };
-    for (size_t i = 0; i < second.files->size(); ++i) if (selected(active, i))
-        paths.insert(pathKey((fs::u8path(active.config.download_dir) / fs::u8path((*second.files)[i].path)).u8string()));
-    for (size_t i = 0; i < first.files->size(); ++i) if (selected(candidate, i) && paths.count(
-        pathKey((fs::u8path(candidate.config.download_dir) / fs::u8path((*first.files)[i].path)).u8string()))) return true;
+    const auto paths = selectedPaths(candidate.config, first);
+    for (const auto& path : paths) if (active.owned_paths.count(path)) return true;
     // Resume and boundary-piece cache files also belong to one writer at a time.
     return first.info_hash == second.info_hash && pathKey(candidate.config.download_dir) == pathKey(active.config.download_dir);
 }
 
 void DownloadQueue::tick() {
     for (auto& entry : entries_) {
-        if (entry->transferring && !entry->task.busy()) entry->transferring = entry->downloading = false;
+        if (entry->transferring && !entry->task.busy()) {
+            entry->transferring = entry->downloading = false;
+            entry->owned_paths.clear();
+        }
         if (entry->retiring_port && (!entry->task.busy() ||
             (entry->transferring && entry->task.snapshot().listen_port == entry->config.listen_port)))
             entry->retiring_port = 0;
@@ -242,6 +272,7 @@ void DownloadQueue::tick() {
         });
         if (collision) { ++it; continue; }
         if (!prepareNetwork(*entry)) { ++it; continue; }
+        entry->owned_paths = selectedPaths(entry->config, state);
         if (entry->task.start(entry->config)) {
             entry->transferring = entry->downloading = true; entry->queued = false; ++active;
             it = pending_.erase(it);

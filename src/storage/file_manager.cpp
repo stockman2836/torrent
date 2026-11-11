@@ -49,15 +49,76 @@ bool FileManager::initialize() {
 void FileManager::openFiles() {
     for (auto& handle : file_handles_) {
         if (!handle.selected) continue;
-        handle.stream.open(fs::u8path(handle.path), std::ios::in | std::ios::out | std::ios::binary);
-        if (!handle.stream.is_open()) {
-            handle.stream.clear();
-            { std::ofstream create(fs::u8path(handle.path), std::ios::binary); }
-            handle.stream.open(fs::u8path(handle.path), std::ios::in | std::ios::out | std::ios::binary);
-        }
-        if (!handle.stream) throw std::runtime_error("Failed to open file: " + handle.path);
-        if (fs::file_size(fs::u8path(handle.path)) < static_cast<uintmax_t>(handle.length)) fs::resize_file(fs::u8path(handle.path), handle.length);
+        openFile(handle);
     }
+}
+
+void FileManager::openFile(FileHandle& handle) {
+    const auto path = fs::u8path(handle.path);
+    fs::create_directories(path.parent_path());
+    if (!fs::exists(path)) {
+        std::ofstream create(path, std::ios::binary);
+        if (!create) throw std::runtime_error("Failed to create file: " + handle.path);
+    }
+    handle.stream.open(path, std::ios::in | std::ios::out | std::ios::binary);
+    if (!handle.stream) throw std::runtime_error("Failed to open file: " + handle.path);
+    if (fs::file_size(path) < static_cast<uintmax_t>(handle.length)) fs::resize_file(path, handle.length);
+}
+
+void FileManager::setSelection(const FileSelection& selection, const std::vector<bool>& verified) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto selected = selection.files();
+    if (selected.size() != file_handles_.size() || verified.size() != torrent_.numPieces())
+        throw std::invalid_argument("Invalid live file selection");
+    if (selected == selected_files_) return;
+    std::vector<std::fstream> opened(selected.size());
+    std::vector<bool> created(selected.size(), false);
+    for (size_t i = 0; i < selected.size(); ++i) if (selected[i] && !selected_files_[i]) {
+        FileHandle handle;
+        handle.path = file_handles_[i].path; handle.length = file_handles_[i].length;
+        created[i] = !fs::exists(fs::u8path(handle.path));
+        openFile(handle);
+        opened[i] = std::move(handle.stream);
+    }
+    for (uint32_t index = 0; index < verified.size(); ++index) {
+        if (!verified[index]) continue;
+        const int64_t start = static_cast<int64_t>(index) * torrent_.pieceLength();
+        const auto end = std::min(start + torrent_.pieceLength(), torrent_.totalLength());
+        bool changed = false, wanted = false, skipped = false, missing = false;
+        for (size_t i = 0; i < selected.size(); ++i) {
+            const auto& file = file_handles_[i];
+            if (file.offset >= end || file.offset + file.length <= start) continue;
+            changed = changed || selected[i] != selected_files_[i];
+            wanted = wanted || selected[i]; skipped = skipped || !selected[i]; missing = missing || created[i];
+        }
+        if (!changed) continue;
+        const bool cached = fs::exists(fs::u8path(cachePath(index)));
+        // Whole skipped pieces remain in their existing files. Only boundary
+        // pieces and cached data need copying; skipping a large file is cheap.
+        if (!(wanted && skipped) && !cached && !missing) continue;
+        const auto data = readPieceLocked(index); // Read with the previous mask.
+        const auto digest = utils::sha1(data);
+        if (data.empty() || !std::equal(digest.begin(), digest.end(), torrent_.pieces().begin() + index * 20))
+            throw std::runtime_error("Verified data changed on disk; restart the download to recheck it");
+        for (size_t i = 0; i < selected.size(); ++i) if (selected[i] && !selected_files_[i]) {
+            const auto& file = file_handles_[i];
+            const auto begin = std::max(start, file.offset), finish = std::min(end, file.offset + file.length);
+            if (begin >= finish) continue;
+            opened[i].seekp(begin - file.offset);
+            opened[i].write(reinterpret_cast<const char*>(data.data() + begin - start), finish - begin);
+            opened[i].flush();
+            if (!opened[i]) throw std::runtime_error("Failed to restore cached file data: " + file.path);
+        }
+        if (((wanted && skipped) || cached) && !writeCache(index, data))
+            throw std::runtime_error("Failed to preserve boundary piece data");
+    }
+    for (size_t i = 0; i < selected.size(); ++i) {
+        auto& file = file_handles_[i];
+        if (file.selected && !selected[i]) file.stream.close();
+        else if (!file.selected && selected[i]) file.stream = std::move(opened[i]);
+        file.selected = selected[i];
+    }
+    selected_files_.swap(selected);
 }
 
 void FileManager::closeFiles() {
@@ -75,6 +136,15 @@ bool FileManager::needsCache(uint32_t index) const {
     return std::any_of(file_handles_.begin(), file_handles_.end(), [&](const FileHandle& file) {
         return !file.selected && file.offset < end && file.offset + file.length > start;
     });
+}
+
+bool FileManager::writeCache(uint32_t index, const std::vector<uint8_t>& data) {
+    const auto path = fs::u8path(cachePath(index));
+    fs::create_directories(path.parent_path());
+    std::ofstream cache(path, std::ios::binary | std::ios::trunc);
+    cache.write(reinterpret_cast<const char*>(data.data()), data.size());
+    cache.close();
+    return static_cast<bool>(cache);
 }
 
 bool FileManager::writePiece(uint32_t index, const std::vector<uint8_t>& data) {
@@ -98,14 +168,7 @@ bool FileManager::writePiece(uint32_t index, const std::vector<uint8_t>& data) {
             written += end - begin;
         }
         if (written == 0) return false;
-        if (needsCache(index)) {
-            const auto path = cachePath(index);
-            fs::create_directories(fs::u8path(path).parent_path());
-            std::ofstream cache(fs::u8path(path), std::ios::binary | std::ios::trunc);
-            cache.write(reinterpret_cast<const char*>(data.data()), data.size());
-            cache.flush();
-            if (!cache) return false;
-        }
+        if (needsCache(index) && !writeCache(index, data)) return false;
         return true;
     } catch (const std::exception& error) {
         LOG_ERROR("Failed to write piece {}: {}", index, error.what());
@@ -115,6 +178,10 @@ bool FileManager::writePiece(uint32_t index, const std::vector<uint8_t>& data) {
 
 std::vector<uint8_t> FileManager::readPiece(uint32_t index) {
     std::lock_guard<std::mutex> lock(mutex_);
+    return readPieceLocked(index);
+}
+
+std::vector<uint8_t> FileManager::readPieceLocked(uint32_t index) {
     if (index >= torrent_.numPieces()) return {};
     const int64_t start = static_cast<int64_t>(index) * torrent_.pieceLength();
     const int64_t size = std::min(torrent_.pieceLength(), torrent_.totalLength() - start);

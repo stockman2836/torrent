@@ -1,4 +1,5 @@
 const net = require('node:net');
+const dgram = require('node:dgram');
 const { randomInt } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,7 +14,7 @@ async function availablePort(count = 1) {
   const directory = path.resolve(__dirname, '../../build/tests/ports');
   fs.mkdirSync(directory, { recursive: true });
   for (let attempt = 0; attempt < 32; ++attempt) {
-    const servers = [], acquired = [];
+    const servers = [], datagrams = [], acquired = [];
     let reserved = false;
     try {
       // Keep listeners out of the ephemeral range used by outbound connections.
@@ -29,7 +30,11 @@ async function availablePort(count = 1) {
       for (let i = 0; i < count; ++i) {
         const server = net.createServer(); servers.push(server);
         await new Promise((resolve, reject) => {
-          server.once('error', reject); server.listen(base + i * 2, '127.0.0.1', resolve);
+          server.once('error', reject); server.listen(base + i * 2, '0.0.0.0', resolve);
+        });
+        const udp = dgram.createSocket('udp4'); datagrams.push(udp);
+        await new Promise((resolve, reject) => {
+          udp.once('error', reject); udp.bind(base + i * 2 + 1, '0.0.0.0', resolve);
         });
         if (base + (count - 1) * 2 > 65535) throw new Error('Port range exceeds uint16');
       }
@@ -38,6 +43,9 @@ async function availablePort(count = 1) {
       if (attempt === 31) throw error;
     } finally {
       await Promise.all(servers.map(server => server.listening ? new Promise(resolve => server.close(resolve)) : Promise.resolve()));
+      await Promise.all(datagrams.map(socket => new Promise(resolve => {
+        try { socket.close(resolve); } catch { resolve(); }
+      })));
       if (!reserved) for (const file of acquired) fs.unlinkSync(file);
     }
   }

@@ -25,6 +25,7 @@ struct DownloadSnapshot {
     int64_t seed_seconds = 0;
     double seed_ratio = 0;
     bool can_seed = false;
+    bool priorities_pending = false;
     uint16_t listen_port = 0;
     NetworkStatus network;
 };
@@ -39,6 +40,7 @@ public:
     void stop();
     void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
     void setSeedingOptions(const SeedingOptions& options);
+    bool setFilePriorities(const std::map<size_t, FilePriority>& priorities);
     void wait();
     bool busy() const { return busy_.load(); }
     DownloadSnapshot snapshot() const;
@@ -52,6 +54,8 @@ private:
     int64_t download_limit_ = 0;
     int64_t upload_limit_ = 0;
     SeedingOptions seeding_;
+    std::map<size_t, FilePriority> file_priorities_;
+    uint64_t priority_revision_ = 0;
     std::unique_ptr<ResolvedInput> input_;
     std::atomic<bool> busy_{false};
     std::atomic<bool> cancelled_{false};

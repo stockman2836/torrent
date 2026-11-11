@@ -78,6 +78,7 @@ class Window {
 public:
     HWND handle = nullptr;
     bool smoke = false;
+    bool smokePriorities = false;
     std::wstring smokeSource, smokeSecond, smokeFolder, smokeConfig;
     int exitCode = 0;
 
@@ -112,6 +113,7 @@ private:
     std::shared_ptr<const std::vector<FileInfo>> displayed_;
     std::vector<FilePriority> priorities_;
     bool filling_ = false, fillingJobs_ = false, closing_ = false, smokeStarted_ = false, dirty_ = false;
+    bool smokePrioritiesApplied_ = false;
     ULONGLONG smokeDeadline_ = 0;
     DownloadId selected_ = 0, rendered_ = 0;
     std::vector<QueueSnapshot> entries_;
@@ -305,13 +307,25 @@ private:
         const auto entry = current();
         return entry && !entry->busy && !entry->queued && !entry->removing && !closing_;
     }
+    bool prioritiesEditable() const {
+        const auto entry = current();
+        return entry && displayed_ && !closing_ && !entry->removing &&
+            entry->download.state != DownloadState::Stopping &&
+            (!entry->busy || entry->download.state == DownloadState::Downloading || entry->download.state == DownloadState::Seeding);
+    }
     void saveEdits() {
-        if (!displayed_ || selected_ != rendered_ || !editable()) return;
-        if (text(folder_).empty()) return;
+        if (!displayed_ || selected_ != rendered_ || !prioritiesEditable()) return;
+        const auto entry = current();
         std::map<size_t, FilePriority> priorities;
         for (size_t i = 0; i < priorities_.size(); ++i)
             priorities[i] = ListView_GetCheckState(files_, i) ? priorities_[i] : FilePriority::Skip;
-        queue_.configure(selected_, utf8(text(folder_)), priorities);
+        if (!entry->config.file_indices.empty() || priorities != entry->config.file_priorities) {
+            try {
+                if (!queue_.setFilePriorities(selected_, priorities))
+                    throw std::runtime_error(u8"Приоритеты не изменены: дождитесь остановки раздачи");
+            } catch (...) { populate(entry->download, entry->config); throw; }
+        }
+        if (editable() && !text(folder_).empty()) queue_.configure(selected_, utf8(text(folder_)), priorities);
     }
     void persist() {
         dirty_ = false;
@@ -429,7 +443,7 @@ private:
         for (HWND c : {folder_, choose_}) EnableWindow(c, editable());
         for (HWND c : {downloadLimit_, uploadLimit_, applyLimits_})
             EnableWindow(c, entry && !closing_ && !entry->removing && state.state != DownloadState::Stopping);
-        for (HWND c : {all_, none_, priority_, apply_}) EnableWindow(c, displayed_ && editable());
+        for (HWND c : {all_, none_, priority_, apply_}) EnableWindow(c, prioritiesEditable());
         EnableWindow(start_, editable());
         EnableWindow(stop_, entry && (busy || entry->queued) && !closing_ && state.state != DownloadState::Stopping);
         EnableWindow(remove_, entry && !entry->removing && !closing_);
@@ -453,6 +467,7 @@ private:
         }
         if (entry && entry->queued && !busy) label = L"В очереди — ожидание свободного места";
         if (entry && entry->removing) label = L"Удаление из списка…";
+        if (state.priorities_pending) label = L"Применение приоритетов файлов…";
         std::wostringstream status;
         status << label;
         if (state.state == DownloadState::Seeding)
@@ -483,7 +498,19 @@ private:
                     networkSettings();
                     SendMessageW(handle, WM_COMMAND, Start, 0);
                 }
-            } else if (!busy && state.state == DownloadState::Complete) { networkDetails(); close(); }
+            } else if (smokePriorities && !smokePrioritiesApplied_ && busy && state.progress > 0 &&
+                       state.state == DownloadState::Downloading) {
+                smokePrioritiesApplied_ = true;
+                const auto count = ListView_GetItemCount(files_);
+                if (count < 3 || !IsWindowEnabled(apply_)) { exitCode = 1; close(); return; }
+                ListView_SetCheckState(files_, 1, FALSE);
+                ListView_SetItemState(files_, count - 1, LVIS_SELECTED, LVIS_SELECTED);
+                SendMessageW(priority_, CB_SETCURSEL, 1, 0);
+                SendMessageW(handle, WM_COMMAND, Apply, 0);
+            } else if (!busy && state.state == DownloadState::Complete) {
+                if (smokePriorities && !smokePrioritiesApplied_) exitCode = 1;
+                networkDetails(); close();
+            }
             else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
         }
     }
@@ -591,15 +618,18 @@ private:
             }
             if (header->idFrom == Files && header->code == LVN_ITEMCHANGING && !filling_) {
                 auto change = reinterpret_cast<NMLISTVIEW*>(lparam);
-                if (((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) && !editable()) return TRUE;
+                if (((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) && !prioritiesEditable()) return TRUE;
             }
             if (header->idFrom == Files && header->code == LVN_ITEMCHANGED && !filling_) {
                 auto change = reinterpret_cast<NMLISTVIEW*>(lparam);
-                if ((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) dirty_ = true;
-                if (change->iItem >= 0 && static_cast<size_t>(change->iItem) < priorities_.size() &&
-                    ListView_GetCheckState(files_, change->iItem) && priorities_[change->iItem] == FilePriority::Skip) {
-                    priorities_[change->iItem] = FilePriority::Normal;
-                    ListView_SetItemText(files_, change->iItem, 2, const_cast<PWSTR>(L"Обычный"));
+                if ((change->uOldState ^ change->uNewState) & LVIS_STATEIMAGEMASK) {
+                    dirty_ = true;
+                    if (change->iItem >= 0 && static_cast<size_t>(change->iItem) < priorities_.size()) {
+                        const bool checked = ListView_GetCheckState(files_, change->iItem);
+                        if (checked && priorities_[change->iItem] == FilePriority::Skip) priorities_[change->iItem] = FilePriority::Normal;
+                        ListView_SetItemText(files_, change->iItem, 2,
+                            const_cast<PWSTR>(priorityName(checked ? priorities_[change->iItem] : FilePriority::Skip)));
+                    }
                 }
             }
             return 0;
@@ -628,10 +658,10 @@ private:
                 ShellExecuteW(handle, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
             }
             case SelectAll: case SelectNone:
-                if (editable()) for (size_t i = 0; i < priorities_.size(); ++i) ListView_SetCheckState(files_, i, LOWORD(wparam) == SelectAll);
+                if (prioritiesEditable()) for (size_t i = 0; i < priorities_.size(); ++i) ListView_SetCheckState(files_, i, LOWORD(wparam) == SelectAll);
                 break;
             case Apply:
-                if (editable()) {
+                if (prioritiesEditable()) {
                     const FilePriority values[] = {FilePriority::Normal, FilePriority::High, FilePriority::Low, FilePriority::Skip};
                     const auto selection = SendMessageW(priority_, CB_GETCURSEL, 0, 0);
                     if (selection < 0 || selection > 3) break;
@@ -641,6 +671,7 @@ private:
                         ListView_SetItemText(files_, i, 2, const_cast<PWSTR>(priorityName(values[selection])));
                     }
                     dirty_ = true;
+                    saveEdits(); persist(); refresh();
                 }
                 break;
             }
@@ -658,8 +689,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     Window window;
     int argc = 0;
     auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argv && argc == 5 && std::wstring(argv[1]) == L"--ui-test") {
+    if (argv && argc == 5 && (std::wstring(argv[1]) == L"--ui-test" || std::wstring(argv[1]) == L"--ui-test-priorities")) {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeFolder = argv[3]; window.smokeConfig = argv[4];
+        window.smokePriorities = std::wstring(argv[1]) == L"--ui-test-priorities";
     }
     if (argv && argc == 6 && std::wstring(argv[1]) == L"--ui-queue-test") {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeSecond = argv[3];

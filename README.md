@@ -95,7 +95,8 @@ On Windows, open `build/desktop/TorrentClient.exe` (or
 `build/desktop/Release/TorrentClient.exe` with Visual Studio). Select a `.torrent`
 file or paste a magnet link and click **Add**. Select a torrent in the list on the
 left, choose its destination and check the files to download. Select file rows
-and apply a priority using the dropdown. Each torrent keeps its own choices. The window
+and apply a priority using the dropdown. File choices and priorities can be changed
+while downloading; folders remain locked. Each torrent keeps its own choices. The window
 shows progress and transfer speeds. **Stop** saves verified pieces; **Continue**
 starts a session that verifies and reuses them. Closing the window waits for this
 cleanup; network timeouts can delay stopping. **Download** adds the selected
@@ -104,6 +105,13 @@ from 1 to 8. Lowering the limit lets existing transfers finish before starting
 more. Jobs writing to the same files wait for each other even when the limit is
 higher. By default each session stops when its selected files finish. **Remove from list**
 stops the job and removes its row while keeping downloaded files and resume data.
+
+High/normal/low affect the next requests; already requested pieces may finish
+first. Unticking a file cancels requests for pieces no longer needed by any
+selected file. Existing files and verified pieces remain available, and enabling
+a file restores cached boundary bytes. A pending status appears while changes
+are applied. Selecting files already owned by another active job is rejected.
+See [live file priorities](docs/FILE_PRIORITIES.md#live-desktop-changes).
 
 The list, file priorities, destinations and concurrency limit are saved in
 `%LOCALAPPDATA%/TorrentClient/downloads.json`. After reopening the app, select a

@@ -4,6 +4,7 @@
 #include "network_settings.h"
 #include <deque>
 #include <optional>
+#include <set>
 
 namespace torrent::app {
 
@@ -30,6 +31,7 @@ public:
     bool setSpeedLimits(DownloadId id, int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
     bool setSeedingOptions(DownloadId id, const SeedingOptions& options);
     bool setNetworkSettings(const NetworkSettings& settings);
+    bool setFilePriorities(DownloadId id, const std::map<size_t, FilePriority>& priorities);
     void stop(DownloadId id);
     void remove(DownloadId id); // Removes the list entry, never downloaded data.
     void setLimit(size_t limit);
@@ -53,6 +55,7 @@ private:
         bool removing = false;
         bool unloading = false;
         uint16_t retiring_port = 0; // Metadata DHT may still own the previous pair during startup.
+        std::set<std::string> owned_paths; // Retained until all session writers have stopped.
     };
     Entry* find(DownloadId id);
     void dequeue(DownloadId id);

@@ -228,7 +228,10 @@ void PieceManager::setPiecePriorities(const std::vector<FilePriority>& prioritie
         if (priority > FilePriority::High) throw std::invalid_argument("Invalid piece priority");
     }
     priorities_ = priorities;
-    for (size_t i = 0; i < num_pieces_; ++i) wanted_[i] = priorities[i] != FilePriority::Skip;
+    for (size_t i = 0; i < num_pieces_; ++i) {
+        wanted_[i] = priorities[i] != FilePriority::Skip;
+        if (!wanted_[i]) pieces_in_progress_.erase(static_cast<uint32_t>(i));
+    }
 }
 
 FilePriority PieceManager::piecePriority(uint32_t index) const {

@@ -125,8 +125,8 @@ Run transfer scenarios with `ctest --test-dir build -R test_transfer --output-on
 Priority integration checks inspect the order of actual wire requests from one
 peer. They verify final file bytes, skipped paths, tracker totals, boundary
 pieces and restarting with changed priorities. Unit tests check maximum-overlap
-priority mapping and each strategy's tie-break behavior. These checks cover
-startup selection, not changing priorities in a running session.
+priority mapping and each strategy's tie-break behavior. Live session changes
+have a separate suite described below.
 
 ```sh
 ctest --test-dir build -R test_priority --output-on-failure
@@ -214,14 +214,16 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 121 CTest suites/scenarios, or 122
-when the OpenSSL executable is available: 114 ordinary checks, an optional local
+Both independent-client options enabled yield 128 CTest suites/scenarios, or 129
+when the OpenSSL executable is available: 121 ordinary checks, an optional local
 TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
 
 TCP fixtures keep exclusive port-range leases until exit, in addition to probing
-the ports before starting a child. This prevents parallel fixtures from claiming
+the TCP listener and adjacent DHT UDP ports on all IPv4 interfaces before starting
+a child. This catches wildcard listeners owned by other applications as well as
+loopback conflicts. Leases prevent parallel fixtures from claiming
 the next torrent's port between that probe and its listener startup.
 
 ## Live network diagnostics
@@ -267,6 +269,36 @@ ctest --test-dir build -R "test_network_settings|test_download_queue|test_downlo
 Native-window smoke checks open and save the network-settings dialog before
 starting downloads. Their fixtures keep public discovery disabled and leave
 the user's preferences untouched.
+
+## Live file priorities
+
+`test_live_selection` verifies cached-span restoration, boundary preservation,
+zero-byte files, excluding/re-enabling files without deleting data or copying
+whole files to the cache, failed file activation and corrupt-data rejection.
+It also checks that skipped unverified assemblies can be selected again while
+verified pieces remain complete.
+
+`test_live_priorities_*` uses local peers and actual wire requests to verify:
+
+- high/normal/low order changes without recreating connections;
+- CANCEL messages, late replies and re-enabling a skipped file;
+- cached boundary reuse, saved choices and stop/resume without re-requesting verified pieces;
+- rejecting active file conflicts and retaining ownership until stop;
+- cancellation of duplicate endgame requests and resuming after skipping everything;
+- abandoning a skipped block waiting at a 1 B/s limit and requesting wanted data.
+
+```sh
+ctest --test-dir build -R "test_live_priorities|test_live_selection" --output-on-failure
+```
+
+The manual Windows `ui` scenario drives the real priority controls during a
+transfer, then checks request order, final selected bytes and an untouched skipped
+file. Portable verification runs it from the extracted Release archive with a
+system-only PATH:
+
+```powershell
+node tests/integration/test_live_priorities.cjs build/desktop/TorrentClient.exe ui
+```
 
 ## Portable distribution
 

@@ -48,6 +48,13 @@ files may be read without opening them for writing when reconstructing data
 from an earlier selection. Missing boundary data or corrupted selected bytes
 invalidate the corresponding resume piece and cause it to be downloaded again.
 
+The desktop can also change this selection during a transfer. New file handles
+are prepared before replacing the current mask; verified cached bytes are copied
+into newly selected spans using the previous read mask after checking the full
+piece hash. Shared verified boundaries are cached before closing deselected
+handles. This preserves data while preventing skipped files from receiving later
+writes. See [live priority changes](FILE_PRIORITIES.md#live-desktop-changes).
+
 ## Progress and protocol state
 
 Progress counts only required pieces. Selecting an empty file needs no pieces

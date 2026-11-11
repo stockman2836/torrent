@@ -19,6 +19,8 @@ public:
 
     // Initialize files (create/allocate space)
     bool initialize();
+    // Switch open files while preserving already verified boundary data.
+    void setSelection(const FileSelection& selection, const std::vector<bool>& verified);
 
     // Write piece data to file(s)
     bool writePiece(uint32_t piece_index, const std::vector<uint8_t>& data);
@@ -40,7 +42,10 @@ private:
     };
 
     void openFiles();
+    void openFile(FileHandle& file);
     void closeFiles();
+    std::vector<uint8_t> readPieceLocked(uint32_t piece_index);
+    bool writeCache(uint32_t piece_index, const std::vector<uint8_t>& data);
     bool needsCache(uint32_t piece_index) const;
     std::string cachePath(uint32_t piece_index) const;
 

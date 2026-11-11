@@ -38,6 +38,7 @@ public:
     void pause();
     void resume();
     void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
+    void setFilePriorities(const std::map<size_t, FilePriority>& priorities);
 
     // Status
     bool isRunning() const { return running_; }
@@ -121,6 +122,7 @@ private:
     // Piece tracking
     std::set<uint32_t> pieces_in_download_;  // Pieces currently being downloaded
     std::mutex pieces_mutex_;
+    std::mutex selection_mutex_;
 
     std::atomic<bool> running_;
     std::atomic<bool> paused_;

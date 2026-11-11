@@ -53,6 +53,7 @@ add_library(torrent_session STATIC
     session/scheduling.cpp
     session/tracker.cpp
     session/network_status.cpp
+    session/file_priorities.cpp
     session/resume.cpp
     session/discovery.cpp
     session/magnet_download_manager.cpp)

@@ -13,6 +13,7 @@ code; prefer small concrete modules and keep network work off the window thread.
 - [x] Multi-peer scheduling and bounded endgame requests with cancellation.
 - [x] Tracker-based magnet metadata acquisition with hash verification and fallback.
 - [x] File selection and startup priorities, including shared boundary pieces.
+- [x] Live file priorities and selection with cancellation, cached-data reuse and queue ownership checks.
 - [x] Native Windows interface with background loading and responsive shutdown.
 - [x] Multiple torrents with FIFO queue, concurrency limits and file conflict handling.
 - [x] Saved download list, destinations, file choices and per-torrent settings.
@@ -26,7 +27,7 @@ code; prefer small concrete modules and keep network work off the window thread.
 
 Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
-coverage. The ordinary suite currently has sixteen unit suites and ninety-eight
+coverage. The ordinary suite currently has seventeen unit suites and 104
 offline integration scenarios, plus a certificate check when the OpenSSL tool
 is available. See [tests](../tests/README.md) for verification.
 
@@ -88,7 +89,6 @@ encrypted/uTP transfers and other network environments still need validation.
 - Port reachability and connectivity diagnostics across different networks.
 - Optional UPnP/NAT-PMP port mapping with explicit user controls.
 - Serve verified magnet metadata to peers.
-- Change file priorities during an active download.
 - Global speed limits in addition to the existing per-torrent limits.
 - Tracker-list fallback and richer peer statistics beyond the active tracker and current connections.
 - Windows and POSIX CI plus broader protocol and encryption checks.

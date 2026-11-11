@@ -45,6 +45,7 @@ void DownloadTask::fail(const std::exception& error) {
     snapshot_.download_speed = snapshot_.upload_speed = 0;
     snapshot_.network.peers.clear();
     snapshot_.network.queued_peers = 0;
+    snapshot_.priorities_pending = false;
 }
 
 bool DownloadTask::load(const std::string& source, Config config) {
@@ -60,6 +61,8 @@ bool DownloadTask::load(const std::string& source, Config config) {
         snapshot_.seed_ratio = 0;
         snapshot_.network = {};
         snapshot_.listen_port = 0;
+        snapshot_.priorities_pending = false;
+        file_priorities_.clear(); priority_revision_ = 0;
     }
     worker_ = std::thread([this, source, config] {
         try {
@@ -98,6 +101,8 @@ bool DownloadTask::start(Config config) {
         snapshot_.seed_ratio = 0;
         snapshot_.listen_port = 0;
         snapshot_.network = initialNetworkStatus(input_->torrent, config);
+        file_priorities_ = config.file_priorities; priority_revision_ = 0;
+        snapshot_.priorities_pending = false;
     }
     worker_ = std::thread([this, config] {
         try {
@@ -108,8 +113,23 @@ bool DownloadTask::start(Config config) {
             DownloadManager manager(input_->torrent, config, std::move(input_->dht));
             auto download_limit = config.max_download_speed, upload_limit = config.max_upload_speed;
             std::optional<std::chrono::steady_clock::time_point> seed_started;
+            uint64_t applied_revision = 0;
+            const auto apply_priorities = [&] {
+                std::map<size_t, FilePriority> priorities;
+                uint64_t revision;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    if (priority_revision_ == applied_revision) return;
+                    priorities = file_priorities_; revision = priority_revision_;
+                }
+                manager.setFilePriorities(priorities);
+                applied_revision = revision;
+                std::lock_guard<std::mutex> lock(mutex_);
+                snapshot_.priorities_pending = priority_revision_ != applied_revision;
+            };
             if (!cancelled_) manager.start();
             while (!cancelled_ && manager.isRunning()) {
+                apply_priorities();
                 const double progress = manager.progress();
                 auto network = manager.networkStatus();
                 const bool can_seed = progress >= 100 && manager.canSeed();
@@ -136,11 +156,16 @@ bool DownloadTask::start(Config config) {
                     snapshot_.seed_seconds = elapsed.count();
                     snapshot_.seed_ratio = input_->torrent.totalLength() > 0
                         ? static_cast<double>(snapshot_.uploaded_bytes) / input_->torrent.totalLength() : 0;
-                    if (progress >= 100 && (!can_seed || seeding_.finished(snapshot_.uploaded_bytes, input_->torrent.totalLength(), elapsed))) break;
+                    if (progress >= 100 && (!can_seed || seeding_.finished(snapshot_.uploaded_bytes, input_->torrent.totalLength(), elapsed))) {
+                        if (priority_revision_ != applied_revision) continue;
+                        snapshot_.state = DownloadState::Stopping;
+                        break;
+                    }
                     if (!cancelled_) snapshot_.state = can_seed ? DownloadState::Seeding : DownloadState::Downloading;
                     wake_.wait_for(lock, std::chrono::milliseconds(150));
                 }
             }
+            if (manager.isRunning()) apply_priorities();
             const double progress = manager.progress();
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -151,6 +176,7 @@ bool DownloadTask::start(Config config) {
             auto network = manager.networkStatus();
             std::lock_guard<std::mutex> lock(mutex_);
             snapshot_.network = std::move(network);
+            snapshot_.priorities_pending = false;
             snapshot_.state = progress >= 100 ? DownloadState::Complete : DownloadState::Stopped;
             snapshot_.uploaded_bytes = manager.uploadedBytes();
             snapshot_.seed_ratio = input_->torrent.totalLength() > 0
@@ -166,6 +192,21 @@ void DownloadTask::setSeedingOptions(const SeedingOptions& options) {
     options.validate();
     { std::lock_guard<std::mutex> lock(mutex_); seeding_ = options; }
     wake_.notify_all();
+}
+
+bool DownloadTask::setFilePriorities(const std::map<size_t, FilePriority>& priorities) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!busy_ || cancelled_ || !snapshot_.files ||
+        (snapshot_.state != DownloadState::Downloading && snapshot_.state != DownloadState::Seeding)) return false;
+    for (const auto& [index, priority] : priorities) {
+        if (index >= snapshot_.files->size() || priority > FilePriority::High)
+            throw std::invalid_argument("Invalid live file priority");
+    }
+    file_priorities_ = priorities;
+    ++priority_revision_;
+    snapshot_.priorities_pending = true;
+    wake_.notify_all();
+    return true;
 }
 
 void DownloadTask::setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec) {

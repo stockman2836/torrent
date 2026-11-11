@@ -167,7 +167,22 @@ Sequential and random-first strategies apply their own ordering within the
 highest eligible priority. Rarest-first compares priority before availability
 count. Endgame compares priority among eligible rescue blocks. Web-seed
 candidate selection reuses the sequential priority-aware selector. Priorities
-are chosen before starting a session; runtime changes are not exposed yet.
+can also change during a desktop session. The queue records desired choices and
+retains ownership of every selected output path until the session stops. Live
+updates cannot select a path owned by another active job. The task publishes a
+pending flag and a revisioned request; its worker applies the latest choice
+before checking completion, so an accepted update cannot be lost at the finish
+boundary. Storage work never runs on the window thread.
+
+`file_priorities.cpp` serializes selection changes against block commits, then
+updates file handles and piece priorities under the session's existing peer and
+piece locks. `FileManager` stages newly selected handles, verifies old boundary
+data before rehydrating new spans and creates only the necessary boundary cache.
+Deselected files are closed and retained. Whole skipped files are not copied into
+the cache. Skipped piece assemblies are discarded; verified bits are preserved.
+Outstanding session requests for wholly skipped pieces are removed and their
+workers receive CANCEL commands. Limiter waits observe the new piece mask. Late
+network replies cannot commit data excluded by the current selection.
 
 The coordinator's implementation is divided by responsibility:
 
@@ -178,6 +193,7 @@ The coordinator's implementation is divided by responsibility:
 - `scheduling.cpp`: piece assignment, selection and stale-peer cleanup.
 - `tracker.cpp`: announces and tracker refreshes.
 - `network_status.cpp`: synchronized value snapshots of peer/tracker diagnostics.
+- `file_priorities.cpp`: live selection, storage transition and request cancellation.
 - `resume.cpp`: state persistence and verification after restart.
 - `discovery.cpp`: DHT, PEX, LSD, web seeds and uTP integration.
 - `magnet_download_manager.cpp`: metadata acquisition before piece downloading.
