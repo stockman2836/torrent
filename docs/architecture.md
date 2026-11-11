@@ -50,6 +50,10 @@ Incoming handshakes run on bounded peer workers with a five-second total deadlin
 one slow handshake does not block accepting others. The expected info hash comes
 from the session owning that port. Both directions use `PeerConnection` and the
 same session peer loop, rate limiter, request validation and verified piece state.
+Both handshake directions send one initial availability message and an explicit
+UNCHOKE. Fast peers receive HAVE_ALL, HAVE_NONE or BITFIELD exactly once before
+any other messages. Metadata-only connections send HAVE_NONE when Fast is
+negotiated; the session does not send a second availability announcement.
 Upload buffers are hashed again before sending, so external file corruption is
 not shared. Incoming handshake workers count toward the active peer cap; finished
 workers are joined and removed during cleanup. Network handshakes do not hold the
@@ -137,6 +141,7 @@ The coordinator's implementation is divided by responsibility:
 
 - `download_manager.cpp`: construction, lifecycle and status.
 - `peers.cpp`: peer workers and transfer processing.
+- `incoming.cpp`: listener admission and incoming handshake workers.
 - `transfer.cpp`: block acceptance, completion and remaining byte counts.
 - `scheduling.cpp`: piece assignment, selection and stale-peer cleanup.
 - `tracker.cpp`: announces and tracker refreshes.

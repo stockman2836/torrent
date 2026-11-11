@@ -56,7 +56,7 @@ PeerConnection::PeerConnection(const std::string& ip,
     , utp_socket_(nullptr)
     , connected_(false)
     , handshake_completed_(false)
-    , am_choking_(false)  // Start unchoked - allow uploads
+    , am_choking_(true)  // BEP 3: uploads start choked until UNCHOKE is sent.
     , am_interested_(false)
     , peer_choking_(true)
     , peer_interested_(false)

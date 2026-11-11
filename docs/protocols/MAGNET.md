@@ -59,6 +59,11 @@ different local/remote IDs, metadata rejects, valid Bencode with a wrong hash,
 an unavailable tracker and an idle peer. Invalid metadata must not start file
 downloading. Logs and artifacts remain under `build/tests/magnet-*`.
 
+The Fast peer fixture requires one HAVE_NONE immediately after the basic
+handshake, followed by UNCHOKE before extension negotiation. Optional
+[qBittorrent interoperability checks](../../tests/README.md#independent-client-interoperability)
+also acquire metadata and payload from an independent implementation.
+
 These checks do not establish interoperability with every public client or
 tracker. Public-swarm checks, DHT-only discovery, v2 magnets, direct `x.pe`
 sources and metadata seeding require separate work or coverage. Incoming

@@ -44,10 +44,27 @@ set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file
     test_file_selection
     PROPERTIES TIMEOUT 30)
 find_program(NODE_EXECUTABLE NAMES node)
+set(INTEROP_QBITTORRENT_EXECUTABLE "" CACHE FILEPATH
+    "Optional qBittorrent 4.6.x executable for isolated interoperability tests")
 if(NODE_EXECUTABLE)
     add_executable(incoming_driver integration/incoming_driver.cpp)
     target_link_libraries(incoming_driver PRIVATE torrent_app)
-    foreach(scenario transfer validate missing corrupt limit stop stalled cap restart occupied ipv6 multi receive)
+    if(INTEROP_QBITTORRENT_EXECUTABLE)
+        if(NOT WIN32)
+            message(FATAL_ERROR "qBittorrent interoperability tests currently require Windows")
+        endif()
+        if(NOT EXISTS "${INTEROP_QBITTORRENT_EXECUTABLE}")
+            message(FATAL_ERROR "INTEROP_QBITTORRENT_EXECUTABLE does not exist")
+        endif()
+        foreach(scenario download upload-incoming upload-outgoing magnet resume)
+            add_test(NAME test_interop_${scenario} COMMAND "${NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_interop.cjs"
+                "$<TARGET_FILE:incoming_driver>" "$<TARGET_FILE:torrent_client>"
+                "${INTEROP_QBITTORRENT_EXECUTABLE}" ${scenario})
+            set_tests_properties(test_interop_${scenario} PROPERTIES TIMEOUT 100 LABELS interop RUN_SERIAL TRUE)
+        endforeach()
+    endif()
+    foreach(scenario transfer validate missing corrupt limit stop stalled cap restart occupied ipv6 multi receive fast)
         add_test(NAME test_incoming_${scenario} COMMAND "${NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_incoming.cjs" "$<TARGET_FILE:incoming_driver>" ${scenario})
         set_tests_properties(test_incoming_${scenario} PROPERTIES TIMEOUT 30)
@@ -91,7 +108,7 @@ if(NODE_EXECUTABLE)
             "$<TARGET_FILE:torrent_client>" "$<TARGET_FILE:partial_download>")
         set_tests_properties(test_transfer_${scenario} PROPERTIES TIMEOUT 40)
     endforeach()
-    foreach(scenario download reject hash tracker invalid stall list)
+    foreach(scenario download reject hash tracker invalid stall list fast)
         add_test(NAME test_magnet_${scenario} COMMAND "${NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_magnet.cjs" ${scenario}
             "$<TARGET_FILE:torrent_client>")

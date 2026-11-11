@@ -55,7 +55,7 @@ async function main() {
   }
   const peer = net.createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('error', () => {});
-    let pending = Buffer.alloc(0), torrent;
+    let pending = Buffer.alloc(0), torrent, unchoked = false;
     socket.on('data', chunk => {
       try {
         pending = Buffer.concat([pending, chunk]);
@@ -73,12 +73,14 @@ async function main() {
           const length = pending.readUInt32BE();
           if (pending.length < length + 4) break;
           const message = pending.subarray(4, length + 4); pending = pending.subarray(length + 4);
+          if (message[0] === 1) unchoked = true;
           const uploadMode = torrent.id === 0 && ['upload', 'upload-live', 'upload-stop'].includes(mode);
           if (mode === 'seed-resume' && torrent.id === 0 && torrent.stops > 0 && message[0] === 5) {
             assert.equal(message[1] & 0xf0, 0xf0, 'Resumed seed did not advertise verified pieces');
             requestSeededBlocks(torrent, socket);
           }
           if (uploadMode && message[0] === 4 && message.readUInt32BE(1) === 0 && !torrent.uploadStarted) {
+            assert.ok(unchoked, 'Outgoing connection must send UNCHOKE before accepting upload requests');
             torrent.uploadStarted = Date.now();
             for (let n = 0; n < 4; ++n) {
               const request = Buffer.alloc(12); request.writeUInt32BE(16384, 8);

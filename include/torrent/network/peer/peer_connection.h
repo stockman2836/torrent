@@ -262,6 +262,7 @@ private:
     friend class PeerListener;
     bool sendHandshake();
     bool receiveHandshake();
+    bool sendAvailability(const std::vector<bool>& bitfield);
     // Friend class for MSE handshake access to low-level methods
     friend class MSEHandshake;
     bool sendMessage(const PeerMessage& message);

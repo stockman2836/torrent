@@ -23,6 +23,18 @@ int main(int argc, char* argv[]) {
         }
         DownloadQueue queue;
         const auto first = queue.add(argv[1], config), second = queue.add(argv[2], config);
+        // These scenarios measure transfer overlap in enqueue order. Wait for
+        // both asynchronous metadata loads so the second ready job cannot pass
+        // a first job that is still loading under a busy build/test machine.
+        const auto metadata_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        for (;;) {
+            const auto entries = queue.snapshots();
+            for (const auto& entry : entries) if (entry.download.state == DownloadState::Failed)
+                throw std::runtime_error(entry.download.error);
+            if (std::all_of(entries.begin(), entries.end(), [](const auto& entry) { return !entry.busy; })) break;
+            if (std::chrono::steady_clock::now() >= metadata_deadline) throw std::runtime_error("Metadata loading timed out");
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
         queue.setLimit(mode == "parallel" || mode == "collision" ? 2 : 1);
         if (mode == "limited") queue.setSpeedLimits(first, 16384, 0);
         if (mode == "live" || mode == "limited-stop") queue.setSpeedLimits(first, 1024, 0);

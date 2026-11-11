@@ -52,7 +52,7 @@ const listen = server => new Promise((resolve, reject) => {
 
 async function main() {
   const [scenario, program] = process.argv.slice(2);
-  assert.ok(['download', 'reject', 'hash', 'tracker', 'invalid', 'stall', 'list'].includes(scenario));
+  assert.ok(['download', 'reject', 'hash', 'tracker', 'invalid', 'stall', 'list', 'fast'].includes(scenario));
   const work = fs.mkdtempSync(path.join(process.cwd(), `magnet-${scenario}-`));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; ++i) data[i] = (i * 37 + Math.floor(i / 32768) * 19) % 256;
@@ -70,7 +70,7 @@ async function main() {
       sockets.add(socket);
       socket.on('close', () => sockets.delete(socket));
       socket.on('error', () => {});
-      let pending = Buffer.alloc(0), handshaken = false, localId;
+      let pending = Buffer.alloc(0), handshaken = false, localId, availability = 0, unchoked = false;
       socket.on('data', chunk => {
         try {
           pending = Buffer.concat([pending, chunk]);
@@ -80,9 +80,10 @@ async function main() {
             pending = pending.subarray(68);
             handshaken = true;
             const reserved = Buffer.alloc(8); reserved[5] = 0x10;
+            if (scenario === 'fast') reserved[7] = 0x04;
             socket.write(Buffer.concat([Buffer.from([19]), Buffer.from('BitTorrent protocol'), reserved,
               infoHash, Buffer.from('-MAGNET-123456789012')]));
-            socket.write(packet(5, Buffer.from([0xc0])));
+            socket.write(scenario === 'fast' ? packet(14) : packet(5, Buffer.from([0xc0])));
             socket.write(packet(1));
           }
           while (pending.length >= 4) {
@@ -90,6 +91,12 @@ async function main() {
             if (pending.length < length + 4) break;
             const message = pending.subarray(4, length + 4);
             pending = pending.subarray(length + 4);
+            if (scenario === 'fast') {
+              if (!availability) assert.equal(message[0], 15, 'Fast peer must receive HAVE_NONE before other messages');
+              if ([5, 14, 15].includes(message[0])) assert.equal(++availability, 1, 'Availability was sent twice');
+              if (message[0] === 1) unchoked = true;
+              if (message[0] === 20 || message[0] === 6) assert.ok(unchoked, 'Uploads must be explicitly unchoked');
+            }
             if (message[0] === 20) {
               const [header, end] = decode(message, 2);
               assert.equal(end, message.length, 'Unexpected bytes or repeated extension headers');

@@ -26,7 +26,9 @@ function request(index, offset = 0, length = 16384) {
   return packet(6, payload);
 }
 function handshake(hash, id = Buffer.from('-TESTIN-123456789012')) {
-  return Buffer.concat([Buffer.from([19]), Buffer.from('BitTorrent protocol'), Buffer.alloc(8), hash, id]);
+  const reserved = Buffer.alloc(8);
+  if (process.argv[3] === 'fast') reserved[7] = 0x04;
+  return Buffer.concat([Buffer.from([19]), Buffer.from('BitTorrent protocol'), reserved, hash, id]);
 }
 async function waitUntil(test, timeout = 6000, description = 'condition') {
   const deadline = Date.now() + timeout;
@@ -176,8 +178,9 @@ async function main() {
       first.close(); second.close(); await closed(first); await closed(second); await delay(100);
     }
     const client = await newClient(0, mode === 'ipv6' ? '::1' : undefined).greeted(hashes[0], mode === 'transfer');
-    const bitfield = await client.next(5);
-    assert.deepEqual(bitfield.payload, Buffer.from([mode === 'missing' ? 0x80 : mode === 'receive' ? 0 : 0xf0]));
+    const bitfield = await client.next(mode === 'fast' ? 14 : 5);
+    assert.deepEqual(bitfield.payload, mode === 'fast' ? Buffer.alloc(0) : Buffer.from([mode === 'missing' ? 0x80 : mode === 'receive' ? 0 : 0xf0]));
+    assert.ok(!client.messages.some(message => [5, 14, 15].includes(message.id)), 'Sent duplicate availability');
     if (mode === 'validate') {
       await rejected(handshake(hashes[0], client.response.subarray(48)));
       for (const frame of [request(0xffffffff), request(0, 0xfffffff0, 64), request(0, 0, 0), request(0, 0, 16385),

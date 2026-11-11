@@ -27,6 +27,12 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_extension_protocol` | Payload framing, ID dispatch and extension disable updates | Network |
 | `test_metadata_exchange` | Binary assembly, size validation, rejects and callback locking | Network |
 | `test_file_selection` | File-to-piece masks, boundaries, empty files and invalid metadata | Metainfo |
+| `test_download_task` | Background task state and cancellation | Application |
+| `test_download_queue` | Scheduling, settings, persistence and file conflicts | Application |
+| `test_speed_limits` | UI rate parsing and exact byte conversion | Application |
+| `test_token_bucket` | Throttling, live changes and cancellation | Core |
+| `test_seeding_options` | Ratio/time limits and policy validation | Application |
+| `test_peer_listener` | Port ownership and bitfield validation | Network |
 | `test_download` | Actual CLI download from a loopback tracker and TCP peer | CLI executable |
 | `test_transfer_multi` | Two contributing seeds without duplicate block requests | CLI executable |
 | `test_transfer_resume` | Stop a partial session and retain verified pieces after restart | Session + CLI |
@@ -40,6 +46,7 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_magnet_invalid` | Invalid metadata never starts a file download | CLI executable |
 | `test_magnet_stall` | Fall back from an idle metadata peer after its deadline | CLI executable |
 | `test_magnet_list` | Acquire metadata and list files without payload requests | CLI executable |
+| `test_magnet_fast` | Fast peer receives one HAVE_NONE before metadata negotiation | CLI executable |
 | `test_endgame_cancel` | Rescue a stalled block and send a matching CANCEL | CLI executable |
 | `test_endgame_late` | Ignore a late cancelled response without corrupting assembly | CLI executable |
 | `test_endgame_cap` | Limit concurrent block copies with three connected seeds | CLI executable |
@@ -133,3 +140,46 @@ trackers or external swarms.
 The suite does not yet establish interoperability with public swarms, DHT-only
 magnet discovery, metadata seeding, encryption, optional libutp or all
 cross-platform socket paths.
+
+Queue scenarios also cover concurrency, file conflicts, removal, upload/download
+limits, live changes and seeding policies. Incoming scenarios cover both transfer
+directions, invalid requests, missing/corrupt data, peer caps, stalled handshakes,
+IPv6, occupied ports and immediate restart. `test_incoming_fast` checks that a
+complete incoming Fast connection receives HAVE_ALL exactly once. Existing queue
+upload scenarios require an explicit UNCHOKE before sending upload requests.
+
+## Independent client interoperability
+
+These opt-in Windows checks require a separately installed qBittorrent 4.6.x.
+They are not enabled or downloaded automatically. The verified reference is
+qBittorrent 4.6.2 with libtorrent 1.2.19. Other versions need their own validation.
+
+```powershell
+cmake -S . -B build -DINTEROP_QBITTORRENT_EXECUTABLE="C:/Program Files/qBittorrent/qbittorrent.exe"
+cmake --build build --parallel
+ctest --test-dir build -L interop --output-on-failure
+```
+
+Unset the CMake variable to remove these checks. Ordinary fixtures continue to
+run without an external client. Tests are serial and use a fresh profile under
+`build/tests/interop-<scenario>-*`, distinct ports, a loopback-only API and local
+tracker. DHT, PEX, LSD, encryption, uTP, GeoIP lookup, update checks and port mapping
+are disabled. On Windows the GUI starts hidden and exits through its API.
+
+| Scenario | Evidence |
+| --- | --- |
+| `download` | Our client downloads a multi-file torrent from qBittorrent |
+| `upload-incoming` | qBittorrent initiates a TCP connection and downloads our verified pieces |
+| `upload-outgoing` | Our seed connects to qBittorrent and uploads the full payload |
+| `magnet` | Our client acquires metadata from qBittorrent before downloading files |
+| `resume` | A partial desktop-controller session stops and the CLI resumes its verified pieces |
+
+Each scenario checks 1,048,713 payload bytes and all piece hashes, including a
+piece spanning two files. Resume additionally checks the stopped and restarted
+tracker `left` values. Artifacts retain engine output, tracker announces,
+qBittorrent's own logs and a `result.json` recording the reference build.
+
+The fixture uses the documented [WebUI API](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-%28qBittorrent-4.1%29)
+and a separate [portable profile](https://github.com/qbittorrent/qBittorrent/wiki/How-to-use-portable-mode).
+It establishes loopback plaintext TCP compatibility with that reference build;
+public-swarm, DHT-only, encrypted and reverse metadata transfers remain separate work.

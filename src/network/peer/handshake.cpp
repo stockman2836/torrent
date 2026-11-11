@@ -30,25 +30,36 @@ bool PeerConnection::receiveHandshake() {
 }
 
 bool PeerConnection::performHandshake() {
-    if (!connected_) return false;
-    if (handshake_completed_) return true;
-    if (!sendHandshake() || !receiveHandshake()) { disconnect(); return false; }
-    handshake_completed_ = true;
-    return true;
+    return performHandshake({});
+}
+
+bool PeerConnection::sendAvailability(const std::vector<bool>& bitfield) {
+    // BEP 6 requires exactly one availability message immediately after the
+    // handshake, including metadata-only connections with no known pieces yet.
+    if (supports_fast_extension_ && peer_supports_fast_extension_) {
+        if (std::none_of(bitfield.begin(), bitfield.end(), [](bool have) { return have; })) return sendHaveNone();
+        if (std::all_of(bitfield.begin(), bitfield.end(), [](bool have) { return have; })) return sendHaveAll();
+    }
+    return bitfield.empty() || sendBitfield(bitfield);
 }
 
 bool PeerConnection::performHandshake(const std::vector<bool>& bitfield) {
-    if (!performHandshake()) return false;
-    if (std::any_of(bitfield.begin(), bitfield.end(), [](bool have) { return have; })) return sendBitfield(bitfield);
+    if (!connected_) return false;
+    if (handshake_completed_) return true;
+    if (!sendHandshake() || !receiveHandshake() || !sendAvailability(bitfield) || !sendUnchoke()) {
+        disconnect(); return false;
+    }
+    handshake_completed_ = true;
     return true;
 }
 
 bool PeerConnection::acceptHandshake(const std::vector<bool>& bitfield) {
     if (!connected_) return false;
+    if (handshake_completed_) return true;
     read_deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     const bool valid = receiveHandshake();
     read_deadline_ = std::chrono::steady_clock::time_point::max();
-    if (!valid || !sendHandshake() || !sendBitfield(bitfield) || !sendUnchoke()) {
+    if (!valid || !sendHandshake() || !sendAvailability(bitfield) || !sendUnchoke()) {
         disconnect(); return false;
     }
     handshake_completed_ = true;

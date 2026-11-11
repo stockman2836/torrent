@@ -290,26 +290,9 @@ void DownloadManager::connectToPeers() {
             continue;
         }
 
-        // If peer supports Fast Extension, send optimized messages
+        // Availability was sent once by the handshake; advertise allowed pieces
+        // only after it, never a second bitfield/HAVE_ALL/HAVE_NONE.
         if (connection->peerSupportsFastExtension()) {
-            // Check if we're a seeder or have no pieces
-            bool is_seeder = bytesRemaining() == 0;
-            size_t pieces_have = 0;
-            for (bool have : our_bitfield) {
-                if (have) pieces_have++;
-            }
-
-            if (is_seeder) {
-                // Send HAVE_ALL instead of bitfield
-                LOG_INFO("Sending HAVE_ALL to peer (Fast Extension)");
-                connection->sendHaveAll();
-            } else if (pieces_have == 0) {
-                // Send HAVE_NONE instead of empty bitfield
-                LOG_INFO("Sending HAVE_NONE to peer (Fast Extension)");
-                connection->sendHaveNone();
-            }
-
-            // Generate and send allowed fast set
             connection->generateAllowedFastSet(torrent_.numPieces(), 10);
         }
 

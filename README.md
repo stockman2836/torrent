@@ -5,8 +5,9 @@ trackers, TCP peer transfers, piece verification, multi-file storage and resume
 state and selective file downloads. Additional modules implement DHT, magnet metadata exchange, PEX, MSE,
 Fast Extension, IPv6, local discovery, web seeds and optional uTP.
 
-The automated integration test covers the ordinary `.torrent` TCP download
-path. The additional protocols still require broader interoperability testing.
+Automated integration tests cover TCP transfers, tracker-based magnets and the
+desktop controller. Optional checks exchange files with an independently
+installed qBittorrent. Other protocols still require broader interoperability testing.
 
 ## Project structure
 
@@ -75,6 +76,7 @@ with non-ASCII dependency paths.
 | `BUILD_TOOLS` | `OFF` | Manual HTTP, socket and handshake diagnostics |
 | `ENABLE_UTP` | `OFF` | Link libutp and enable its transport implementation |
 | `BUILD_DESKTOP` | `ON` on Windows | Build the native Windows application |
+| `INTEROP_QBITTORRENT_EXECUTABLE` | Empty | Opt into Windows interoperability checks against qBittorrent 4.6.x |
 
 An explicit `ENABLE_UTP=ON` requires libutp to be found; configuration fails with
 an explanation if it is missing. Compile definitions and library settings apply
@@ -192,13 +194,16 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R test_download --output-on-failure
 ```
 
-Eight unit-test executables cover metadata parsing, file selection, piece
-management, file I/O, CLI parsing, extension dispatch and metadata exchange.
-With Node.js installed, thirty-four integration scenarios run against
-local trackers and TCP seeds: basic download, multiple peers, partial download
-followed by restart, corrupted saved data, peer disconnect and multi-file piece
-boundaries. The multi-peer check rejects duplicate block requests. Each result
-is compared byte for byte with its original payload; no public tracker is used.
+Unit suites cover metadata, storage, peer messages and application controls.
+With Node.js installed, integration scenarios run against local trackers and
+TCP peers, checking downloads, resume, magnets, file selection, the queue, rate
+limits, seeding and incoming connections. Payloads are compared byte for byte;
+no public tracker is used.
+
+Windows interoperability checks against qBittorrent 4.6.x are optional and must
+be enabled explicitly with `INTEROP_QBITTORRENT_EXECUTABLE`. They use a disposable
+profile and a loopback tracker, leaving the installed client's normal profile
+alone. See [running interoperability checks](tests/README.md#independent-client-interoperability).
 
 Integration artifacts stay under `build/tests/download-test-*` and
 `build/tests/transfer-*`. The partial-download helper exercises the public
