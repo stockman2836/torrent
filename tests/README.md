@@ -214,11 +214,23 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 114 CTest suites/scenarios: 107
-ordinary checks and seven optional interoperability checks. Test artifacts stay
+Both independent-client options enabled yield 114 CTest suites/scenarios, or 115
+when the OpenSSL executable is available: 107 ordinary checks, an optional local
+TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
 
 TCP fixtures keep exclusive port-range leases until exit, in addition to probing
 the ports before starting a child. This prevents parallel fixtures from claiming
 the next torrent's port between that probe and its listener startup.
+
+## Portable distribution
+
+`test_tracker_tls` uses the OpenSSL command-line tool to generate a temporary
+self-signed certificate. The same valid tracker payload succeeds over HTTP;
+HTTPS with that untrusted certificate must fail before sending the request.
+It does not modify the user's certificate stores.
+
+`test_portable.cjs` checks a completed Release ZIP and runs the extracted native
+window with only system directories on PATH. It verifies actual downloads and
+uploads through local fixtures. See [distribution checks](../docs/DISTRIBUTION.md#verify-the-archive).

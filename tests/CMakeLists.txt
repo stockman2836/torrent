@@ -50,6 +50,15 @@ set(INTEROP_QBITTORRENT_EXECUTABLE "" CACHE FILEPATH
     "Optional qBittorrent 4.6.x executable for isolated interoperability tests")
 option(ENABLE_DHT_INTEROP_TESTS "Run local tests against the optional bittorrent-dht npm dependency" OFF)
 if(NODE_EXECUTABLE)
+    find_program(OPENSSL_PROGRAM NAMES openssl)
+    if(OPENSSL_PROGRAM)
+        add_executable(tracker_tls_driver integration/tracker_tls_driver.cpp)
+        target_link_libraries(tracker_tls_driver PRIVATE Torrent::Network)
+        add_test(NAME test_tracker_tls COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_tracker_tls.cjs"
+            "$<TARGET_FILE:tracker_tls_driver>" "${OPENSSL_PROGRAM}")
+        set_tests_properties(test_tracker_tls PROPERTIES TIMEOUT 20)
+    endif()
     add_executable(dht_driver integration/dht_driver.cpp)
     target_link_libraries(dht_driver PRIVATE torrent_app)
     foreach(scenario direct chain fallback error spoof late cancel metadata-cancel occupied)

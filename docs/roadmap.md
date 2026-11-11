@@ -25,7 +25,8 @@ code; prefer small concrete modules and keep network work off the window thread.
 Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
 coverage. The ordinary suite currently has fifteen unit suites and ninety-two
-offline integration scenarios. See [tests](../tests/README.md) for verification.
+offline integration scenarios, plus a certificate check when the OpenSSL tool
+is available. See [tests](../tests/README.md) for verification.
 
 ## Verified: independent client interoperability
 
@@ -55,10 +56,12 @@ Reference: bittorrent-dht 11.0.12 on a private loopback DHT. A separate check
 downloads metadata and payload from qBittorrent through this DHT without a
 tracker in the magnet. Public DHT/swarm behavior remains to be validated.
 
-## Next: desktop distribution
+## Desktop distribution
 
-- [ ] Produce a portable release archive containing the executable and required DLLs.
-- [ ] Verify startup and download in a clean destination folder.
+- [x] Produce a portable release archive containing the executable and required DLLs.
+- [x] Verify startup, download and upload in a clean destination folder with only system directories on PATH.
+- [x] Check package integrity and reject untrusted HTTPS tracker certificates.
+- [ ] Verify the archive on a fresh Windows installation.
 - [ ] Add a Windows installer and release automation when portable builds are reliable.
 
 ## Later improvements

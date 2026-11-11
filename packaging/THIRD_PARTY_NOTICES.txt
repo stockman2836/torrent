@@ -1,0 +1,17 @@
+Third-party components
+
+TorrentClient uses the following upstream projects. Included license texts
+are under licenses/ when supplied by the build. Runtime DLLs depend on the
+selected toolchain; SHA256SUMS.txt records the exact packaged files.
+
+curl: https://curl.se/docs/copyright.html
+OpenSSL: https://www.openssl.org/source/license.html
+spdlog (including bundled fmt): https://github.com/gabime/spdlog/blob/v1.12.0/LICENSE
+nlohmann/json: https://github.com/nlohmann/json/blob/v3.11.3/LICENSE.MIT
+GNU libiconv: https://www.gnu.org/software/libiconv/
+GNU libidn2: https://www.gnu.org/software/libidn/
+GNU libunistring: https://www.gnu.org/software/libunistring/
+zlib: https://zlib.net/zlib_license.html
+GCC runtime libraries: https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html
+MinGW-w64 runtime: https://github.com/mingw-w64/mingw-w64/blob/master/COPYING
+

@@ -86,6 +86,10 @@ only to their owning targets.
 
 ## Usage
 
+Windows ZIP builds need no installation: extract the complete archive and open
+`TorrentClient.exe`. The build's DLLs must stay beside it. See
+[building and checking the portable archive](docs/DISTRIBUTION.md).
+
 On Windows, open `build/desktop/TorrentClient.exe` (or
 `build/desktop/Release/TorrentClient.exe` with Visual Studio). Select a `.torrent`
 file or paste a magnet link and click **Add**. Select a torrent in the list on the
