@@ -21,9 +21,7 @@ ResolvedInput resolveInput(const std::string& input, const Config& config,
     if (config.enable_dht) {
         result.dht = std::make_unique<dht::DHTManager>(config.dht_port);
         result.dht->start();
-        result.dht->bootstrap({});
-        for (int i = 0; i < 50 && !check(); ++i)
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        result.dht->bootstrap(config.dht_bootstrap_nodes, check);
     }
     if (check()) throw std::runtime_error("Cancelled");
 

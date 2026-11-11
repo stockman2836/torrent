@@ -1,298 +1,90 @@
-# DHT (Distributed Hash Table) Implementation
+# DHT discovery
 
-## Overview
+The client uses IPv4 UDP KRPC from [BEP 5](https://www.bittorrent.org/beps/bep_0005.html)
+to discover TCP peers for v1 torrents. Both trackerless magnets and `.torrent`
+files without an announce URL use this path. Metadata is still transferred over
+TCP using BEP 9 and verified before payload files are opened.
 
-This BitTorrent client now supports DHT (BEP 5), enabling **trackerless operation**. With DHT, peers can discover each other without relying on centralized trackers.
-
-## Features
-
-### Core DHT Protocol (BEP 5)
-
-- **Kademlia-based DHT**: Industry-standard distributed hash table
-- **KRPC Protocol**: UDP-based RPC protocol with 4 queries:
-  - `ping` - Check if node is alive
-  - `find_node` - Find closest nodes to a target ID
-  - `get_peers` - Find peers for an info_hash
-  - `announce_peer` - Announce ourselves as a peer
-- **Routing Table**: 160 K-buckets with 8 nodes each
-- **Node States**: GOOD, QUESTIONABLE, BAD (BEP 5 compliant)
-
-### Implementation Details
-
-#### Files Structure
-
-```
-include/
-  dht_node.h            - Node representation and distance calculations
-  dht_krpc.h            - KRPC message protocol
-  dht_routing_table.h   - K-bucket routing table
-  dht_manager.h         - Main DHT manager
-
-src/
-  dht_node.cpp
-  dht_krpc.cpp
-  dht_routing_table.cpp
-  dht_manager.cpp
-```
-
-#### Key Components
-
-**1. DHT Node (`dht_node.h/cpp`)**
-- 160-bit node IDs
-- XOR distance metric (Kademlia)
-- Compact node format (26 bytes: 20 ID + 4 IP + 2 port)
-- Node status tracking with timestamps
-
-**2. KRPC Protocol (`dht_krpc.h/cpp`)**
-- Bencode-based message encoding
-- Query/Response/Error message types
-- Transaction ID management
-- Compact node/peer encoding
-
-**3. Routing Table (`dht_routing_table.h/cpp`)**
-- 160 K-buckets (one per bit)
-- 8 nodes per bucket (K=8)
-- LRU eviction with node status consideration
-- Automatic bucket refresh every 15 minutes
-
-**4. DHT Manager (`dht_manager.h/cpp`)**
-- Bootstrap from well-known nodes
-- Peer lookup (get_peers)
-- Peer announcement (announce_peer)
-- Token-based security for announce_peer
-- Periodic maintenance (bucket refresh, bad node cleanup)
-- Statistics tracking
-
-## Usage
-
-### Configuration
-
-Enable DHT in `config.json`:
+## Configuration
 
 ```json
 {
   "enable_dht": true,
   "dht_port": 6881,
-  ...
+  "dht_bootstrap_nodes": []
 }
 ```
 
-Or via command line:
-```bash
-./torrent_client example.torrent --config config.json
-```
-
-### How It Works
-
-1. **Bootstrap Phase**
-   - Client connects to well-known DHT nodes:
-     - `router.bittorrent.com:6881`
-     - `dht.transmissionbt.com:6881`
-     - `router.utorrent.com:6881`
-   - Populates routing table with initial nodes
-
-2. **Peer Discovery**
-   - Sends `get_peers` query for info_hash to closest nodes
-   - Receives either:
-     - Peer list (compact format: 6 bytes per peer)
-     - Closest nodes to continue search
-   - Iteratively searches until peers are found
-
-3. **Peer Announcement**
-   - Sends `get_peers` to obtain announce token
-   - Uses token to send `announce_peer` to announce ourselves
-   - Re-announces periodically (every 60 seconds)
-
-4. **Maintenance**
-   - Refreshes stale buckets every 15 minutes
-   - Removes bad/unresponsive nodes
-   - Rotates security tokens every hour
-
-### Integration with DownloadManager
-
-DHT is seamlessly integrated:
-- Automatically starts with `DownloadManager`
-- Supplements tracker-provided peers
-- Fallback when trackers are unavailable
-- No user intervention required
-
-```cpp
-// DHT is enabled by default
-DownloadManager manager(torrent_file, download_dir,
-                       listen_port, max_dl, max_ul,
-                       enable_dht = true);
-```
-
-## Protocol Specification
-
-### KRPC Messages
-
-**Ping Query:**
-```json
-{
-  "t": "aa",
-  "y": "q",
-  "q": "ping",
-  "a": {"id": "abcdefghij0123456789"}
-}
-```
-
-**Find Node Query:**
-```json
-{
-  "t": "aa",
-  "y": "q",
-  "q": "find_node",
-  "a": {
-    "id": "abcdefghij0123456789",
-    "target": "mnopqrstuvwxyz123456"
-  }
-}
-```
-
-**Get Peers Query:**
-```json
-{
-  "t": "aa",
-  "y": "q",
-  "q": "get_peers",
-  "a": {
-    "id": "abcdefghij0123456789",
-    "info_hash": "mnopqrstuvwxyz123456"
-  }
-}
-```
-
-**Announce Peer Query:**
-```json
-{
-  "t": "aa",
-  "y": "q",
-  "q": "announce_peer",
-  "a": {
-    "id": "abcdefghij0123456789",
-    "info_hash": "mnopqrstuvwxyz123456",
-    "port": 6881,
-    "token": "aoeusnth"
-  }
-}
-```
-
-### Response Format
-
-**Ping/Announce Response:**
-```json
-{
-  "t": "aa",
-  "y": "r",
-  "r": {"id": "mnopqrstuvwxyz123456"}
-}
-```
-
-**Find Node Response:**
-```json
-{
-  "t": "aa",
-  "y": "r",
-  "r": {
-    "id": "mnopqrstuvwxyz123456",
-    "nodes": "<compact node info>"
-  }
-}
-```
-
-**Get Peers Response (with peers):**
-```json
-{
-  "t": "aa",
-  "y": "r",
-  "r": {
-    "id": "mnopqrstuvwxyz123456",
-    "token": "aoeusnth",
-    "values": ["<compact peer 1>", "<compact peer 2>"]
-  }
-}
-```
-
-**Get Peers Response (with nodes):**
-```json
-{
-  "t": "aa",
-  "y": "r",
-  "r": {
-    "id": "mnopqrstuvwxyz123456",
-    "token": "aoeusnth",
-    "nodes": "<compact node info>"
-  }
-}
-```
-
-### Error Response
+An empty or omitted bootstrap list uses `router.bittorrent.com:6881`,
+`dht.transmissionbt.com:6881` and `router.utorrent.com:6881`. A nonempty list
+replaces those routers, for example for a local DHT:
 
 ```json
 {
-  "t": "aa",
-  "y": "e",
-  "e": [201, "Generic Error"]
+  "enable_dht": true,
+  "dht_port": 0,
+  "dht_bootstrap_nodes": [{"host": "127.0.0.1", "port": 49001}]
 }
 ```
 
-Error codes:
-- 201 - Generic Error
-- 202 - Server Error
-- 203 - Protocol Error
-- 204 - Method Unknown
+Port `0` asks the OS to select a free UDP port. The desktop queue assigns distinct
+DHT/TCP port pairs to jobs. An occupied UDP port reports an error. The listening
+TCP port is what the client announces as its peer port; the DHT UDP port is a
+separate endpoint. The application does not configure router or firewall rules.
 
-## Compact Formats
+## Lookup and lifetime
 
-### Compact Node Info
-- 26 bytes per node
-- Format: `[20 bytes Node ID][4 bytes IP][2 bytes port]`
-- IP in network byte order (big-endian)
-- Port in big-endian
+Bootstrap sends `find_node` queries asynchronously. A validated response records
+the responding node's actual address, including a router that returns no other
+nodes. Lookup waits for bootstrap responses rather than a fixed warm-up delay.
+If an early router fails, lookup also considers nodes from bootstrap replies
+that arrive later, instead of treating the first failure as an exhausted search.
 
-### Compact Peer Info
-- 6 bytes per peer
-- Format: `[4 bytes IP][2 bytes port]`
-- IP in network byte order (big-endian)
-- Port in big-endian
+`dht_lookup.cpp` walks returned nodes in XOR-distance order with three concurrent
+queries. It visits at most 64 endpoints, retains at most 256 candidates and
+returns at most 200 distinct peer addresses. Invalid compact peers and port zero
+are ignored. The first useful peer response, exhausted candidates, cancellation
+or the caller's deadline ends the lookup. Individual UDP transactions expire
+after two seconds, allowing another node to answer without waiting on an idle one.
 
-## Statistics
+Responses and errors must match a pending transaction and its UDP source address
+and port. Transaction IDs are unique across threads. Completion callbacks run
+after the transaction-map mutex has been released, so an announce callback can
+submit another query. Shared lookup state and removal of unfinished transactions
+make late replies harmless after a timeout or cancellation.
 
-View DHT statistics during operation:
+Announcing first obtains a token with `get_peers`, then returns it in
+`announce_peer`. Served tokens use a random secret bound to the requester's IP
+and info hash. Secrets rotate every five minutes; the previous secret remains
+valid during the next interval. The node supports `implied_port` for incoming
+announcements.
+
+The magnet worker passes cancellation into discovery. The download session takes
+ownership of the same running DHT instance and immediately starts peer lookup;
+it does not bootstrap a second public network. DHT-only sessions do not create a
+tracker client or send tracker completion events. Session discovery, UDP polling
+and maintenance observe shutdown. Hostname resolution uses the OS resolver and
+its timing; cancellation checks happen between resolutions.
+
+## Verification
+
+```sh
+ctest --test-dir build -R "test_dht|test_magnet_dht" --output-on-failure
 ```
-DHT: 127 nodes in routing table (89 good)
-DHT: Found 15 peers
-```
 
-Get detailed stats:
-```cpp
-auto stats = routing_table_->getStats();
-// stats.total_nodes
-// stats.good_nodes
-// stats.questionable_nodes
-// stats.bad_nodes
-// stats.filled_buckets
-```
+The ordinary suite checks node chains, unavailable routers, KRPC errors, wrong
+transaction IDs, wrong response sources, duplicate/invalid peers, late replies,
+announce tokens, occupied ports and cancellation during metadata discovery.
+End-to-end cases acquire two metadata blocks, verify SHA1 and compare downloaded
+bytes without any tracker request. Another case falls back from an unavailable
+tracker; a disabled-DHT case creates no payload files or UDP traffic.
 
-## Performance Considerations
+Optional tests use the independent `bittorrent-dht` 11.0.12 implementation with
+public bootstrap disabled and two loopback nodes. One verifies lookup and announce
+in both implementations. With the qBittorrent fixture enabled, another discovers
+qBittorrent through this DHT, obtains metadata from a magnet without `tr`, and
+verifies the complete multi-file payload. See [test setup](../../tests/README.md#dht-interoperability).
 
-- **Bootstrap Time**: 5-10 seconds to populate routing table
-- **Peer Discovery**: 5-30 seconds depending on network
-- **Memory**: ~50-200 KB for routing table (depends on network size)
-- **Network Traffic**: ~1-5 KB/s for maintenance
-- **Port**: Uses `listen_port + 1` by default
-
-## References
-
-- [BEP 5: DHT Protocol](http://www.bittorrent.org/beps/bep_0005.html)
-- [Kademlia Paper](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf)
-
-## Future Enhancements
-
-Potential improvements:
-- [ ] DHT persistence (save routing table to disk)
-- [ ] IPv6 support (BEP 32)
-- [ ] Security extensions (BEP 42)
-- [ ] DHT statistics dashboard
-- [ ] Custom bootstrap nodes configuration
+This verifies a local IPv4 DHT and TCP transfer path. Public-swarm behavior, IPv6
+DHT, node-ID enforcement extensions and persistent routing tables remain separate
+work. Routing and peer storage are in memory for the lifetime of a job.

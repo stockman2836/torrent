@@ -80,6 +80,18 @@ bool Config::loadFromFile(const std::string& filepath) {
         // DHT settings
         if (j.contains("enable_dht")) enable_dht = j["enable_dht"].get<bool>();
         if (j.contains("dht_port")) dht_port = j["dht_port"].get<uint16_t>();
+        if (j.contains("dht_bootstrap_nodes")) {
+            if (!j["dht_bootstrap_nodes"].is_array()) throw std::invalid_argument("dht_bootstrap_nodes must be an array");
+            std::vector<DhtBootstrapNode> nodes;
+            for (const auto& node : j["dht_bootstrap_nodes"]) {
+                const auto host = node.at("host").get<std::string>();
+                if (!node.at("port").is_number_integer()) throw std::invalid_argument("DHT bootstrap port must be an integer");
+                const auto port = node.at("port").get<int64_t>();
+                if (host.empty() || port < 1 || port > 65535) throw std::invalid_argument("Invalid DHT bootstrap address");
+                nodes.emplace_back(host, static_cast<uint16_t>(port));
+            }
+            dht_bootstrap_nodes = std::move(nodes);
+        }
 
         // PEX settings
         if (j.contains("enable_pex")) enable_pex = j["enable_pex"].get<bool>();
@@ -156,6 +168,9 @@ bool Config::saveToFile(const std::string& filepath) const {
         // DHT settings
         j["enable_dht"] = enable_dht;
         j["dht_port"] = dht_port;
+        j["dht_bootstrap_nodes"] = json::array();
+        for (const auto& node : dht_bootstrap_nodes)
+            j["dht_bootstrap_nodes"].push_back({{"host", node.host}, {"port", node.port}});
 
         // PEX settings
         j["enable_pex"] = enable_pex;
@@ -234,6 +249,9 @@ void Config::mergeWithCLI(const std::optional<std::string>& download_dir_cli,
 
 bool Config::validate() const {
     bool valid = true;
+    for (const auto& node : dht_bootstrap_nodes) if (node.host.empty() || !node.port) {
+        LOG_ERROR("Invalid DHT bootstrap address"); valid = false;
+    }
 
     if (listen_port == 0 || listen_port > 65535) {
         LOG_ERROR("Invalid listen_port: {}", listen_port);

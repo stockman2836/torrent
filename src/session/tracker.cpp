@@ -23,6 +23,7 @@ void DownloadManager::trackerLoop() {
 }
 
 void DownloadManager::updateTracker() {
+    if (!tracker_client_) return;
     int64_t left = bytesRemaining();
 
     // Determine event type

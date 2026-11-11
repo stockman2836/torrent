@@ -63,10 +63,12 @@
     "_resume_dir_comment": "Directory to store resume data",
 
     "enable_dht": false,
-    "_enable_dht_comment": "Enable DHT for trackerless torrents (not yet implemented)",
+    "_enable_dht_comment": "Enable IPv4 DHT peer discovery for trackerless torrents and magnets",
 
     "dht_port": 6881,
-    "_dht_port_comment": "Port for DHT (not yet implemented)",
+    "_dht_port_comment": "UDP port for DHT; 0 selects a free port",
+    "dht_bootstrap_nodes": [],
+    "_dht_bootstrap_nodes_comment": "Empty uses public routers; otherwise an array of {host, port} overrides them",
 
     "enable_pex": false,
     "_enable_pex_comment": "Enable Peer Exchange (not yet implemented)"

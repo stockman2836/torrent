@@ -7,7 +7,8 @@ Fast Extension, IPv6, local discovery, web seeds and optional uTP.
 
 Automated integration tests cover TCP transfers, tracker-based magnets and the
 desktop controller. Optional checks exchange files with an independently
-installed qBittorrent. Other protocols still require broader interoperability testing.
+installed qBittorrent and an independent DHT implementation. Trackerless magnets
+are covered locally; public swarms and other protocols need broader testing.
 
 ## Project structure
 
@@ -77,6 +78,7 @@ with non-ASCII dependency paths.
 | `ENABLE_UTP` | `OFF` | Link libutp and enable its transport implementation |
 | `BUILD_DESKTOP` | `ON` on Windows | Build the native Windows application |
 | `INTEROP_QBITTORRENT_EXECUTABLE` | Empty | Opt into Windows interoperability checks against qBittorrent 4.6.x |
+| `ENABLE_DHT_INTEROP_TESTS` | `OFF` | Check DHT against the optional pinned `bittorrent-dht` test dependency |
 
 An explicit `ENABLE_UTP=ON` requires libutp to be found; configuration fails with
 an explanation if it is missing. Compile definitions and library settings apply
@@ -150,6 +152,12 @@ node tests/integration/test_queue.cjs build/desktop/TorrentClient.exe ui
 ```
 
 The remaining examples below use the CLI.
+
+Magnets without `tr` discover peers through DHT when `enable_dht` is enabled.
+`dht_bootstrap_nodes` can override the built-in routers with an array of
+`{"host": "127.0.0.1", "port": 49001}` addresses. An empty list uses the public
+defaults. DHT uses IPv4 UDP; metadata and file transfers use TCP. See
+[DHT behavior and verification](docs/protocols/DHT.md).
 
 The executable is built under `build/app/` (or `build/app/Release/` with Visual
 Studio). The default configuration path remains `./config.json`, relative to the

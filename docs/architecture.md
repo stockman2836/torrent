@@ -94,6 +94,14 @@ loads configuration, resolves either input form to a `TorrentFile`, and starts
 one `DownloadManager`. Magnet resolution transfers its existing DHT instance
 into the download session. Both input forms use the same download lifecycle.
 
+DHT bootstrap is asynchronous and configurable through core address values.
+`dht_lookup.cpp` owns one bounded iterative search with shared callback state.
+Responses match both transaction ID and source endpoint. The network worker
+removes transactions before invoking callbacks; announce callbacks can therefore
+submit follow-up queries without locking themselves out. Cancellation closes the
+lookup and drops its unfinished transactions. The existing running DHT moves from
+metadata acquisition into the session; sessions without trackers use DHT directly.
+
 Magnet acquisition registers a local `ut_metadata` handler before sending the
 extension handshake. Outgoing requests use the remote ID; incoming responses
 use the advertised local ID. `PeerConnection` owns wire headers while

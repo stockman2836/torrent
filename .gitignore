@@ -32,5 +32,6 @@ downloads/*
 Thumbs.db
 
 # Runtime state
+tests/integration/node_modules/
 *.log
 .resume_*.dat

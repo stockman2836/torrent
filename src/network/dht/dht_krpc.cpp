@@ -1,4 +1,5 @@
 #include "torrent/network/dht/dht_krpc.h"
+#include <atomic>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -90,6 +91,9 @@ KRPCQuery KRPCQuery::fromBencode(const BencodeValue& value) {
         else if (method == "find_node") query.query_type = QueryType::FIND_NODE;
         else if (method == "get_peers") query.query_type = QueryType::GET_PEERS;
         else if (method == "announce_peer") query.query_type = QueryType::ANNOUNCE_PEER;
+        else throw std::runtime_error("Unknown DHT method");
+    } else {
+        throw std::runtime_error("Missing DHT method");
     }
 
     // Parse arguments
@@ -101,8 +105,8 @@ KRPCQuery KRPCQuery::fromBencode(const BencodeValue& value) {
             std::string id_str = args.at("id").getString();
             if (id_str.size() == NODE_ID_SIZE) {
                 std::copy(id_str.begin(), id_str.end(), query.sender_id.begin());
-            }
-        }
+            } else throw std::runtime_error("Invalid DHT node ID");
+        } else throw std::runtime_error("Missing DHT node ID");
 
         // Target (for find_node)
         if (args.find("target") != args.end() && args.at("target").isString()) {
@@ -117,12 +121,15 @@ KRPCQuery KRPCQuery::fromBencode(const BencodeValue& value) {
         // Info hash (for get_peers, announce_peer)
         if (args.find("info_hash") != args.end() && args.at("info_hash").isString()) {
             std::string hash_str = args.at("info_hash").getString();
+            if (hash_str.size() != NODE_ID_SIZE) throw std::runtime_error("Invalid DHT info hash");
             query.info_hash = std::vector<uint8_t>(hash_str.begin(), hash_str.end());
         }
 
         // Port (for announce_peer)
         if (args.find("port") != args.end() && args.at("port").isInteger()) {
-            query.port = static_cast<uint16_t>(args.at("port").getInteger());
+            const auto port = args.at("port").getInteger();
+            if (port < 0 || port > 65535) throw std::runtime_error("Invalid DHT peer port");
+            query.port = static_cast<uint16_t>(port);
         }
 
         // Token (for announce_peer)
@@ -136,6 +143,8 @@ KRPCQuery KRPCQuery::fromBencode(const BencodeValue& value) {
         }
     }
 
+    if (query.transaction_id.empty() || dict.find("a") == dict.end() || !dict.at("a").isDictionary())
+        throw std::runtime_error("Invalid DHT query envelope");
     return query;
 }
 
@@ -168,13 +177,13 @@ BencodeValue KRPCResponse::toBencode() const {
     response["id"] = BencodeValue(id_str);
 
     // Nodes (for find_node, get_peers)
-    if (nodes.has_value() && !nodes->empty()) {
+    if (nodes.has_value()) {
         std::string compact = KRPCMessageFactory::encodeCompactNodes(nodes.value());
         response["nodes"] = BencodeValue(compact);
     }
 
     // Values (peer list for get_peers)
-    if (values.has_value() && !values->empty()) {
+    if (values.has_value()) {
         BencodeValue::List vals;
         for (const auto& val : values.value()) {
             vals.push_back(BencodeValue(val));
@@ -215,8 +224,8 @@ KRPCResponse KRPCResponse::fromBencode(const BencodeValue& value) {
             std::string id_str = resp.at("id").getString();
             if (id_str.size() == NODE_ID_SIZE) {
                 std::copy(id_str.begin(), id_str.end(), response.sender_id.begin());
-            }
-        }
+            } else throw std::runtime_error("Invalid DHT response ID");
+        } else throw std::runtime_error("Missing DHT response ID");
 
         // Nodes
         if (resp.find("nodes") != resp.end() && resp.at("nodes").isString()) {
@@ -242,6 +251,8 @@ KRPCResponse KRPCResponse::fromBencode(const BencodeValue& value) {
         }
     }
 
+    if (response.transaction_id.empty() || dict.find("r") == dict.end() || !dict.at("r").isDictionary())
+        throw std::runtime_error("Invalid DHT response envelope");
     return response;
 }
 
@@ -431,14 +442,10 @@ std::vector<uint8_t> KRPCMessageFactory::serialize(const KRPCMessage& message) {
 }
 
 std::string KRPCMessageFactory::generateTransactionId() {
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
-    static std::uniform_int_distribution<> dis(0, 65535);
-
-    uint16_t tid = dis(gen);
-    std::string result(2, '\0');
-    result[0] = (tid >> 8) & 0xFF;
-    result[1] = tid & 0xFF;
+    static std::atomic<uint32_t> next{std::random_device{}()};
+    const auto tid = next.fetch_add(1);
+    std::string result(4, '\0');
+    for (size_t i = 0; i < 4; ++i) result[i] = (tid >> (24 - 8 * i)) & 255;
     return result;
 }
 
@@ -447,7 +454,7 @@ std::vector<Node> KRPCMessageFactory::parseCompactNodes(const std::string& compa
 
     // Each node is 26 bytes (20 bytes ID + 4 bytes IP + 2 bytes port)
     if (compact.size() % 26 != 0) {
-        return nodes; // Invalid format
+        throw std::runtime_error("Invalid compact DHT nodes");
     }
 
     size_t count = compact.size() / 26;

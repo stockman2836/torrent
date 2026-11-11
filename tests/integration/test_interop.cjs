@@ -61,7 +61,7 @@ async function main() {
   assert.equal(process.platform, 'win32', 'This fixture currently supports Windows qBittorrent 4.6.x');
   const [driverArg, cliArg, qbtArg, mode = 'download'] = process.argv.slice(2);
   assert.ok(driverArg && cliArg && qbtArg, 'Usage: test_interop.cjs <incoming_driver> <torrent_client> <qbittorrent> <scenario>');
-  assert.ok(['download', 'upload-incoming', 'upload-outgoing', 'magnet', 'resume'].includes(mode), 'Unknown scenario');
+  assert.ok(['download', 'upload-incoming', 'upload-outgoing', 'magnet', 'resume', 'dht'].includes(mode), 'Unknown scenario');
   const driver = path.resolve(driverArg), cli = path.resolve(cliArg), qbt = path.resolve(qbtArg);
   for (const executable of [driver, cli, qbt]) assert.ok(fs.existsSync(executable), `Missing executable: ${executable}`);
   const artifacts = path.resolve(__dirname, '../../build/tests'); fs.mkdirSync(artifacts, { recursive: true });
@@ -103,7 +103,9 @@ async function main() {
   const announce = `http://127.0.0.1:${tracker.address().port}/announce`;
   const torrentBytes = encode({ announce, info });
   fs.writeFileSync(path.join(work, 'fixture.torrent'), torrentBytes);
-  const config = { enable_dht: false, enable_pex: false, enable_lsd: false, enable_webseeds: false,
+  const referenceDht = mode === 'dht' ? await require('./reference_dht.cjs').createReferenceDht(Buffer.from(hash, 'hex'), qbtPort) : undefined;
+  const config = { enable_dht: mode === 'dht', dht_port: 0, dht_bootstrap_nodes: referenceDht?.routers || [],
+    enable_pex: false, enable_lsd: false, enable_webseeds: false,
     enable_utp: false, enable_encryption: false, listen_port: enginePort, download_dir: './files', log_file: './client.log',
     max_download_speed: mode === 'resume' ? 65536 : 0, seed_after_download: uploads };
   fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify(config));
@@ -203,9 +205,15 @@ PortForwardingEnabled=false
       const starts = announces.filter(item => Number(item.port) === enginePort && item.event === 'started');
       assert.equal(starts.length, 2); assert.equal(starts[1].left, partialAnnounce.left, 'Restart must reuse verified pieces');
     } else {
-      const source = mode === 'magnet' ? `magnet:?xt=urn:btih:${hash}&tr=${encodeURIComponent(announce)}` : 'fixture.torrent';
+      const source = mode === 'dht' ? `magnet:?xt=urn:btih:${hash}`
+        : mode === 'magnet' ? `magnet:?xt=urn:btih:${hash}&tr=${encodeURIComponent(announce)}` : 'fixture.torrent';
       startEngine(cli, [source, '--config', 'config.json']);
       await exited(engine, `${mode} from qBittorrent`); verifyPayload(files);
+      if (referenceDht) {
+        referenceDht.check();
+        assert.ok(referenceDht.queries.length > 0, 'No independent DHT lookup occurred');
+        assert.ok(!announces.some(item => Number(item.port) === enginePort), 'Trackerless client contacted a tracker');
+      }
     }
     const result = { scenario: mode, qBittorrent: version, buildInfo, bytes: payload.length, infoHash: hash, passed: true };
     fs.writeFileSync(path.join(work, 'result.json'), JSON.stringify(result, null, 2));
@@ -226,6 +234,7 @@ PortForwardingEnabled=false
       fs.writeFileSync(path.join(work, 'qbittorrent-output.log'), qbtProcess.output);
     }
     tracker.closeAllConnections(); await new Promise(resolve => tracker.close(resolve));
+    if (referenceDht) await referenceDht.close();
     fs.writeFileSync(path.join(work, 'engine-output.log'), engines.map(child => child.output).join('\n--- restart ---\n'));
     fs.writeFileSync(path.join(work, 'announces.json'), JSON.stringify(announces, null, 2));
     console.log(`Artifacts: ${work}`);

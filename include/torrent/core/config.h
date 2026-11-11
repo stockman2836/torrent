@@ -6,9 +6,16 @@
 #include <vector>
 #include <cstddef>
 #include <map>
+#include <utility>
 #include "torrent/core/file_priority.h"
 
 namespace torrent {
+
+struct DhtBootstrapNode {
+    std::string host;
+    uint16_t port;
+    DhtBootstrapNode(std::string host, uint16_t port) : host(std::move(host)), port(port) {}
+};
 
 struct Config {
     // Network settings
@@ -50,8 +57,9 @@ struct Config {
     std::string resume_dir = "./resume";
 
     // DHT settings
-    bool enable_dht = true;   // Now implemented!
+    bool enable_dht = true;
     uint16_t dht_port = 6881;
+    std::vector<DhtBootstrapNode> dht_bootstrap_nodes; // Empty uses the built-in public routers.
 
     // PEX settings (BEP 11)
     bool enable_pex = true;   // Now implemented!

@@ -1,7 +1,7 @@
 # Magnet download support
 
-The tracked magnet path is covered by offline end-to-end tests: tracker
-peer discovery, extension negotiation, metadata acquisition, info-hash
+Tracker-based and DHT-only magnets are covered by offline end-to-end tests: peer
+discovery, extension negotiation, metadata acquisition, info-hash
 verification and transition into the ordinary file download session.
 
 ## Protocol flow
@@ -9,8 +9,8 @@ verification and transition into the ordinary file download session.
 1. Parse a v1 `magnet:?xt=urn:btih:<hash>` URI. The parser accepts hex and base32
    hashes with optional display names and trackers.
 2. Query listed trackers and deduplicate peers. If one tracker fails, try the
-   others. DHT is another implemented discovery path; DHT-only magnets are not
-   part of the offline integration coverage.
+   others. If no tracker supplies peers, use iterative [DHT discovery](DHT.md).
+   A URI without `tr` uses DHT directly when enabled.
 3. Perform the BitTorrent handshake and advertise a local `ut_metadata` ID.
 4. Read the remote extension map and metadata size. Outgoing requests use the
    remote ID; responses are dispatched through the advertised local ID.
@@ -19,7 +19,8 @@ verification and transition into the ordinary file download session.
 6. Validate total size, block index and exact block length. Assemble the blocks
    and verify SHA1 against the magnet info hash before creating a `TorrentFile`.
 7. Start the same `DownloadManager` lifecycle used by `.torrent` files, retaining
-   the working tracker and any existing DHT instance.
+   the working tracker and any existing DHT instance. Trackerless metadata starts
+   a DHT-only session without creating a tracker client.
 
 Wire headers are added exactly once by `PeerConnection`. Extension codecs
 produce Bencode bodies and dispatch already-separated extension IDs. Completion
@@ -65,7 +66,7 @@ handshake, followed by UNCHOKE before extension negotiation. Optional
 also acquire metadata and payload from an independent implementation.
 
 These checks do not establish interoperability with every public client or
-tracker. Public-swarm checks, DHT-only discovery, v2 magnets, direct `x.pe`
+tracker. Public-swarm checks, v2 magnets, direct `x.pe`
 sources and metadata seeding require separate work or coverage. Incoming
 metadata requests are not served by the download-side assembler.
 

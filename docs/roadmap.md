@@ -22,9 +22,9 @@ code; prefer small concrete modules and keep network work off the window thread.
 - [x] Incoming IPv4/IPv6 TCP peers with handshake deadlines, a peer cap and verified uploads.
 - [x] Offline tracker/peer regression tests for transfers and application lifecycle.
 
-Protocol modules also exist for UDP trackers, DHT, PEX, local discovery, web
+Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
-coverage. The ordinary suite currently has fourteen unit suites and seventy-seven
+coverage. The ordinary suite currently has fifteen unit suites and ninety-two
 offline integration scenarios. See [tests](../tests/README.md) for verification.
 
 ## Verified: independent client interoperability
@@ -45,11 +45,15 @@ ordinary offline regression suite.
 This stage covers plaintext TCP and tracker-based discovery. Public swarms,
 encryption and metadata serving by our client require separate evidence.
 
-## Next: trackerless magnets
+## Verified: trackerless magnets
 
-- [ ] Add deterministic DHT-only discovery and magnet download checks.
-- [ ] Verify lookup, announce, unavailable-node fallback and cancellation.
-- [ ] Check interoperability with an independent DHT implementation.
+- [x] Add deterministic DHT-only discovery and magnet download checks.
+- [x] Verify iterative lookup, announce, unavailable-node fallback and cancellation.
+- [x] Check interoperability with an independent DHT implementation.
+
+Reference: bittorrent-dht 11.0.12 on a private loopback DHT. A separate check
+downloads metadata and payload from qBittorrent through this DHT without a
+tracker in the magnet. Public DHT/swarm behavior remains to be validated.
 
 ## Next: desktop distribution
 

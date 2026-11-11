@@ -6,6 +6,7 @@ const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { availablePort } = require('./fixture_helpers.cjs');
+const { createDhtFixture } = require('./dht_fixture.cjs');
 
 function encode(value) {
   if (Buffer.isBuffer(value)) return Buffer.concat([Buffer.from(`${value.length}:`), value]);
@@ -52,7 +53,9 @@ const listen = server => new Promise((resolve, reject) => {
 
 async function main() {
   const [scenario, program] = process.argv.slice(2);
-  assert.ok(['download', 'reject', 'hash', 'tracker', 'invalid', 'stall', 'list', 'fast'].includes(scenario));
+  const usesDht = scenario.startsWith('dht');
+  assert.ok(['download', 'reject', 'hash', 'tracker', 'invalid', 'stall', 'list', 'fast',
+    'dht', 'dht-chain', 'dht-fallback', 'dht-tracker', 'dht-disabled', 'dht-torrent'].includes(scenario));
   const work = fs.mkdtempSync(path.join(process.cwd(), `magnet-${scenario}-`));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; ++i) data[i] = (i * 37 + Math.floor(i / 32768) * 19) % 256;
@@ -63,7 +66,7 @@ async function main() {
   const metadata = encode(info), infoHash = hash(metadata);
   assert.ok(metadata.length > 16384);
   const peers = [], sockets = new Set(), requests = [], trackerHits = [];
-  let child, output = '', protocolError;
+  let child, dht, output = '', protocolError;
 
   function seed(bad) {
     const server = net.createServer(socket => {
@@ -153,14 +156,20 @@ async function main() {
   try {
     if (['reject', 'hash', 'invalid', 'stall'].includes(scenario)) await listen(seed(true));
     if (scenario !== 'invalid') await listen(seed(false));
-    await listen(tracker);
-    const base = `http://127.0.0.1:${tracker.address().port}`;
-    const trackers = scenario === 'tracker' ? [base + '/unavailable', base + '/announce'] : [base + '/announce'];
+    if (!usesDht || scenario === 'dht-tracker') await listen(tracker);
+    if (usesDht) dht = await createDhtFixture(infoHash, peers[0].address().port,
+      scenario === 'dht-chain' ? 'chain' : scenario === 'dht-fallback' ? 'fallback' : 'direct');
+    const base = `http://127.0.0.1:${tracker.listening ? tracker.address().port : 0}`;
+    const trackers = usesDht ? (scenario === 'dht-tracker' ? [base + '/unavailable'] : [])
+      : scenario === 'tracker' ? [base + '/unavailable', base + '/announce'] : [base + '/announce'];
     const uri = `magnet:?xt=urn:btih:${infoHash.toString('hex')}&dn=fixture` + trackers.map(url => `&tr=${encodeURIComponent(url)}`).join('');
-    fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: false, enable_pex: false,
+    if (scenario === 'dht-torrent') fs.writeFileSync(path.join(work, 'fixture.torrent'), encode({ info }));
+    fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: usesDht && scenario !== 'dht-disabled',
+      dht_port: 0, dht_bootstrap_nodes: dht?.routers || [], enable_pex: false,
       enable_lsd: false, enable_webseeds: false, enable_utp: false, enable_encryption: false,
       download_dir: './files', log_file: './client.log', listen_port: await availablePort() }));
-    child = spawn(path.resolve(program), [uri, '--config', 'config.json', ...(scenario === 'list' ? ['--list-files'] : [])], { cwd: work });
+    child = spawn(path.resolve(program), [scenario === 'dht-torrent' ? 'fixture.torrent' : uri,
+      '--config', 'config.json', ...(scenario === 'list' ? ['--list-files'] : [])], { cwd: work });
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     const timer = setTimeout(() => child.kill(), 20000);
@@ -169,7 +178,11 @@ async function main() {
       child.once('close', resolve);
     }).finally(() => clearTimeout(timer));
     if (protocolError) throw protocolError;
-    if (scenario === 'list') {
+    if (dht) dht.check();
+    if (scenario === 'dht-disabled') {
+      assert.equal(code, 1, output); assert.equal(dht.queries.length, 0);
+      assert.ok(!fs.existsSync(path.join(work, 'files'))); assert.equal(requests.length, 0);
+    } else if (scenario === 'list') {
       assert.equal(code, 0, output);
       assert.ok(output.includes('ID\tBytes\tPath') && output.includes('payload.bin'));
       assert.ok(!fs.existsSync(path.join(work, 'files')));
@@ -183,17 +196,25 @@ async function main() {
       assert.equal(code, 0, output);
       assert.deepEqual(fs.readFileSync(path.join(work, 'files', 'payload.bin')), data);
       assert.ok(output.includes('Download complete!'));
-      assert.equal(requests.filter(r => r.kind === 'metadata' && !r.bad).length, Math.ceil(metadata.length / 16384));
+      assert.equal(requests.filter(r => r.kind === 'metadata' && !r.bad).length,
+        scenario === 'dht-torrent' ? 0 : Math.ceil(metadata.length / 16384));
       if (['reject', 'hash', 'stall'].includes(scenario)) assert.ok(requests.some(r => r.kind === 'metadata' && r.bad));
       if (scenario === 'hash') assert.ok(output.includes('Info hash mismatch'), output);
       if (scenario === 'tracker') assert.ok(trackerHits.some(url => url.startsWith('/unavailable')));
+      if (usesDht) {
+        assert.ok(dht.queries.some(query => query.method === 'get_peers'), 'No DHT lookup occurred');
+        if (scenario === 'dht-chain') assert.ok(dht.queries.some(query => query.role === 'leaf' && query.method === 'get_peers'));
+        if (scenario === 'dht-tracker') assert.ok(trackerHits.some(url => url.startsWith('/unavailable')));
+        else assert.equal(trackerHits.length, 0, 'Trackerless magnet contacted a tracker');
+      }
     }
     console.log(`PASS magnet ${scenario}: ${metadata.length} metadata bytes; ${requests.filter(r => r.kind === 'data').length} file block requests.`);
   } finally {
     if (child && child.exitCode === null) child.kill();
     for (const socket of sockets) socket.destroy();
     for (const peer of peers) peer.close();
-    tracker.close();
+    if (tracker.listening) tracker.close();
+    if (dht) await dht.close();
     fs.writeFileSync(path.join(work, 'output.log'), output);
   }
 }

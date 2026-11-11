@@ -24,6 +24,7 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     , endgame_mode_(false)
     , seeding_mode_(false)
     , enable_dht_(config.enable_dht)
+    , dht_bootstrap_nodes_(config.dht_bootstrap_nodes)
     , enable_pex_(config.enable_pex)
     , enable_lsd_(config.enable_lsd)
     , enable_webseeds_(config.enable_webseeds)
@@ -55,7 +56,7 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
 
     file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_, selection);
 
-    tracker_client_ = std::make_unique<TrackerClient>(
+    if (!torrent_.announce().empty()) tracker_client_ = std::make_unique<TrackerClient>(
         torrent_.announce(),
         torrent_.infoHash(),
         peer_id_
@@ -65,7 +66,7 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     if (existing_dht) {
         dht_manager_ = std::move(existing_dht);
     } else if (enable_dht_) {
-        dht_manager_ = std::make_unique<dht::DHTManager>(listen_port_ + 1); // DHT on port + 1
+        dht_manager_ = std::make_unique<dht::DHTManager>(config.dht_port);
     }
 
     // Initialize LSD if enabled
@@ -133,15 +134,10 @@ void DownloadManager::start() {
     // Start DHT if enabled
     if (enable_dht_ && dht_manager_) {
         std::cout << "Starting DHT...\n";
-        dht_manager_->start();
-
-        // Bootstrap DHT
-        std::vector<dht::BootstrapNode> bootstrap_nodes = {
-            {"router.bittorrent.com", 6881},
-            {"dht.transmissionbt.com", 6881},
-            {"router.utorrent.com", 6881}
-        };
-        dht_manager_->bootstrap(bootstrap_nodes);
+        if (!dht_manager_->isRunning()) {
+            dht_manager_->start();
+            dht_manager_->bootstrap(dht_bootstrap_nodes_);
+        }
     }
 
     // Start LSD if enabled
@@ -218,7 +214,7 @@ void DownloadManager::stop() {
 
     // Notify tracker we're stopping
     int64_t left = bytesRemaining();
-    if (!first_announce_) tracker_client_->announce(
+    if (tracker_client_ && !first_announce_) tracker_client_->announce(
         total_uploaded_,
         total_downloaded_,
         left,
@@ -353,7 +349,7 @@ void DownloadManager::downloadLoop() {
 }
 
 void DownloadManager::beginSeeding() {
-    if (!canSeed() || seeding_mode_.exchange(true) || complete_at_start_) return;
+    if (!canSeed() || seeding_mode_.exchange(true) || complete_at_start_ || !tracker_client_) return;
     try {
         const auto response = tracker_client_->announce(total_uploaded_, total_downloaded_, 0, listen_port_, "completed");
         if (!response.isSuccess()) std::cerr << "Failed to announce completion: " << response.failure_reason << '\n';

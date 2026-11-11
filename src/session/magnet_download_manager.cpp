@@ -44,8 +44,8 @@ void MagnetDownloadManager::metadataDownloadLoop() {
 }
 
 void MagnetDownloadManager::findPeersViaDHT() {
-    if (!dht_manager_ || dht_manager_->getNodeCount() == 0) return;
-    for (const auto& peer : dht_manager_->getPeers(magnet_uri_.infoHash(), 30)) {
+    if (!dht_manager_) return;
+    for (const auto& peer : dht_manager_->getPeers(magnet_uri_.infoHash(), 30, [this] { return !running_; })) {
         available_peers_.emplace_back(peer.ip, peer.port);
     }
 }

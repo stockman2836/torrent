@@ -18,22 +18,7 @@ void DownloadManager::dhtLoop() {
 
     std::cout << "DHT loop started\n";
 
-    // Wait for DHT to bootstrap
-    waitForStop(std::chrono::seconds(5));
-
-    // Announce ourselves in DHT
-    if (dht_manager_->getNodeCount() > 0) {
-        std::cout << "DHT: Announcing ourselves for info_hash\n";
-        dht_manager_->announcePeer(torrent_.infoHash(), listen_port_);
-    }
-
     while (running_) {
-        waitForStop(std::chrono::seconds(60));
-
-        if (!running_) {
-            break;
-        }
-
         // Get peers from DHT if we don't have enough
         size_t active_peer_count = 0;
         {
@@ -43,6 +28,7 @@ void DownloadManager::dhtLoop() {
 
         if (active_peer_count < min_peers_ && !seeding_mode_) {
             updateDHT();
+            if (running_) connectToPeers();
         }
 
         // Periodically re-announce
@@ -54,6 +40,9 @@ void DownloadManager::dhtLoop() {
         auto stats = dht_manager_->getRoutingStats();
         std::cout << "DHT: " << stats.total_nodes << " nodes in routing table ("
                   << stats.good_nodes << " good)\n";
+        waitForStop(std::chrono::seconds(active_peer_count ? 60 : 5));
+        if (running_ && !dht_manager_->getNodeCount())
+            dht_manager_->bootstrap(dht_bootstrap_nodes_, [this] { return !running_; });
     }
 
     std::cout << "DHT loop ended\n";
@@ -64,14 +53,9 @@ void DownloadManager::updateDHT() {
         return;
     }
 
-    if (dht_manager_->getNodeCount() == 0) {
-        std::cout << "DHT: No nodes in routing table yet, skipping peer lookup\n";
-        return;
-    }
-
     std::cout << "DHT: Looking up peers for info_hash...\n";
 
-    auto dht_peers = dht_manager_->getPeers(torrent_.infoHash(), 15);
+    auto dht_peers = dht_manager_->getPeers(torrent_.infoHash(), 15, [this] { return !running_; });
 
     if (dht_peers.empty()) {
         std::cout << "DHT: No peers found\n";

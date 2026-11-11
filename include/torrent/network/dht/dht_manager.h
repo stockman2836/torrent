@@ -3,6 +3,7 @@
 #include "torrent/network/dht/dht_node.h"
 #include "torrent/network/dht/dht_routing_table.h"
 #include "torrent/network/dht/dht_krpc.h"
+#include "torrent/core/config.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -17,18 +18,15 @@ namespace torrent {
 namespace dht {
 
 // Bootstrap node information
-struct BootstrapNode {
-    std::string host;
-    uint16_t port;
-
-    BootstrapNode(const std::string& h, uint16_t p) : host(h), port(p) {}
-};
+using BootstrapNode = DhtBootstrapNode;
 
 // Pending transaction
 struct Transaction {
     std::string id;
     QueryType type;
     NodeID target_node;
+    std::string ip;
+    uint16_t port = 0;
     std::chrono::steady_clock::time_point sent_time;
     int retry_count = 0;
 
@@ -55,11 +53,14 @@ public:
     bool isRunning() const { return running_; }
 
     // Bootstrap DHT network
-    void bootstrap(const std::vector<BootstrapNode>& bootstrap_nodes);
+    void bootstrap(const std::vector<BootstrapNode>& bootstrap_nodes,
+                   const std::function<bool()>& cancelled = {});
 
     // Find peers for info_hash
     std::vector<DHTpeer> getPeers(const std::vector<uint8_t>& info_hash,
-                                  int timeout_seconds = 30);
+                                  int timeout_seconds = 30,
+                                  const std::function<bool()>& cancelled = {});
+    uint16_t port() const { return port_; }
 
     // Announce ourselves as a peer for info_hash
     void announcePeer(const std::vector<uint8_t>& info_hash, uint16_t port);
@@ -83,8 +84,8 @@ private:
     void handleQuery(const KRPCQuery& query,
                     const std::string& from_ip,
                     uint16_t from_port);
-    void handleResponse(const KRPCResponse& response);
-    void handleError(const KRPCError& error);
+    void handleResponse(const KRPCResponse& response, const std::string& ip, uint16_t port);
+    void handleError(const KRPCError& error, const std::string& ip, uint16_t port);
 
     // Query handlers
     void handlePing(const KRPCQuery& query,
@@ -110,7 +111,7 @@ private:
                  std::function<void(const KRPCResponse&)> on_response = nullptr,
                  std::function<void()> on_timeout = nullptr);
 
-    void getPeersFromNode(const Node& node,
+    std::string getPeersFromNode(const Node& node,
                          const std::vector<uint8_t>& info_hash,
                          std::function<void(const KRPCResponse&)> on_response = nullptr,
                          std::function<void()> on_timeout = nullptr);
@@ -125,7 +126,7 @@ private:
     // Transaction management
     void addTransaction(const std::string& tid,
                        QueryType type,
-                       const NodeID& target_node,
+                       const Node& node,
                        std::function<void(const KRPCResponse&)> on_response,
                        std::function<void()> on_timeout);
     void removeTransaction(const std::string& tid);
@@ -154,7 +155,8 @@ private:
     // State
     NodeID our_id_;
     uint16_t port_;
-    int socket_fd_;
+    std::intptr_t socket_fd_;
+    mutable std::mutex socket_mutex_;
 
     std::unique_ptr<RoutingTable> routing_table_;
     PeerStorage peer_storage_;
@@ -166,10 +168,12 @@ private:
     // Token secret (rotated periodically)
     std::string token_secret_;
     std::string old_token_secret_;
+    std::mutex token_mutex_;
     std::chrono::steady_clock::time_point last_token_rotation_;
 
     // Threading
     std::atomic<bool> running_;
+    std::atomic<size_t> pending_bootstrap_{0};
     std::thread network_thread_;
     std::thread maintenance_thread_;
 

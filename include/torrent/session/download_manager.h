@@ -119,6 +119,7 @@ private:
     std::atomic<bool> endgame_mode_;
     std::atomic<bool> seeding_mode_;
     bool enable_dht_;
+    std::vector<dht::BootstrapNode> dht_bootstrap_nodes_;
     bool enable_pex_;
     bool enable_lsd_;
     bool enable_webseeds_;

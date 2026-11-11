@@ -21,5 +21,6 @@
     "resume_dir": "./resume",
     "enable_dht": true,
     "dht_port": 6881,
+    "dht_bootstrap_nodes": [],
     "enable_pex": false
 }

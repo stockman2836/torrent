@@ -1,0 +1,8 @@
+{
+  "name": "torrent-client-interop-tests",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "bittorrent-dht": "11.0.12"
+  }
+}

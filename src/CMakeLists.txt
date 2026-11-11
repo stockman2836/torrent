@@ -22,6 +22,7 @@ add_library(torrent_network STATIC
     network/dht/dht_krpc.cpp
     network/dht/dht_routing_table.cpp
     network/dht/dht_manager.cpp
+    network/dht/dht_lookup.cpp
     network/peer/connection.cpp
     network/peer/listener.cpp
     network/peer/handshake.cpp

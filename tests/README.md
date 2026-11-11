@@ -33,6 +33,7 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_token_bucket` | Throttling, live changes and cancellation | Core |
 | `test_seeding_options` | Ratio/time limits and policy validation | Application |
 | `test_peer_listener` | Port ownership and bitfield validation | Network |
+| `test_dht` | UDP lifecycle, KRPC validation, unique transactions and bootstrap configuration | Network |
 | `test_download` | Actual CLI download from a loopback tracker and TCP peer | CLI executable |
 | `test_transfer_multi` | Two contributing seeds without duplicate block requests | CLI executable |
 | `test_transfer_resume` | Stop a partial session and retain verified pieces after restart | Session + CLI |
@@ -137,8 +138,8 @@ Use Google Test assertions to check observable behavior and failure cases.
 Integration checks belong under `integration/` and should not depend on public
 trackers or external swarms.
 
-The suite does not yet establish interoperability with public swarms, DHT-only
-magnet discovery, metadata seeding, encryption, optional libutp or all
+The suite does not yet establish interoperability with public swarms,
+metadata seeding, encryption, optional libutp or all
 cross-platform socket paths.
 
 Queue scenarios also cover concurrency, file conflicts, removal, upload/download
@@ -182,4 +183,42 @@ qBittorrent's own logs and a `result.json` recording the reference build.
 The fixture uses the documented [WebUI API](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-%28qBittorrent-4.1%29)
 and a separate [portable profile](https://github.com/qbittorrent/qBittorrent/wiki/How-to-use-portable-mode).
 It establishes loopback plaintext TCP compatibility with that reference build;
-public-swarm, DHT-only, encrypted and reverse metadata transfers remain separate work.
+public-swarm, encrypted and reverse metadata transfers remain separate work.
+
+## DHT interoperability
+
+The ordinary suite does not require npm dependencies. It runs local UDP fixtures
+for iterative lookup through another node, unavailable routers, KRPC errors,
+forged replies, late responses, deduplication, token-based announces, occupied
+ports and cancellation. `test_magnet_dht*` covers trackerless metadata/payload
+downloads, an unavailable tracker, disabled DHT and a trackerless `.torrent` file.
+
+To add checks against the independent `bittorrent-dht` 11.0.12 implementation:
+
+```sh
+cd tests/integration
+npm ci --ignore-scripts
+cd ../..
+cmake -S . -B build -DENABLE_DHT_INTEROP_TESTS=ON
+cmake --build build --parallel
+ctest --test-dir build -R "test_dht|test_magnet_dht" --output-on-failure
+```
+
+The pinned dependency and its lockfile belong only to the integration tests.
+Configuration never downloads it automatically. Two independent loopback DHT
+nodes publish and serve a peer address with public bootstrap disabled.
+`test_dht_reference` verifies our lookup and announce against them. When
+`INTEROP_QBITTORRENT_EXECUTABLE` is also set, `test_interop_dht` acquires metadata
+and a full multi-file payload from qBittorrent using a magnet without a tracker.
+It rejects any tracker announce by our client; qBittorrent retains its local
+fixture tracker and has its own DHT/PEX/LSD disabled.
+
+This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
+Both independent-client options enabled yield 114 CTest suites/scenarios: 107
+ordinary checks and seven optional interoperability checks. Test artifacts stay
+under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
+on the build directory. No public tracker or DHT router participates in these tests.
+
+TCP fixtures keep exclusive port-range leases until exit, in addition to probing
+the ports before starting a child. This prevents parallel fixtures from claiming
+the next torrent's port between that probe and its listener startup.
