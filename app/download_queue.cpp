@@ -73,17 +73,11 @@ DownloadId DownloadQueue::add(std::string source, Config config) {
     if (!MagnetURI::isMagnetURI(source)) source = absolute(source);
     for (const auto& entry : entries_) if (!entry->removing && entry->source == source) return entry->id;
     config.download_dir = absolute(config.download_dir);
+    if (network_settings_) network_settings_->applyTo(config);
     // Each live task may own a DHT socket even while waiting for user input.
-    uint32_t port = config.listen_port;
-    for (;;) {
-        if (port < 1024 || port >= 65535) throw std::invalid_argument("No free port pair for another download");
-        const bool used = std::any_of(entries_.begin(), entries_.end(), [port](const auto& entry) {
-            return port <= uint32_t(entry->config.listen_port) + 1 && port + 1 >= entry->config.listen_port;
-        });
-        if (!used) break;
-        port += 2;
-    }
-    config.listen_port = static_cast<uint16_t>(port);
+    const auto port = availablePort(config.listen_port);
+    if (!port) throw std::invalid_argument("No free port pair for another download");
+    config.listen_port = port;
     config.dht_port = static_cast<uint16_t>(port + 1);
     auto entry = std::make_unique<Entry>();
     entry->id = next_id_++;
@@ -93,6 +87,37 @@ DownloadId DownloadQueue::add(std::string source, Config config) {
     const auto id = entry->id;
     entries_.push_back(std::move(entry));
     return id;
+}
+
+uint16_t DownloadQueue::availablePort(uint16_t first, const Entry* except) const {
+    for (uint32_t port = first; port >= 1024 && port < 65535; port += 2) {
+        const auto overlaps = [port](uint16_t used) { return used && port <= uint32_t(used) + 1 && port + 1 >= used; };
+        const bool used = std::any_of(entries_.begin(), entries_.end(), [&](const auto& entry) {
+            return entry.get() != except && (overlaps(entry->config.listen_port) || overlaps(entry->retiring_port));
+        });
+        if (!used) return static_cast<uint16_t>(port);
+    }
+    return 0;
+}
+
+bool DownloadQueue::setNetworkSettings(const NetworkSettings& settings) {
+    settings.validate(entries_.size());
+    if (closing_) return false;
+    network_settings_ = settings;
+    return true;
+}
+
+bool DownloadQueue::prepareNetwork(Entry& entry) {
+    if (!network_settings_) return true;
+    const auto port = availablePort(static_cast<uint16_t>(network_settings_->first_port), &entry);
+    if (!port) return false; // Another startup may still be releasing its old DHT socket.
+    auto config = entry.config;
+    network_settings_->applyTo(config);
+    config.listen_port = port;
+    config.dht_port = static_cast<uint16_t>(port + 1);
+    if (port != entry.config.listen_port) entry.retiring_port = entry.config.listen_port;
+    entry.config = std::move(config);
+    return true;
 }
 
 bool DownloadQueue::configure(DownloadId id, const std::string& directory,
@@ -110,7 +135,10 @@ bool DownloadQueue::enqueue(DownloadId id) {
     auto entry = find(id);
     if (entry && entry->transferring && !entry->task.busy()) entry->transferring = entry->downloading = false;
     if (closing_ || !entry || entry->removing || entry->queued || entry->transferring) return false;
-    if (!entry->task.busy() && !entry->task.snapshot().files) entry->task.load(entry->source, entry->config);
+    if (!entry->task.busy() && !entry->task.snapshot().files) {
+        if (!prepareNetwork(*entry)) return false;
+        entry->task.load(entry->source, entry->config);
+    }
     entry->queued = true;
     pending_.push_back(id);
     return true;
@@ -185,6 +213,9 @@ bool DownloadQueue::conflicts(const Entry& candidate, const Entry& active) const
 void DownloadQueue::tick() {
     for (auto& entry : entries_) {
         if (entry->transferring && !entry->task.busy()) entry->transferring = entry->downloading = false;
+        if (entry->retiring_port && (!entry->task.busy() ||
+            (entry->transferring && entry->task.snapshot().listen_port == entry->config.listen_port)))
+            entry->retiring_port = 0;
         if (entry->task.snapshot().state == DownloadState::Seeding) entry->downloading = false;
         if ((closing_ || entry->removing) && !entry->unloading && !entry->task.busy()) {
             entry->task.unload(); entry->unloading = true;
@@ -210,6 +241,7 @@ void DownloadQueue::tick() {
             return other->transferring && conflicts(*entry, *other);
         });
         if (collision) { ++it; continue; }
+        if (!prepareNetwork(*entry)) { ++it; continue; }
         if (entry->task.start(entry->config)) {
             entry->transferring = entry->downloading = true; entry->queued = false; ++active;
             it = pending_.erase(it);
@@ -292,6 +324,7 @@ void DownloadQueue::restore(const std::string& path, const Config& defaults) {
         config.download_dir = absolute(config.download_dir);
         restored.emplace_back(std::move(source), std::move(config));
     }
+    network_settings_.value_or(NetworkSettings::fromConfig(defaults)).validate(restored.size());
     setLimit(limit);
     for (auto& item : restored) add(std::move(item.first), std::move(item.second));
 }

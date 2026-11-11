@@ -130,6 +130,20 @@ belong to the current session; stopped jobs retain the last tracker result, and
 restarting resets the session counters. Only the tracker actually queried by the
 engine is shown; this does not add fallback across a torrent's entire tracker list.
 
+Click **Network settings** at the top of the window to set the first connection
+port (1024–65534), the peer cap per torrent (1–1000), DHT and PEX. These are shared
+defaults saved in `%LOCALAPPDATA%/TorrentClient/config.json`. Changes apply when a
+torrent next starts or resumes; existing transfers and metadata lookups keep
+their current settings. Newly added torrents use the saved values immediately.
+The queue assigns separate TCP/DHT port pairs starting at the chosen port, so a
+particular torrent may use a higher port. Its actual listening port is shown in
+the window. A port range too small for the current list is rejected before saving.
+
+Settings are saved through a temporary file and atomic replacement. An unsuccessful
+write keeps the previous preferences. When a magnet's saved metadata still owns a
+DHT socket, changing its port or disabling DHT releases that socket on the worker
+before the next download session starts.
+
 Click **Seeding** for a torrent to continue sharing after it finishes. Set a ratio
 limit and a whole number of hours; `0` disables that limit. The first reached
 limit stops sharing. Changes apply to active sessions, and **Stop** ends sharing

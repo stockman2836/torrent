@@ -59,6 +59,7 @@ bool DownloadTask::load(const std::string& source, Config config) {
         snapshot_.uploaded_bytes = snapshot_.seed_seconds = 0;
         snapshot_.seed_ratio = 0;
         snapshot_.network = {};
+        snapshot_.listen_port = 0;
     }
     worker_ = std::thread([this, source, config] {
         try {
@@ -100,6 +101,10 @@ bool DownloadTask::start(Config config) {
     }
     worker_ = std::thread([this, config] {
         try {
+            // A magnet can have loaded metadata with the previous network settings.
+            // Release its old socket on this worker before binding the new session.
+            if (input_->dht && (!config.enable_dht ||
+                (config.dht_port != 0 && input_->dht->port() != config.dht_port))) input_->dht.reset();
             DownloadManager manager(input_->torrent, config, std::move(input_->dht));
             auto download_limit = config.max_download_speed, upload_limit = config.max_upload_speed;
             std::optional<std::chrono::steady_clock::time_point> seed_started;

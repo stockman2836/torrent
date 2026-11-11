@@ -5,6 +5,12 @@
 #include <filesystem>
 #include <cmath>
 #include <iostream>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 using json = nlohmann::json;
 
@@ -194,13 +200,23 @@ bool Config::saveToFile(const std::string& filepath) const {
         j["enable_utp"] = enable_utp;
         j["prefer_utp"] = prefer_utp;
 
-        std::ofstream file(std::filesystem::u8path(filepath));
+        const auto destination = std::filesystem::u8path(filepath);
+        auto temporary = destination; temporary += ".tmp";
+        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
         if (!file.is_open()) {
             LOG_ERROR("Failed to open config file for writing: {}", filepath);
             return false;
         }
 
-        file << j.dump(4);  // Pretty print with 4 spaces indent
+        file << j.dump(4) << '\n';
+        file.close();
+        if (!file) return false;
+#ifdef _WIN32
+        if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return false;
+#else
+        std::filesystem::rename(temporary, destination);
+#endif
         LOG_INFO("Configuration saved to: {}", filepath);
         return true;
 

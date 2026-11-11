@@ -1,7 +1,9 @@
 #pragma once
 
 #include "download_task.h"
+#include "network_settings.h"
 #include <deque>
+#include <optional>
 
 namespace torrent::app {
 
@@ -27,6 +29,7 @@ public:
     bool enqueue(DownloadId id);
     bool setSpeedLimits(DownloadId id, int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
     bool setSeedingOptions(DownloadId id, const SeedingOptions& options);
+    bool setNetworkSettings(const NetworkSettings& settings);
     void stop(DownloadId id);
     void remove(DownloadId id); // Removes the list entry, never downloaded data.
     void setLimit(size_t limit);
@@ -49,15 +52,19 @@ private:
         bool queued = false;
         bool removing = false;
         bool unloading = false;
+        uint16_t retiring_port = 0; // Metadata DHT may still own the previous pair during startup.
     };
     Entry* find(DownloadId id);
     void dequeue(DownloadId id);
+    uint16_t availablePort(uint16_t first, const Entry* except = nullptr) const;
+    bool prepareNetwork(Entry& entry);
     bool conflicts(const Entry& candidate, const Entry& active) const;
     std::vector<std::unique_ptr<Entry>> entries_;
     std::deque<DownloadId> pending_;
     DownloadId next_id_ = 1;
     size_t limit_ = 1;
     bool closing_ = false;
+    std::optional<NetworkSettings> network_settings_;
 };
 
 } // namespace torrent::app

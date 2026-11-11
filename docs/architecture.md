@@ -44,6 +44,19 @@ their DHT sockets can coexist. A job that reaches `Seeding` keeps its session an
 file ownership but releases its download slot. This distinction remains in place
 while the seed stops, so network cleanup does not occupy a download slot again.
 
+`NetworkSettings` validates the desktop's first port, per-torrent peer cap and
+DHT/PEX flags. The queue keeps these as defaults for future sessions. Existing
+entry configurations remain the settings actually used until that job starts
+again; changing defaults does not mutate an active worker's captured `Config`.
+New entries inherit the defaults, and restored entries use the preferences read
+from `config.json`. Before loading/restarting a job, the queue chooses a port
+pair that does not overlap other entries or sockets still being retired. It
+keeps the old pair reserved until startup publishes the new listening port or
+the worker finishes. A changed/disabled metadata DHT is destroyed on the task
+worker before constructing the new session; an unchanged DHT is reused.
+Preference writes also use a temporary file and atomic replacement, preserving
+the previous config when writing fails.
+
 Each running session owns a `PeerListener` on its advertised TCP port. The socket
 is bound before the first announce, and a separate worker accepts connections.
 Incoming handshakes run on bounded peer workers with a five-second total deadline;

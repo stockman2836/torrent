@@ -11,6 +11,7 @@
 #include "speed_limits.h"
 #include "seeding_dialog.h"
 #include "network_dialog.h"
+#include "network_settings_dialog.h"
 #include "torrent/core/logger.h"
 #include <algorithm>
 #include <filesystem>
@@ -63,7 +64,7 @@ std::wstring bytes(int64_t value) {
     return out.str();
 }
 enum Control { Source = 100, Browse, Read, Folder, ChooseFolder, Files, SelectAll, SelectNone,
-    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits, SeedSettings, NetworkDetails };
+    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits, SeedSettings, NetworkDetails, EditNetworkSettings };
 const wchar_t* priorityName(FilePriority value) {
     switch (value) {
     case FilePriority::High: return L"Высокий";
@@ -105,8 +106,8 @@ private:
     HWND title_, subtitle_, source_, browse_, read_, folderLabel_, folder_, choose_, files_,
         all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_,
         jobs_, jobsLabel_, remove_, limit_, limitLabel_, rateLabel_, downloadLabel_, uploadLabel_,
-        downloadLimit_, uploadLimit_, applyLimits_, seedSettings_, networkStatus_, networkDetails_;
-    bool detailsOpen_ = false;
+        downloadLimit_, uploadLimit_, applyLimits_, seedSettings_, networkStatus_, networkDetails_, networkSettings_;
+    bool dialogOpen_ = false;
     HFONT font_ = nullptr, heading_ = nullptr;
     std::shared_ptr<const std::vector<FileInfo>> displayed_;
     std::vector<FilePriority> priorities_;
@@ -135,6 +136,7 @@ private:
         title_ = control(L"STATIC", L"TorrentClient", SS_LEFT);
         SendMessageW(title_, WM_SETFONT, reinterpret_cast<WPARAM>(heading_), TRUE);
         subtitle_ = control(L"STATIC", L"Добавляйте торренты и управляйте загрузками в списке слева", SS_LEFT);
+        networkSettings_ = control(L"BUTTON", L"Настройки сети…", WS_TABSTOP, EditNetworkSettings);
         source_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Source);
         SendMessageW(source_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Путь к .torrent или magnet-ссылка"));
         browse_ = control(L"BUTTON", L"Открыть .torrent", WS_TABSTOP, Browse);
@@ -211,6 +213,7 @@ private:
         // File logging is optional; a logging failure must not prevent opening the app.
         try { Logger::init((home / L"desktop.log").u8string(), Logger::Level::OFF); } catch (...) {}
         SetWindowTextW(folder_, wide(config_.download_dir).c_str());
+        queue_.setNetworkSettings(NetworkSettings::fromConfig(config_));
         if (!listPath_.empty() && fs::exists(listPath_)) {
             try { queue_.restore(listPath_.u8string(), config_); }
             catch (const std::exception& error) {
@@ -237,7 +240,8 @@ private:
         RECT bounds{}; GetClientRect(handle, &bounds);
         const int w = bounds.right, h = bounds.bottom, m = 24, left = 328, bottom = h - 237;
         const auto move = [](HWND c, int x, int y, int width, int height) { MoveWindow(c, x, y, std::max(1, width), height, TRUE); };
-        move(title_, m, 18, w-48, 42); move(subtitle_, m, 66, w-48, 25);
+        move(title_, m, 18, w-280, 42); move(subtitle_, m, 66, w-48, 25);
+        move(networkSettings_, w-224, 25, 200, 34);
         move(source_, m, 107, w-320, 32); move(browse_, w-284, 106, 155, 34); move(read_, w-119, 106, 95, 34);
         move(jobsLabel_, m, 158, 280, 22); move(jobs_, m, 188, 280, h-370);
         move(limitLabel_, m, h-167, 280, 24); move(limit_, m, h-137, 90, 250);
@@ -354,6 +358,25 @@ private:
             saveEdits(); persist(); refresh();
         }
     }
+    void networkSettings() {
+        if (closing_ || dialogOpen_) return;
+        auto settings = NetworkSettings::fromConfig(config_);
+        dialogOpen_ = true;
+        bool accepted;
+        try { accepted = editNetworkSettings(handle, settings, queue_.snapshots().size(), smoke); }
+        catch (...) { dialogOpen_ = false; throw; }
+        dialogOpen_ = false;
+        if (smoke && !accepted) throw std::runtime_error("Network settings dialog did not save");
+        if (!accepted || closing_) return;
+        settings.validate(queue_.snapshots().size());
+        auto updated = config_;
+        settings.applyTo(updated);
+        if (!settings_.empty() && !updated.saveToFile(settings_.u8string()))
+            throw std::runtime_error(u8"Не удалось сохранить настройки сети");
+        queue_.setNetworkSettings(settings);
+        config_ = std::move(updated);
+        refresh();
+    }
     void populate(const DownloadSnapshot& snapshot, const Config& config) {
         filling_ = true;
         ListView_DeleteAllItems(files_);
@@ -375,16 +398,16 @@ private:
         filling_ = false;
     }
     void networkDetails() {
-        if (!current() || closing_ || detailsOpen_) return;
+        if (!current() || closing_ || dialogOpen_) return;
         const auto id = selected_;
-        detailsOpen_ = true;
+        dialogOpen_ = true;
         try {
             showNetworkDetails(handle, [this, id] {
                 for (const auto& entry : entries_) if (entry.id == id) return entry.download;
                 return DownloadSnapshot{};
             }, smoke);
-        } catch (...) { detailsOpen_ = false; throw; }
-        detailsOpen_ = false;
+        } catch (...) { dialogOpen_ = false; throw; }
+        dialogOpen_ = false;
     }
     void refresh() {
         if (dirty_) { dirty_ = false; saveEdits(); persist(); }
@@ -402,7 +425,7 @@ private:
             SetWindowTextW(uploadLimit_, wide(formatSpeedLimit(entry ? entry->config.max_upload_speed : 0)).c_str());
             populate(state, entry ? entry->config : config_);
         } else if (state.files != displayed_) populate(state, entry ? entry->config : config_);
-        for (HWND c : {source_, browse_, read_, limit_}) EnableWindow(c, !closing_);
+        for (HWND c : {source_, browse_, read_, limit_, networkSettings_}) EnableWindow(c, !closing_);
         for (HWND c : {folder_, choose_}) EnableWindow(c, editable());
         for (HWND c : {downloadLimit_, uploadLimit_, applyLimits_})
             EnableWindow(c, entry && !closing_ && !entry->removing && state.state != DownloadState::Stopping);
@@ -451,11 +474,15 @@ private:
         previous_ = state.state;
         if (closing_ && queue_.closed()) {
             DestroyWindow(handle);
-        } else if (smoke && !closing_ && !detailsOpen_) {
+        } else if (smoke && !closing_ && !dialogOpen_) {
             if (!smokeSecond.empty()) { smokeQueue(); return; }
             if (!busy && state.state == DownloadState::Ready && !smokeStarted_) {
                 if (ListView_GetItemCount(files_) == 0) { exitCode = 1; close(); }
-                else { smokeStarted_ = true; SendMessageW(handle, WM_COMMAND, Start, 0); }
+                else {
+                    smokeStarted_ = true;
+                    networkSettings();
+                    SendMessageW(handle, WM_COMMAND, Start, 0);
+                }
             } else if (!busy && state.state == DownloadState::Complete) { networkDetails(); close(); }
             else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
         }
@@ -467,6 +494,7 @@ private:
         if (!smokeStarted_) {
             if (entries_.size() != 2 || std::any_of(entries_.begin(), entries_.end(), [](const auto& entry) { return entry.busy; })) return;
             smokeStarted_ = true; // Command handlers refresh the window recursively.
+            networkSettings();
             SendMessageW(handle, WM_COMMAND, SeedSettings, 0);
             SetWindowTextW(downloadLimit_, L"32"); SetWindowTextW(uploadLimit_, L"16");
             SendMessageW(handle, WM_COMMAND, ApplyLimits, 0);
@@ -584,6 +612,7 @@ private:
             case Start: start(); break;
             case SeedSettings: seedingSettings(); break;
             case NetworkDetails: networkDetails(); break;
+            case EditNetworkSettings: networkSettings(); break;
             case ApplyLimits: applySpeedLimits(); refresh(); break;
             case Stop: queue_.stop(selected_); refresh(); break;
             case Remove: queue_.remove(selected_); persist(); refresh(); break;

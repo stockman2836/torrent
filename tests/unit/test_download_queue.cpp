@@ -70,6 +70,55 @@ TEST_F(DownloadQueueTest, EntriesHaveIndependentSettingsAndDuplicateSourcesAreSe
     EXPECT_EQ(entries[1].config.dht_port, entries[1].config.listen_port + 1);
 }
 
+TEST_F(DownloadQueueTest, NetworkDefaultsApplyOnNextStartAndToNewEntries) {
+    DownloadQueue queue;
+    const auto first = queue.add(torrent("first"), config);
+    queue.add(torrent("second"), config);
+    ASSERT_TRUE(ready(queue));
+    const auto original = queue.snapshots();
+    const NetworkSettings settings{26001, 12, false, false};
+    ASSERT_TRUE(queue.setNetworkSettings(settings));
+    EXPECT_EQ(queue.snapshots()[0].config.listen_port, original[0].config.listen_port);
+    EXPECT_EQ(queue.snapshots()[0].config.max_peers, original[0].config.max_peers);
+    ASSERT_TRUE(queue.enqueue(first));
+    ASSERT_TRUE(until(queue, [&] { return queue.snapshots()[0].download.state == DownloadState::Complete; }));
+    EXPECT_EQ(queue.snapshots()[0].config.listen_port, 26001);
+    EXPECT_EQ(queue.snapshots()[0].config.dht_port, 26002);
+    EXPECT_EQ(queue.snapshots()[0].config.max_peers, 12);
+    EXPECT_FALSE(queue.snapshots()[0].config.enable_pex);
+    EXPECT_EQ(queue.snapshots()[1].config.listen_port, original[1].config.listen_port);
+    queue.add(torrent("third"), config);
+    ASSERT_TRUE(ready(queue));
+    EXPECT_EQ(queue.snapshots()[2].config.listen_port, 26003);
+    EXPECT_EQ(queue.snapshots()[2].config.max_peers, 12);
+}
+
+TEST_F(DownloadQueueTest, InvalidNetworkSettingsLeaveTheQueueUnchanged) {
+    DownloadQueue queue;
+    queue.add(torrent("first"), config);
+    queue.add(torrent("second"), config);
+    ASSERT_TRUE(queue.setNetworkSettings({25001, 8, false, false}));
+    EXPECT_THROW(queue.setNetworkSettings({65534, 8, false, false}), std::invalid_argument);
+    EXPECT_THROW(queue.setNetworkSettings({25001, 0, false, false}), std::invalid_argument);
+    queue.add(torrent("third"), config);
+    EXPECT_EQ(queue.snapshots()[2].config.listen_port, 25001);
+    EXPECT_EQ(queue.snapshots()[2].config.max_peers, 8);
+    queue.close();
+    EXPECT_FALSE(queue.setNetworkSettings({24001, 8, false, false}));
+}
+
+TEST_F(DownloadQueueTest, RestoreRejectsAnInsufficientPortRangeBeforeLoadingEntries) {
+    DownloadQueue original;
+    original.add(torrent("first"), config);
+    original.add(torrent("second"), config);
+    const auto path = (directory / "list.json").u8string();
+    original.save(path);
+    DownloadQueue restored;
+    ASSERT_TRUE(restored.setNetworkSettings({65534, 8, false, false}));
+    EXPECT_THROW(restored.restore(path, config), std::invalid_argument);
+    EXPECT_TRUE(restored.snapshots().empty());
+}
+
 TEST_F(DownloadQueueTest, CancellingAWaitingEntryDoesNotStartIt) {
     DownloadQueue queue;
     const auto first = queue.add(torrent("first"), config);

@@ -19,6 +19,24 @@ BEGIN
     PUSHBUTTON "Отмена", IDCANCEL, 226, 151, 72, 20
 END
 
+IDD_NETWORK_SETTINGS DIALOGEX 0, 0, 350, 244
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Настройки сети"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Общие настройки для всех раздач", -1, 12, 12, 326, 16
+    LTEXT "Начальный порт подключений", -1, 12, 42, 210, 16
+    EDITTEXT IDC_NET_FIRST_PORT, 242, 39, 96, 20, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT "Максимум пиров на одну раздачу", -1, 12, 72, 220, 16
+    EDITTEXT IDC_NET_MAX_PEERS, 242, 69, 96, 20, ES_NUMBER | ES_AUTOHSCROLL
+    CONTROL "DHT — поиск пиров без трекера", IDC_NET_DHT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 101, 326, 18
+    CONTROL "PEX — обмен адресами между пирами", IDC_NET_PEX, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 126, 326, 18
+    LTEXT "Для нескольких раздач порты назначаются автоматически начиная с указанного. Фактический порт показан у раздачи.", -1, 12, 156, 326, 28
+    LTEXT "Изменения сохраняются и применяются при следующем запуске раздачи. Текущие подключения продолжают работу.", -1, 12, 189, 326, 27
+    DEFPUSHBUTTON "Сохранить", IDOK, 180, 222, 76, 18
+    PUSHBUTTON "Отмена", IDCANCEL, 264, 222, 74, 18
+END
+
 IDD_NETWORK DIALOGEX 0, 0, 640, 368
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Пиры и трекер"

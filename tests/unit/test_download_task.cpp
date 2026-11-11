@@ -86,6 +86,21 @@ TEST_F(DownloadTaskTest, ConfigurationRoundTripsUnicodePath) {
     EXPECT_EQ(loaded.download_dir, config.download_dir);
 }
 
+TEST_F(DownloadTaskTest, FailedPreferencesWritePreservesThePreviousFile) {
+    const auto path = directory / fs::u8path(u8"настройки.json");
+    ASSERT_TRUE(config.saveToFile(path.u8string()));
+    auto staging = path; staging += ".tmp";
+    fs::create_directory(staging); // Prevent creating the replacement without locking a user file.
+    auto changed = config;
+    changed.listen_port = 24501;
+    changed.max_peers = 17;
+    EXPECT_FALSE(changed.saveToFile(path.u8string()));
+    Config restored;
+    ASSERT_TRUE(restored.loadFromFile(path.u8string()));
+    EXPECT_EQ(restored.listen_port, config.listen_port);
+    EXPECT_EQ(restored.max_peers, config.max_peers);
+}
+
 TEST_F(DownloadTaskTest, EmptyTorrentCannotRemainSeeding) {
     DownloadTask task;
     config.seed_after_download = true;

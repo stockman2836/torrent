@@ -214,8 +214,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 118 CTest suites/scenarios, or 119
-when the OpenSSL executable is available: 111 ordinary checks, an optional local
+Both independent-client options enabled yield 121 CTest suites/scenarios, or 122
+when the OpenSSL executable is available: 114 ordinary checks, an optional local
 TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -241,6 +241,32 @@ ctest --test-dir build -R test_network_status --output-on-failure
 
 The native-window smoke checks also open and close the network-details dialog
 after a completed transfer. They continue using isolated local fixtures.
+
+## Saved network settings
+
+`test_network_settings` validates integer input, port and peer-limit boundaries,
+port-pair capacity and preservation of unrelated configuration values. Queue unit
+checks verify that defaults apply on restart and to new jobs, invalid settings
+leave defaults unchanged, and insufficient saved port ranges fail before restoring
+any entries. `test_download_task` also verifies that a failed staged preferences
+write preserves the previous Unicode-named config.
+
+`test_network_settings_apply` keeps one transfer running while changing defaults,
+starts another with the new port/DHT/PEX/peer cap, verifies its PEX handshake and
+enforced incoming connection cap, then resumes and restores both jobs. It compares
+the final payloads and checks that restoring the list does not start downloads.
+`test_network_settings_magnet` loads metadata on a local DHT, changes its port and
+later disables DHT before starting again. Real UDP probes verify that old metadata
+sockets are released and that disabled DHT does not bind a replacement socket.
+Both scenarios save and read preferences using the ordinary Config API.
+
+```sh
+ctest --test-dir build -R "test_network_settings|test_download_queue|test_download_task" --output-on-failure
+```
+
+Native-window smoke checks open and save the network-settings dialog before
+starting downloads. Their fixtures keep public discovery disabled and leave
+the user's preferences untouched.
 
 ## Portable distribution
 
