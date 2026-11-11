@@ -235,3 +235,7 @@ copy limits and preserving shared partial data after a disconnect. See
 [endgame policy](docs/protocols/ENDGAME.md) for thresholds and ownership rules.
 
 See [test documentation](tests/README.md) for details and limitations.
+
+Real public torrents are checked separately with a time-limited desktop-controller
+driver and independent piece/ISO verification. See the
+[manual public-swarm procedure and evidence](docs/PUBLIC_SWARMS.md).

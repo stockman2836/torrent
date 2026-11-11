@@ -43,8 +43,9 @@ Reference: qBittorrent 4.6.2 with libtorrent 1.2.19 on Windows. All five
 interoperability scenarios pass. The tests are opt-in and do not replace the
 ordinary offline regression suite.
 
-This stage covers plaintext TCP and tracker-based discovery. Public swarms,
-encryption and metadata serving by our client require separate evidence.
+This optional suite covers local plaintext TCP and tracker-based discovery.
+Public-swarm evidence is recorded separately below. Encryption and metadata
+serving by our client require separate verification.
 
 ## Verified: trackerless magnets
 
@@ -54,7 +55,23 @@ encryption and metadata serving by our client require separate evidence.
 
 Reference: bittorrent-dht 11.0.12 on a private loopback DHT. A separate check
 downloads metadata and payload from qBittorrent through this DHT without a
-tracker in the magnet. Public DHT/swarm behavior remains to be validated.
+tracker in the magnet. Public DHT metadata resolution is checked below.
+
+## Verified: public-swarm smoke checks
+
+- [x] Download an official image from public peers with web seeds disabled.
+- [x] Stop, independently verify saved pieces and resume to completion.
+- [x] Match every final piece hash and the official whole-image SHA256.
+- [x] Resolve public magnet metadata through both a tracker and trackerless DHT.
+- [x] Keep time-limited manual runs and their reports separate from CTest.
+
+On 2026-11-11, Debian 13.7.0 armhf netinst completed all 939,831,296 bytes after
+stopping at 796 saved pieces. All 3,586 piece hashes and the official image
+SHA256 matched. Trackerless metadata resolution used the public IPv4 DHT.
+See [repeatable procedure and evidence](PUBLIC_SWARMS.md).
+
+This covers one public swarm on the current Windows machine. Longer operation,
+encrypted/uTP transfers and other network environments still need validation.
 
 ## Desktop distribution
 

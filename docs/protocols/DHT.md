@@ -85,6 +85,8 @@ in both implementations. With the qBittorrent fixture enabled, another discovers
 qBittorrent through this DHT, obtains metadata from a magnet without `tr`, and
 verifies the complete multi-file payload. See [test setup](../../tests/README.md#dht-interoperability).
 
-This verifies a local IPv4 DHT and TCP transfer path. Public-swarm behavior, IPv6
-DHT, node-ID enforcement extensions and persistent routing tables remain separate
-work. Routing and peer storage are in memory for the lifetime of a job.
+The automated suite verifies a local IPv4 DHT and TCP transfer path. A separate
+[manual public-swarm run](../PUBLIC_SWARMS.md) also resolved Debian metadata from
+a trackerless magnet through public IPv4 DHT. IPv6 DHT, node-ID enforcement
+extensions and persistent routing tables remain separate work. Routing and peer
+storage are in memory for the lifetime of a job.

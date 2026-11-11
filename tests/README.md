@@ -234,3 +234,11 @@ It does not modify the user's certificate stores.
 `test_portable.cjs` checks a completed Release ZIP and runs the extracted native
 window with only system directories on PATH. It verifies actual downloads and
 uploads through local fixtures. See [distribution checks](../docs/DISTRIBUTION.md#verify-the-archive).
+
+## Manual public-network checks
+
+`public_swarm_driver` is built with the tests but never registered with CTest.
+It runs the desktop controller with a time budget, records progress and stops
+cleanly for resume. `verify_public_download.cjs` independently checks saved piece
+hashes and an optional official image SHA256.
+See [commands and recorded evidence](../docs/PUBLIC_SWARMS.md).

@@ -45,6 +45,11 @@ set_tests_properties(test_bencode test_torrent_file test_piece_manager test_file
     test_extension_protocol test_metadata_exchange
     test_file_selection
     PROPERTIES TIMEOUT 30)
+
+# Explicit manual runs only: public swarms are not deterministic regression tests.
+add_executable(public_swarm_driver integration/public_swarm_driver.cpp)
+target_link_libraries(public_swarm_driver PRIVATE torrent_app nlohmann_json::nlohmann_json)
+
 find_program(NODE_EXECUTABLE NAMES node)
 set(INTEROP_QBITTORRENT_EXECUTABLE "" CACHE FILEPATH
     "Optional qBittorrent 4.6.x executable for isolated interoperability tests")
