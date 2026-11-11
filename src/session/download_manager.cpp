@@ -61,6 +61,8 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
         torrent_.infoHash(),
         peer_id_
     );
+    tracker_status_.url = torrent_.announce();
+    tracker_status_.state = tracker_client_ ? TrackerState::Waiting : TrackerState::None;
 
     // Use existing DHT or create new one
     if (existing_dht) {
@@ -127,9 +129,6 @@ void DownloadManager::start() {
         listen_port_ = listener_->port();
     } catch (...) { running_ = false; throw; }
     listener_thread_ = std::thread(&DownloadManager::incomingLoop, this);
-
-    std::cout << "Contacting tracker...\n";
-    updateTracker();
 
     // Start DHT if enabled
     if (enable_dht_ && dht_manager_) {
@@ -212,17 +211,6 @@ void DownloadManager::stop() {
     if (listener_thread_.joinable()) listener_thread_.join();
     listener_.reset();
 
-    // Notify tracker we're stopping
-    int64_t left = bytesRemaining();
-    if (tracker_client_ && !first_announce_) tracker_client_->announce(
-        total_uploaded_,
-        total_downloaded_,
-        left,
-        listen_port_,
-        "stopped"
-    );
-
-
     // Stop DHT
     if (enable_dht_ && dht_manager_) {
         std::cout << "Stopping DHT...\n";
@@ -255,6 +243,10 @@ void DownloadManager::stop() {
     }
 
     worker_threads_.clear();
+    // The initial announce now runs on the tracker worker. Join all announce
+    // callers before sending stopped, so it cannot precede a delayed started.
+    if (tracker_client_ && !first_announce_) tracker_client_->announce(
+        total_uploaded_, total_downloaded_, bytesRemaining(), listen_port_, "stopped");
     for (auto& worker : peer_threads_) {
         if (worker.thread.joinable()) worker.thread.join();
     }
@@ -266,6 +258,8 @@ void DownloadManager::stop() {
     {
         std::lock_guard<std::mutex> lock(peers_mutex_);
         active_peers_.clear();
+        connecting_peers_.clear();
+        available_peers_.clear();
     }
 
     std::cout << "Client stopped.\n";
@@ -351,7 +345,7 @@ void DownloadManager::downloadLoop() {
 void DownloadManager::beginSeeding() {
     if (!canSeed() || seeding_mode_.exchange(true) || complete_at_start_ || !tracker_client_) return;
     try {
-        const auto response = tracker_client_->announce(total_uploaded_, total_downloaded_, 0, listen_port_, "completed");
+        const auto response = announceTracker("completed");
         if (!response.isSuccess()) std::cerr << "Failed to announce completion: " << response.failure_reason << '\n';
     } catch (const std::exception& error) {
         std::cerr << "Completion announce failed: " << error.what() << '\n';

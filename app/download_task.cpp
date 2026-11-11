@@ -6,6 +6,16 @@
 
 namespace torrent::app {
 
+namespace {
+NetworkStatus initialNetworkStatus(const TorrentFile& torrent, const Config& config) {
+    NetworkStatus result;
+    result.dht_enabled = config.enable_dht;
+    result.tracker.url = torrent.announce();
+    result.tracker.state = result.tracker.url.empty() ? TrackerState::None : TrackerState::Waiting;
+    return result;
+}
+}
+
 DownloadTask::~DownloadTask() { stop(); wait(); }
 
 void DownloadTask::wait() {
@@ -33,6 +43,8 @@ void DownloadTask::fail(const std::exception& error) {
     snapshot_.state = cancelled_ ? DownloadState::Stopped : DownloadState::Failed;
     if (!cancelled_) snapshot_.error = error.what();
     snapshot_.download_speed = snapshot_.upload_speed = 0;
+    snapshot_.network.peers.clear();
+    snapshot_.network.queued_peers = 0;
 }
 
 bool DownloadTask::load(const std::string& source, Config config) {
@@ -46,6 +58,7 @@ bool DownloadTask::load(const std::string& source, Config config) {
         snapshot_.can_seed = false;
         snapshot_.uploaded_bytes = snapshot_.seed_seconds = 0;
         snapshot_.seed_ratio = 0;
+        snapshot_.network = {};
     }
     worker_ = std::thread([this, source, config] {
         try {
@@ -57,6 +70,7 @@ bool DownloadTask::load(const std::string& source, Config config) {
                 snapshot_.name = input->torrent.name();
                 snapshot_.info_hash = utils::toHex(input->torrent.infoHash());
                 snapshot_.files = std::move(files);
+                snapshot_.network = initialNetworkStatus(input->torrent, config);
                 input_ = std::move(input);
                 snapshot_.state = cancelled_ ? DownloadState::Stopped : DownloadState::Ready;
             } else {
@@ -82,6 +96,7 @@ bool DownloadTask::start(Config config) {
         snapshot_.uploaded_bytes = snapshot_.seed_seconds = 0;
         snapshot_.seed_ratio = 0;
         snapshot_.listen_port = 0;
+        snapshot_.network = initialNetworkStatus(input_->torrent, config);
     }
     worker_ = std::thread([this, config] {
         try {
@@ -91,6 +106,7 @@ bool DownloadTask::start(Config config) {
             if (!cancelled_) manager.start();
             while (!cancelled_ && manager.isRunning()) {
                 const double progress = manager.progress();
+                auto network = manager.networkStatus();
                 const bool can_seed = progress >= 100 && manager.canSeed();
                 const auto now = std::chrono::steady_clock::now();
                 if (can_seed && !seed_started) {
@@ -106,6 +122,7 @@ bool DownloadTask::start(Config config) {
                         manager.setSpeedLimits(download_limit, upload_limit);
                     }
                     snapshot_.progress = progress;
+                    snapshot_.network = std::move(network);
                     snapshot_.download_speed = can_seed ? 0 : manager.downloadSpeed();
                     snapshot_.upload_speed = manager.uploadSpeed();
                     snapshot_.uploaded_bytes = manager.uploadedBytes();
@@ -126,7 +143,9 @@ bool DownloadTask::start(Config config) {
                 snapshot_.progress = progress;
             }
             manager.stop();
+            auto network = manager.networkStatus();
             std::lock_guard<std::mutex> lock(mutex_);
+            snapshot_.network = std::move(network);
             snapshot_.state = progress >= 100 ? DownloadState::Complete : DownloadState::Stopped;
             snapshot_.uploaded_bytes = manager.uploadedBytes();
             snapshot_.seed_ratio = input_->torrent.totalLength() > 0

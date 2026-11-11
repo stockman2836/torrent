@@ -2,6 +2,7 @@
 
 #include "input.h"
 #include "seeding_options.h"
+#include "torrent/session/network_status.h"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -25,6 +26,7 @@ struct DownloadSnapshot {
     double seed_ratio = 0;
     bool can_seed = false;
     uint16_t listen_port = 0;
+    NetworkStatus network;
 };
 
 // Commands are issued by one UI thread. The engine belongs exclusively to the worker.

@@ -4,10 +4,10 @@
 
 namespace torrent {
 
-void DownloadManager::receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data) {
-    if (!download_limiter_.waitAndConsume(data.size(), [this] { return !running_.load(); })) return;
+bool DownloadManager::receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data) {
+    if (!download_limiter_.waitAndConsume(data.size(), [this] { return !running_.load(); })) return false;
     const auto result = piece_manager_->receiveBlock(index, offset, data, file_manager_.get());
-    if (result == PieceManager::BlockResult::Rejected) return;
+    if (result == PieceManager::BlockResult::Rejected) return false;
     total_downloaded_ += data.size();
     download_tracker_.addBytes(data.size());
     {
@@ -29,6 +29,7 @@ void DownloadManager::receiveBlock(uint32_t index, uint32_t offset, const std::v
         }
     }
     if (result == PieceManager::BlockResult::Complete) broadcastHave(index);
+    return true;
 }
 
 void DownloadManager::flushPeerCommands(ActivePeerInfo& peer) {

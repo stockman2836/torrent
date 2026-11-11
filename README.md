@@ -8,7 +8,8 @@ Fast Extension, IPv6, local discovery, web seeds and optional uTP.
 Automated integration tests cover TCP transfers, tracker-based magnets and the
 desktop controller. Optional checks exchange files with an independently
 installed qBittorrent and an independent DHT implementation. Trackerless magnets
-are covered locally; public swarms and other protocols need broader testing.
+are covered locally and in a manual public-swarm run; other protocols and network
+environments need broader testing.
 
 ## Project structure
 
@@ -118,6 +119,16 @@ torrent is downloading or waiting in the queue. Starting a torrent also applies
 the values currently entered in its fields. Applied limits are saved with the
 download list and restored independently for each torrent. Limits apply to
 payload data; short bursts and protocol traffic can exceed the displayed value.
+
+The network status line explains whether the selected torrent is contacting its
+tracker, connecting to peers, waiting for permission to download or waiting for
+requested blocks. Click **Peers and tracker** to see live IPv4/IPv6 addresses,
+incoming/outgoing direction, connection stage, per-peer payload byte totals and
+pending requests. The dialog also shows queued peer addresses, known DHT nodes,
+failed connection attempts and the active tracker's last response/error. Counts
+belong to the current session; stopped jobs retain the last tracker result, and
+restarting resets the session counters. Only the tracker actually queried by the
+engine is shown; this does not add fallback across a torrent's entire tracker list.
 
 Click **Seeding** for a torrent to continue sharing after it finishes. Set a ratio
 limit and a whole number of hours; `0` disables that limit. The first reached

@@ -214,8 +214,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 114 CTest suites/scenarios, or 115
-when the OpenSSL executable is available: 107 ordinary checks, an optional local
+Both independent-client options enabled yield 118 CTest suites/scenarios, or 119
+when the OpenSSL executable is available: 111 ordinary checks, an optional local
 TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -223,6 +223,24 @@ on the build directory. No public tracker or DHT router participates in these te
 TCP fixtures keep exclusive port-range leases until exit, in addition to probing
 the ports before starting a child. This prevents parallel fixtures from claiming
 the next torrent's port between that probe and its listener startup.
+
+## Live network diagnostics
+
+`test_network_status_*` checks the desktop controller's synchronized snapshots
+against local HTTP/TCP/UDP fixtures. The transfer case observes outgoing and
+incoming handshakes, choke state, pending requests, actual downloaded/uploaded
+bytes, failed connections and removal after disconnect. It then stops and
+resumes the verified payload. Other cases cover an initial tracker response
+that is still pending, tracker errors and recovery, an empty peer list,
+trackerless sessions and DHT node counts. Stopping retains the useful tracker
+error; reloading clears it. These tests require no public network.
+
+```sh
+ctest --test-dir build -R test_network_status --output-on-failure
+```
+
+The native-window smoke checks also open and close the network-details dialog
+after a completed transfer. They continue using isolated local fixtures.
 
 ## Portable distribution
 

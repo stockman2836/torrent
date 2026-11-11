@@ -20,11 +20,12 @@ code; prefer small concrete modules and keep network work off the window thread.
 - [x] Live per-torrent upload and download limits.
 - [x] Optional seeding with ratio and time limits.
 - [x] Incoming IPv4/IPv6 TCP peers with handshake deadlines, a peer cap and verified uploads.
+- [x] Live peer connections, transfer totals, tracker responses/errors and waiting hints in the desktop.
 - [x] Offline tracker/peer regression tests for transfers and application lifecycle.
 
 Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
-coverage. The ordinary suite currently has fifteen unit suites and ninety-two
+coverage. The ordinary suite currently has fifteen unit suites and ninety-six
 offline integration scenarios, plus a certificate check when the OpenSSL tool
 is available. See [tests](../tests/README.md) for verification.
 
@@ -88,7 +89,7 @@ encrypted/uTP transfers and other network environments still need validation.
 - Serve verified magnet metadata to peers.
 - Change file priorities during an active download.
 - Global speed limits in addition to the existing per-torrent limits.
-- Better peer/tracker statistics and diagnostics in the desktop interface.
+- Tracker-list fallback and richer peer statistics beyond the active tracker and current connections.
 - Windows and POSIX CI plus broader protocol and encryption checks.
 - Profile disk I/O and memory usage before adding caches or tuning performance.
 

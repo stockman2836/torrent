@@ -61,6 +61,17 @@ session's peer mutex. Stop cancels handshakes and transfers, joins the accept wo
 closes the listener and drains existing incoming connections with a bounded wait.
 
 Each task exposes an immutable file list plus a synchronized status snapshot.
+The snapshot also contains copied peer and tracker diagnostics. `network_status.cpp`
+reads session-owned peer fields under the peer mutex; it never reads another
+worker's mutable socket/protocol state. Peer workers publish choke state and
+accepted byte totals under that same mutex. The application worker copies the
+result into `DownloadSnapshot`, so the desktop never accesses a live session.
+Initial tracker announces run on the tracker worker, allowing the application to
+publish startup diagnostics while a response is pending. Announce calls are
+serialized, and shutdown joins announce workers before sending `stopped`.
+The final snapshot clears active peers while retaining the last useful tracker
+response/error. Starting or loading a job resets its session diagnostics.
+
 One background worker exclusively
 owns input resolution and the download session. Start, stop and close never join
 network workers on the window thread. Stop persists verified pieces; continuing
@@ -153,6 +164,7 @@ The coordinator's implementation is divided by responsibility:
 - `transfer.cpp`: block acceptance, completion and remaining byte counts.
 - `scheduling.cpp`: piece assignment, selection and stale-peer cleanup.
 - `tracker.cpp`: announces and tracker refreshes.
+- `network_status.cpp`: synchronized value snapshots of peer/tracker diagnostics.
 - `resume.cpp`: state persistence and verification after restart.
 - `discovery.cpp`: DHT, PEX, LSD, web seeds and uTP integration.
 - `magnet_download_manager.cpp`: metadata acquisition before piece downloading.

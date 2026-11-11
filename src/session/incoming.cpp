@@ -18,6 +18,7 @@ void DownloadManager::incomingLoop() {
             if (!running_ || active_peers_.size() >= max_peers_) continue;
             auto peer = std::make_shared<ActivePeerInfo>(std::move(connection), remote);
             peer->handshaking = true;
+            peer->incoming = true;
             active_peers_.push_back(peer);
             peer_threads_.push_back({peer, std::thread([this, peer] {
                 try {
@@ -38,6 +39,11 @@ void DownloadManager::incomingLoop() {
                 peer->connection->disconnect();
                 std::lock_guard<std::mutex> lock(peers_mutex_);
                 peer->finished = true;
+                if (running_) {
+                    ++failed_connections_;
+                    last_peer_error_ = peer->peer_data.ip + ":" + std::to_string(peer->peer_data.port) +
+                        u8" — Не удалось принять приветствие BitTorrent";
+                }
             })});
         } catch (const std::exception& error) { LOG_WARN("Accepting peer failed: {}", error.what()); }
     }

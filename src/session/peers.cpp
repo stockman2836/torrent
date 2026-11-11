@@ -89,6 +89,7 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
             std::lock_guard<std::mutex> lock(peers_mutex_);
             peer_info->last_activity = last_activity;
             peer_info->available_pieces = conn_ptr->peerBitfield();
+            peer_info->is_choking = conn_ptr->peerChoking();
         }
 
         // Check if we're interested in this peer
@@ -121,7 +122,10 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                 // Late responses to cancelled requests must not alter assembly or statistics.
                 if (!requested) continue;
                 if (!valid_size) break;
-                receiveBlock(block.piece_index, block.offset, block.data);
+                if (receiveBlock(block.piece_index, block.offset, block.data)) {
+                    std::lock_guard<std::mutex> lock(peers_mutex_);
+                    peer_info->bytes_downloaded += block.data.size();
+                }
             }
         }
         if (message->type == MessageType::CHOKE) releasePeerPiece(*peer_info);
@@ -277,15 +281,33 @@ void DownloadManager::connectToPeers() {
         );
 
         connection->setCancellationCallback([this] { return !running_; });
+        {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            connecting_peers_ = {{peer.ip, peer.port, PeerState::Connecting}};
+        }
+        const auto failed = [&](const char* reason) {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            connecting_peers_.clear();
+            if (running_) {
+                ++failed_connections_;
+                last_peer_error_ = peer.ip + ":" + std::to_string(peer.port) + " — " + reason;
+            }
+        };
         if (!connection->connect()) {
+            failed(u8"Не удалось установить TCP-соединение");
             std::cerr << "Failed to connect to " << peer.ip << "\n";
             continue;
         }
 
         connection->initializePeerBitfield(torrent_.numPieces());
+        {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            connecting_peers_.front().state = PeerState::Handshaking;
+        }
 
         std::vector<bool> our_bitfield = piece_manager_->getBitfield();
         if (!connection->performHandshake(our_bitfield)) {
+            failed(u8"Не удалось завершить обмен приветствиями BitTorrent");
             std::cerr << "Failed handshake with " << peer.ip << "\n";
             continue;
         }
@@ -304,6 +326,7 @@ void DownloadManager::connectToPeers() {
 
         // Add to active peers
         std::lock_guard<std::mutex> lock(peers_mutex_);
+        connecting_peers_.clear();
         if (!running_ || active_peers_.size() >= max_peers_) continue;
         auto peer_info = std::make_shared<ActivePeerInfo>(std::move(connection), peer);
         active_peers_.push_back(peer_info);

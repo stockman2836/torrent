@@ -2,6 +2,7 @@
 
 #include "torrent/metainfo/torrent_file.h"
 #include "torrent/core/config.h"
+#include "torrent/session/network_status.h"
 #include "torrent/network/tracker/tracker_client.h"
 #include "torrent/network/peer/peer_connection.h"
 #include "torrent/storage/piece_manager.h"
@@ -45,6 +46,7 @@ public:
     int64_t uploadSpeed() const;
     int64_t uploadedBytes() const { return total_uploaded_.load(); }
     uint16_t listenPort() const { return listen_port_; }
+    NetworkStatus networkStatus() const;
     bool canSeed() const;
     void beginSeeding();
 
@@ -68,6 +70,7 @@ private:
 
     void connectToPeers();
     void updateTracker();
+    TrackerResponse announceTracker(const std::string& event);
     void updateDHT();   // Get peers from DHT
     void updatePEX();   // Exchange peers via PEX
     void updateWebSeeds();  // Download from web seeds
@@ -84,7 +87,7 @@ private:
     void requestEndgameBlock(ActivePeerInfo& peer); // Caller holds peers_mutex_.
     void flushPeerCommands(ActivePeerInfo& peer);
     void releasePeerPiece(ActivePeerInfo& peer);
-    void receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data);
+    bool receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data);
     int64_t bytesRemaining() const;
     void cleanupStalePeers();
     int32_t selectNextPiece(ActivePeerInfo* peer);
@@ -109,6 +112,11 @@ private:
     std::vector<std::shared_ptr<ActivePeerInfo>> active_peers_;
     mutable std::mutex peers_mutex_;
     std::mutex connect_mutex_;
+    std::mutex tracker_mutex_;
+    TrackerStatus tracker_status_; // Protected by peers_mutex_, like peer diagnostics.
+    std::vector<PeerStatus> connecting_peers_;
+    size_t failed_connections_ = 0;
+    std::string last_peer_error_;
 
     // Piece tracking
     std::set<uint32_t> pieces_in_download_;  // Pieces currently being downloaded
@@ -143,7 +151,6 @@ private:
     // Tracker state
     bool first_announce_ = true;
     bool complete_at_start_ = false;
-    int tracker_failures_ = 0;
 
     // Speed limiting and tracking
     utils::TokenBucket download_limiter_;

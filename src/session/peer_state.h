@@ -33,6 +33,7 @@ struct ActivePeerInfo {
     std::vector<bool> available_pieces;
     bool finished = false;
     bool handshaking = false;
+    bool incoming = false;
     std::map<BlockKey, PendingBlock> pending_blocks;
     std::vector<Block> pending_cancels;
     std::vector<uint32_t> pending_haves;

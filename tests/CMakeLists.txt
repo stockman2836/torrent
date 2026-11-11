@@ -55,6 +55,13 @@ set(INTEROP_QBITTORRENT_EXECUTABLE "" CACHE FILEPATH
     "Optional qBittorrent 4.6.x executable for isolated interoperability tests")
 option(ENABLE_DHT_INTEROP_TESTS "Run local tests against the optional bittorrent-dht npm dependency" OFF)
 if(NODE_EXECUTABLE)
+    add_executable(network_status_driver integration/network_status_driver.cpp)
+    target_link_libraries(network_status_driver PRIVATE torrent_app nlohmann_json::nlohmann_json)
+    foreach(scenario transfer error none dht)
+        add_test(NAME test_network_status_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_network_status.cjs" "$<TARGET_FILE:network_status_driver>" ${scenario})
+        set_tests_properties(test_network_status_${scenario} PROPERTIES TIMEOUT 30)
+    endforeach()
     find_program(OPENSSL_PROGRAM NAMES openssl)
     if(OPENSSL_PROGRAM)
         add_executable(tracker_tls_driver integration/tracker_tls_driver.cpp)

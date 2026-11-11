@@ -10,6 +10,7 @@
 #include "download_queue.h"
 #include "speed_limits.h"
 #include "seeding_dialog.h"
+#include "network_dialog.h"
 #include "torrent/core/logger.h"
 #include <algorithm>
 #include <filesystem>
@@ -62,7 +63,7 @@ std::wstring bytes(int64_t value) {
     return out.str();
 }
 enum Control { Source = 100, Browse, Read, Folder, ChooseFolder, Files, SelectAll, SelectNone,
-    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits, SeedSettings };
+    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits, SeedSettings, NetworkDetails };
 const wchar_t* priorityName(FilePriority value) {
     switch (value) {
     case FilePriority::High: return L"Высокий";
@@ -104,7 +105,8 @@ private:
     HWND title_, subtitle_, source_, browse_, read_, folderLabel_, folder_, choose_, files_,
         all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_,
         jobs_, jobsLabel_, remove_, limit_, limitLabel_, rateLabel_, downloadLabel_, uploadLabel_,
-        downloadLimit_, uploadLimit_, applyLimits_, seedSettings_;
+        downloadLimit_, uploadLimit_, applyLimits_, seedSettings_, networkStatus_, networkDetails_;
+    bool detailsOpen_ = false;
     HFONT font_ = nullptr, heading_ = nullptr;
     std::shared_ptr<const std::vector<FileInfo>> displayed_;
     std::vector<FilePriority> priorities_;
@@ -188,6 +190,8 @@ private:
         start_ = control(L"BUTTON", L"Скачать", WS_TABSTOP | BS_DEFPUSHBUTTON, Start);
         stop_ = control(L"BUTTON", L"Остановить", WS_TABSTOP, Stop);
         seedSettings_ = control(L"BUTTON", L"Раздача…", WS_TABSTOP, SeedSettings);
+        networkStatus_ = control(L"STATIC", L"", SS_LEFT | SS_ENDELLIPSIS);
+        networkDetails_ = control(L"BUTTON", L"Пиры и трекер…", WS_TABSTOP, NetworkDetails);
         open_ = control(L"BUTTON", L"Открыть папку", WS_TABSTOP, OpenFolder);
         auto home = knownFolder(FOLDERID_LocalAppData) / L"TorrentClient";
         fs::create_directories(home);
@@ -231,7 +235,7 @@ private:
     void layout() {
         if (!font_) return;
         RECT bounds{}; GetClientRect(handle, &bounds);
-        const int w = bounds.right, h = bounds.bottom, m = 24, left = 328, bottom = h - 205;
+        const int w = bounds.right, h = bounds.bottom, m = 24, left = 328, bottom = h - 237;
         const auto move = [](HWND c, int x, int y, int width, int height) { MoveWindow(c, x, y, std::max(1, width), height, TRUE); };
         move(title_, m, 18, w-48, 42); move(subtitle_, m, 66, w-48, 25);
         move(source_, m, 107, w-320, 32); move(browse_, w-284, 106, 155, 34); move(read_, w-119, 106, 95, 34);
@@ -249,6 +253,8 @@ private:
         move(priority_, w-403, bottom+12, 125, 240); move(apply_, w-268, bottom+11, 244, 34);
         move(summary_, left, bottom+56, w-left-24, 23); move(progress_, left, bottom+85, w-left-24, 17);
         move(status_, left, bottom+112, w-left-275, 25); move(speeds_, w-270, bottom+112, 246, 25);
+        move(networkStatus_, left, bottom+149, w-left-209, 25);
+        move(networkDetails_, w-204, bottom+141, 180, 32);
         move(start_, left, h-53, 150, 34); move(stop_, left+162, h-53, 140, 34); move(open_, w-184, h-53, 160, 34);
         move(seedSettings_, left+314, h-53, 140, 34);
     }
@@ -368,6 +374,18 @@ private:
         }
         filling_ = false;
     }
+    void networkDetails() {
+        if (!current() || closing_ || detailsOpen_) return;
+        const auto id = selected_;
+        detailsOpen_ = true;
+        try {
+            showNetworkDetails(handle, [this, id] {
+                for (const auto& entry : entries_) if (entry.id == id) return entry.download;
+                return DownloadSnapshot{};
+            }, smoke);
+        } catch (...) { detailsOpen_ = false; throw; }
+        detailsOpen_ = false;
+    }
     void refresh() {
         if (dirty_) { dirty_ = false; saveEdits(); persist(); }
         queue_.tick();
@@ -394,6 +412,8 @@ private:
         EnableWindow(remove_, entry && !entry->removing && !closing_);
         EnableWindow(seedSettings_, entry && !entry->removing && !closing_ && state.state != DownloadState::Stopping);
         EnableWindow(open_, entry && !text(folder_).empty());
+        EnableWindow(networkDetails_, entry && !closing_);
+        SetWindowTextW(networkStatus_, entry ? networkHint(state).c_str() : L"");
         SetWindowTextW(start_, state.state == DownloadState::Stopped ? L"Продолжить" : L"Скачать");
         if (entry && state.can_seed && entry->config.seed_after_download) SetWindowTextW(start_, L"Раздавать");
         const wchar_t* label = L"Готов к работе";
@@ -431,12 +451,12 @@ private:
         previous_ = state.state;
         if (closing_ && queue_.closed()) {
             DestroyWindow(handle);
-        } else if (smoke && !closing_) {
+        } else if (smoke && !closing_ && !detailsOpen_) {
             if (!smokeSecond.empty()) { smokeQueue(); return; }
             if (!busy && state.state == DownloadState::Ready && !smokeStarted_) {
                 if (ListView_GetItemCount(files_) == 0) { exitCode = 1; close(); }
                 else { smokeStarted_ = true; SendMessageW(handle, WM_COMMAND, Start, 0); }
-            } else if (!busy && state.state == DownloadState::Complete) close();
+            } else if (!busy && state.state == DownloadState::Complete) { networkDetails(); close(); }
             else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
         }
     }
@@ -470,7 +490,7 @@ private:
             }
         } else if (std::all_of(entries_.begin(), entries_.end(), [](const auto& entry) {
             return !entry.busy && entry.download.state == DownloadState::Complete;
-        })) close();
+        })) { networkDetails(); close(); }
     }
     const wchar_t* jobState(const QueueSnapshot& entry) const {
         if (entry.removing) return L"Удаление";
@@ -563,6 +583,7 @@ private:
             case ChooseFolder: chooseFolder(); break;
             case Start: start(); break;
             case SeedSettings: seedingSettings(); break;
+            case NetworkDetails: networkDetails(); break;
             case ApplyLimits: applySpeedLimits(); refresh(); break;
             case Stop: queue_.stop(selected_); refresh(); break;
             case Remove: queue_.remove(selected_); persist(); refresh(); break;
