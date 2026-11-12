@@ -28,7 +28,8 @@ async function main() {
   const executable = path.resolve(process.argv[2]);
   const globalUI = process.argv[3] === '--desktop-global-ui';
   const fallbackUI = process.argv[3] === '--desktop-fallback-ui';
-  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI || fallbackUI;
+  const networkUI = process.argv[3] === '--desktop-network-ui';
+  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI || fallbackUI || networkUI;
   const work = fs.mkdtempSync(path.join(process.cwd(), 'download-test-'));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; i++) data[i] = (i * 37 + 11) % 256;
@@ -37,6 +38,7 @@ async function main() {
     pieces: Buffer.concat([sha1(data.subarray(0, pieceLength)), sha1(data.subarray(pieceLength))]) };
   const infoHash = sha1(encode(info));
   const sockets = new Set();
+  const timers = new Set();
   let requests = 0;
   let protocolError;
   const announces = [];
@@ -74,7 +76,11 @@ async function main() {
           const start = index * pieceLength + offset;
           assert.ok(start + size <= Math.min((index + 1) * pieceLength, data.length));
           requests++;
-          socket.write(packet(7, Buffer.concat([message.subarray(1, 9), data.subarray(start, start + size)])));
+          const response = packet(7, Buffer.concat([message.subarray(1, 9), data.subarray(start, start + size)]));
+          if (networkUI) {
+            const timer = setTimeout(() => { timers.delete(timer); if (!socket.destroyed) socket.write(response); }, 600);
+            timers.add(timer);
+          } else socket.write(response);
         }
       } catch (error) { protocolError = error; socket.destroy(); }
     });
@@ -110,7 +116,7 @@ async function main() {
       fs.writeFileSync(file, JSON.stringify(config));
     }
     const args = desktopUI
-      ? [globalUI ? '--ui-test-global-limits' : '--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
+      ? [globalUI ? '--ui-test-global-limits' : networkUI ? '--ui-test-network' : '--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
       : ['test.torrent', '--config', 'config.json'];
     child = spawn(executable, args, { cwd: work, windowsHide: true });
     child.stdout.on('data', chunk => { output += chunk; });
@@ -140,6 +146,7 @@ async function main() {
     console.log(`PASS: ${data.length} bytes downloaded through local tracker and peer; exact contents verified (${requests} block requests).`);
   } finally {
     if (child && child.exitCode === null) child.kill();
+    for (const timer of timers) clearTimeout(timer);
     for (const socket of sockets) socket.destroy();
     peer.close();
     tracker.close();

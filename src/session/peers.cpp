@@ -331,6 +331,7 @@ void DownloadManager::connectToPeers() {
         if (!running_ || active_peers_.size() >= max_peers_) continue;
         auto peer_info = std::make_shared<ActivePeerInfo>(std::move(connection), peer);
         active_peers_.push_back(peer_info);
+        ++outgoing_handshakes_;
 
         // Start peer thread
         peer_threads_.push_back({peer_info, std::thread(&DownloadManager::peerLoop, this, peer_info)});

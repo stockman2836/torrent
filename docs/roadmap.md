@@ -24,12 +24,13 @@ code; prefer small concrete modules and keep network work off the window thread.
 - [x] Optional seeding with ratio and time limits.
 - [x] Incoming IPv4/IPv6 TCP peers with handshake deadlines, a peer cap and verified uploads.
 - [x] Live peer connections, transfer totals, tracker responses/errors and waiting hints in the desktop.
+- [x] Local listening-port diagnostics, incoming handshake evidence, contextual advice and a copyable report.
 - [x] Saved network settings for the first port, per-torrent peer cap, DHT and PEX, applied on the next session.
 - [x] Offline tracker/peer regression tests for transfers and application lifecycle.
 
 Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
-coverage. The ordinary suite currently has seventeen unit suites and 130
+coverage. The ordinary suite currently has eighteen unit suites and 132
 offline integration scenarios, plus a certificate check when the OpenSSL tool
 is available. See [tests](../tests/README.md) for verification.
 
@@ -88,7 +89,7 @@ encrypted/uTP transfers and other network environments still need validation.
 
 ## Later improvements
 
-- Port reachability and connectivity diagnostics across different networks.
+- Verify public port reachability from another network; local socket diagnostics are already available.
 - Optional UPnP/NAT-PMP port mapping with explicit user controls.
 - Serve verified magnet metadata to peers.
 - Richer per-tracker history and peer statistics beyond the current connection snapshots.

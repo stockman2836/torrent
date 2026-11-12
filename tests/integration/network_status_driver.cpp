@@ -1,4 +1,5 @@
 #include "download_task.h"
+#include "network_diagnostics.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <fstream>
@@ -64,12 +65,24 @@ int main(int argc, char* argv[]) {
             } else if (command == "status") {
                 const auto state = task.snapshot();
                 const auto& network = state.network;
+                const char* listener = "not-started";
+                switch (network.listener.state) {
+                case torrent::ListenerState::Listening: listener = "listening"; break;
+                case torrent::ListenerState::Stopped: listener = "stopped"; break;
+                case torrent::ListenerState::Error: listener = "error"; break;
+                default: break;
+                }
                 auto peers = nlohmann::json::array();
                 for (const auto& peer : network.peers) peers.push_back({{"ip", peer.ip}, {"port", peer.port},
                     {"state", peerState(peer.state)}, {"incoming", peer.incoming}, {"choked", peer.choked},
                     {"pending", peer.pending_requests}, {"downloaded", peer.downloaded_bytes}, {"uploaded", peer.uploaded_bytes}});
                 output << "STATUS " << nlohmann::json{{"busy", task.busy()}, {"progress", state.progress},
                     {"state", static_cast<int>(state.state)},
+                    {"listener", {{"state", listener}, {"port", network.listener.port}, {"ipv6", network.listener.ipv6}, {"error", network.listener.error}}},
+                    {"incoming", network.incoming_handshakes}, {"local_incoming", network.loopback_handshakes},
+                    {"outgoing", network.outgoing_handshakes}, {"rejected", network.rejected_incoming},
+                    {"incoming_failed", network.failed_incoming_handshakes},
+                    {"hint", torrent::app::diagnoseNetwork(state).summary}, {"report", torrent::app::networkReport(state)},
                     {"error", state.error}, {"uploaded", state.uploaded_bytes}, {"port", state.listen_port},
                     {"peers", peers}, {"queued", network.queued_peers}, {"failed", network.failed_connections},
                     {"peer_error", network.last_peer_error}, {"dht", network.dht_enabled}, {"nodes", network.dht_nodes},

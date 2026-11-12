@@ -1,47 +1,16 @@
 #include "network_dialog.h"
 #include "resource.h"
+#include "network_diagnostics.h"
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <cstring>
 
 using namespace torrent;
 using namespace torrent::app;
-
-std::wstring networkHint(const DownloadSnapshot& snapshot) {
-    switch (snapshot.state) {
-    case DownloadState::Loading: return L"Получение метаданных…";
-    case DownloadState::Stopping: return L"Закрытие сетевых подключений…";
-    case DownloadState::Stopped: return L"Сеть остановлена · доступен последний ответ трекера";
-    case DownloadState::Complete: return L"Загрузка завершена · сеть остановлена";
-    case DownloadState::Failed: return L"Загрузка завершилась с ошибкой";
-    case DownloadState::Downloading: case DownloadState::Seeding: break;
-    default: return L"Сеть будет запущена после начала загрузки";
-    }
-    const auto& network = snapshot.network;
-    const auto connected = std::count_if(network.peers.begin(), network.peers.end(),
-        [](const auto& peer) { return peer.state == PeerState::Connected; });
-    if (snapshot.state == DownloadState::Seeding)
-        return L"Раздача · подключений: " + std::to_wstring(connected);
-    if (snapshot.download_speed > 0 && connected) return L"Данные поступают · пиров: " + std::to_wstring(connected);
-    if (connected) {
-        if (std::any_of(network.peers.begin(), network.peers.end(), [](const auto& peer) { return peer.pending_requests > 0; }))
-            return L"Ожидание запрошенных блоков · пиров: " + std::to_wstring(connected);
-        if (std::all_of(network.peers.begin(), network.peers.end(), [](const auto& peer) {
-            return peer.state != PeerState::Connected || peer.choked;
-        })) return L"Пиры пока не разрешают скачивание";
-        return L"Подключение установлено · ожидание данных";
-    }
-    if (!network.peers.empty()) return L"Установка подключения к пирам…";
-    if (network.tracker.state == TrackerState::Announcing) return L"Запрос пиров у трекера…";
-    if (network.tracker.state == TrackerState::Error)
-        return network.dht_enabled ? L"Ошибка трекера · поиск пиров через DHT"
-                                   : L"Ошибка трекера · подробности в окне «Пиры и трекер»";
-    if (network.dht_enabled && network.dht_nodes == 0) return L"Поиск узлов DHT…";
-    return L"Доступные пиры пока не найдены";
-}
 
 namespace {
 std::wstring wide(const std::string& value) {
@@ -73,11 +42,40 @@ struct DialogState {
     std::string error;
 };
 
+void copyReport(HWND dialog, const DownloadSnapshot& snapshot) {
+    std::wstring value;
+    for (const auto character : wide(networkReport(snapshot))) {
+        if (character == L'\n') value += L'\r';
+        value += character;
+    }
+    const auto size = (value.size() + 1) * sizeof(wchar_t);
+    const auto memory = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (!memory) throw std::runtime_error(u8"Не удалось подготовить отчёт");
+    auto data = GlobalLock(memory);
+    if (!data) { GlobalFree(memory); throw std::runtime_error(u8"Не удалось подготовить отчёт"); }
+    std::memcpy(data, value.c_str(), size);
+    GlobalUnlock(memory);
+    if (!OpenClipboard(dialog)) {
+        GlobalFree(memory); throw std::runtime_error(u8"Буфер обмена занят. Попробуйте ещё раз.");
+    }
+    const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory);
+    if (!copied) GlobalFree(memory);
+    CloseClipboard();
+    if (!copied) throw std::runtime_error(u8"Не удалось скопировать отчёт");
+}
+
 void refresh(HWND dialog, const DialogState& state) {
     const auto snapshot = state.snapshot();
     const auto& network = snapshot.network;
+    const auto diagnosis = diagnoseNetwork(snapshot);
     SetWindowTextW(dialog, (L"Пиры и трекер · " + wide(snapshot.name)).c_str());
     SetDlgItemTextW(dialog, IDC_NET_HINT, networkHint(snapshot).c_str());
+    SetDlgItemTextW(dialog, IDC_NET_PORT, wide(diagnosis.port).c_str());
+    SetDlgItemTextW(dialog, IDC_NET_INCOMING, wide(diagnosis.incoming).c_str());
+    auto advice = diagnosis.advice;
+    if (network.download_limit || network.upload_limit || network.global_download_limit || network.global_upload_limit)
+        advice += "\r\n" + diagnosis.limits;
+    SetDlgItemTextW(dialog, IDC_NET_ADVICE, wide(advice).c_str());
     const auto connected = std::count_if(network.peers.begin(), network.peers.end(),
         [](const auto& peer) { return peer.state == PeerState::Connected; });
     const auto summary = L"Подключено: " + std::to_wstring(connected) + L" · Подключаются: " +
@@ -135,12 +133,24 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
                 ListView_InsertColumn(list, i, &column);
             }
             refresh(dialog, *state);
+            if (state->automatic && (GetWindowTextLengthW(GetDlgItem(dialog, IDC_NET_PORT)) == 0 ||
+                GetWindowTextLengthW(GetDlgItem(dialog, IDC_NET_ADVICE)) == 0 || networkReport(state->snapshot()).empty()))
+                throw std::runtime_error("Network diagnosis was not displayed");
             if (state->automatic) PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             else SetTimer(dialog, 1, 500, nullptr);
             return TRUE;
         }
         if (!state) return FALSE;
         if (message == WM_TIMER) { refresh(dialog, *state); return TRUE; }
+        if (message == WM_COMMAND && LOWORD(wparam) == IDC_NET_COPY) {
+            try {
+                copyReport(dialog, state->snapshot());
+                SetDlgItemTextW(dialog, IDC_NET_COPY, L"Отчёт скопирован");
+            } catch (const std::exception& error) {
+                MessageBoxW(dialog, wide(error.what()).c_str(), L"Копирование отчёта", MB_OK | MB_ICONWARNING);
+            }
+            return TRUE;
+        }
         if (message == WM_CLOSE || (message == WM_COMMAND && (LOWORD(wparam) == IDOK || LOWORD(wparam) == IDCANCEL))) {
             KillTimer(dialog, 1); EndDialog(dialog, IDOK); return TRUE;
         }
@@ -151,6 +161,10 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
     }
     return FALSE;
 }
+}
+
+std::wstring networkHint(const DownloadSnapshot& snapshot) {
+    return wide(diagnoseNetwork(snapshot).summary);
 }
 
 void showNetworkDetails(HWND owner, const std::function<DownloadSnapshot()>& snapshot, bool automatic) {

@@ -117,6 +117,12 @@ private:
     std::mutex connect_mutex_;
     std::mutex tracker_mutex_;
     TrackerStatus tracker_status_; // Protected by peers_mutex_, like peer diagnostics.
+    ListenerStatus listener_status_;
+    size_t incoming_handshakes_ = 0;
+    size_t loopback_handshakes_ = 0;
+    size_t outgoing_handshakes_ = 0;
+    size_t rejected_incoming_ = 0;
+    size_t failed_incoming_handshakes_ = 0;
     std::vector<PeerStatus> connecting_peers_;
     size_t failed_connections_ = 0;
     std::string last_peer_error_;

@@ -59,6 +59,7 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_, selection);
 
     initializeTrackers(config.tracker_timeout_seconds);
+    listener_status_.port = listen_port_;
 
     // Use existing DHT or create new one
     if (existing_dht) {
@@ -123,7 +124,15 @@ void DownloadManager::start() {
     try {
         listener_ = std::make_unique<PeerListener>(listen_port_, listen_ipv6_);
         listen_port_ = listener_->port();
-    } catch (...) { running_ = false; throw; }
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        listener_status_ = listener_->status();
+    } catch (const std::exception& error) {
+        running_ = false;
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        listener_status_.state = ListenerState::Error;
+        listener_status_.error = error.what();
+        throw;
+    }
     listener_thread_ = std::thread(&DownloadManager::incomingLoop, this);
 
     // Start DHT if enabled
@@ -209,6 +218,10 @@ void DownloadManager::stop() {
     stop_cv_.notify_all();
     if (listener_thread_.joinable()) listener_thread_.join();
     listener_.reset();
+    {
+        std::lock_guard<std::mutex> lock(peers_mutex_);
+        if (listener_status_.state != ListenerState::NotStarted) listener_status_.state = ListenerState::Stopped;
+    }
 
     // Stop DHT
     if (enable_dht_ && dht_manager_) {

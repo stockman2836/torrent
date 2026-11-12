@@ -85,6 +85,26 @@ serialized, and shutdown joins announce workers before sending `stopped`.
 The final snapshot clears active peers while retaining the last useful tracker
 response/error. Starting or loading a job resets its session diagnostics.
 
+`PeerListener::status()` checks the owned socket's `SO_ACCEPTCONN` flag and reports
+the actual IPv4/dual-stack mode. The listener worker publishes this copied value
+under the peer mutex, including before the first accept. Stop joins that worker
+before closing the socket and publishing a stopped state. Bind failures are copied
+into the task snapshot before the session is destroyed. This checks local socket
+state, not public reachability; see [Winsock socket options](https://learn.microsoft.com/en-us/windows/win32/winsock/sol-socket-socket-options).
+The check does not generate a peer connection or affect peer limits/statistics.
+Incoming and outgoing workers count successful handshakes, incoming handshake
+failures and rejections at the peer cap. Loopback evidence includes IPv4-mapped
+IPv6 addresses. Non-loopback addresses are not proof of an Internet connection.
+
+`app/network_diagnostics.cpp` produces a diagnosis and report from copied snapshot
+values. It owns the shared Russian hints used by the main window and details
+dialog. It distinguishes lifecycle states, missing discovery, tracker results,
+choked peers and pending blocks, and includes effective limiter values without
+claiming a particular firewall/NAT failure. The desktop copies the report as
+Unicode only when the user clicks the copy button. Tracker credentials, paths
+and query strings are omitted from the report URL. UI smoke tests render the
+diagnosis without changing the user's clipboard.
+
 `TorrentFile::trackerTiers()` preserves BEP 12 group boundaries and removes empty
 and duplicate URLs. Effective groups come from `announce-list`, falling back to
 the legacy URL when no usable group exists. Magnet tracker URLs form separate

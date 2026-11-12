@@ -30,6 +30,7 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_download_task` | Background task state and cancellation | Application |
 | `test_download_queue` | Scheduling, settings, persistence and file conflicts | Application |
 | `test_speed_limits` | UI rate parsing and exact byte conversion | Application |
+| `test_network_diagnostics` | Connection advice and report evidence | Application |
 | `test_token_bucket` | Throttling, live changes and cancellation | Core |
 | `test_seeding_options` | Ratio/time limits and policy validation | Application |
 | `test_peer_listener` | Port ownership and bitfield validation | Network |
@@ -214,8 +215,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 154 CTest suites/scenarios, or 155
-when the OpenSSL executable is available: 147 ordinary checks, an optional local
+Both independent-client options enabled yield 157 CTest suites/scenarios, or 158
+when the OpenSSL executable is available: 150 ordinary checks, an optional local
 TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -299,6 +300,31 @@ system-only PATH:
 ```powershell
 node tests/integration/test_live_priorities.cjs build/desktop/TorrentClient.exe ui
 ```
+
+## Connection diagnostics
+
+`test_network_diagnostics` checks advice for lifecycle, port errors, peer permission,
+pending blocks, missing discovery, empty tracker replies, connection failures,
+HTTP transfers without peers, peer caps and effective speed limits. Reports retain
+the distinction between local listening and Internet reachability, and omit tracker
+credentials, path and query. The listener unit suite checks the OS listening flag,
+address-family reporting and loopback classification including mapped IPv6.
+
+The network-status integration cases additionally verify a port held by another
+local listener, copied startup failures, successful incoming/outgoing handshakes,
+loopback/mapped-IPv6/native-IPv6 evidence, rejection at the peer cap, failed
+handshakes and retained results after disconnect/stop. Real IPv6 is exercised when
+the listener is dual stack; IPv4 fallback is reported as such. No external port
+checker or synthetic connection is used by the application's diagnostics.
+
+```sh
+ctest --test-dir build -R "test_network_diagnostics|test_network_status|test_peer_listener" --output-on-failure
+```
+
+Portable verification runs `test_download.cjs --desktop-network-ui`, opens the
+real diagnosis during an active download and again after completion, verifies the
+new fields render and checks final payload bytes. It leaves the user's clipboard
+untouched; report content is tested through the shared application function.
 
 ## Tracker fallback
 

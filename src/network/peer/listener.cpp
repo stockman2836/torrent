@@ -1,6 +1,8 @@
 #include "torrent/network/peer/peer_listener.h"
 #include <stdexcept>
 #include <utility>
+#include <algorithm>
+#include <array>
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -72,9 +74,30 @@ PeerListener::PeerListener(uint16_t port, bool ipv6) {
         throw std::runtime_error("Cannot read TCP listener address");
     port_ = ntohs(dual ? reinterpret_cast<sockaddr_in6&>(address).sin6_port : reinterpret_cast<sockaddr_in&>(address).sin_port);
     socket_ = std::exchange(listener.value, -1);
+    ipv6_ = dual;
 }
 
 PeerListener::~PeerListener() { if (socket_ != -1) closesocket(socket_); }
+
+ListenerStatus PeerListener::status() const {
+    ListenerStatus result{ListenerState::Error, port_, ipv6_, {}};
+    int accepting = 0;
+    socklen_t size = sizeof(accepting);
+    if (getsockopt(socket_, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<char*>(&accepting), &size) != 0)
+        result.error = "Cannot check TCP listener";
+    else if (!accepting) result.error = "TCP socket is not listening";
+    else result.state = ListenerState::Listening;
+    return result;
+}
+
+bool isLoopbackAddress(const std::string& address) {
+    std::array<uint8_t, 16> bytes{};
+    if (inet_pton(AF_INET, address.c_str(), bytes.data()) == 1) return bytes[0] == 127;
+    if (inet_pton(AF_INET6, address.c_str(), bytes.data()) != 1) return false;
+    const auto zero = [](uint8_t value) { return value == 0; };
+    return (std::all_of(bytes.begin(), bytes.begin() + 15, zero) && bytes[15] == 1) ||
+        (std::all_of(bytes.begin(), bytes.begin() + 10, zero) && bytes[10] == 255 && bytes[11] == 255 && bytes[12] == 127);
+}
 
 std::unique_ptr<PeerConnection> PeerListener::accept(const std::vector<uint8_t>& hash, const std::string& id, int timeout_ms) {
     fd_set readable; FD_ZERO(&readable); FD_SET(socket_, &readable);

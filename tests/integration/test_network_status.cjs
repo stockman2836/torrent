@@ -20,7 +20,7 @@ function handshake(hash) {
 }
 async function main() {
   const executable = path.resolve(process.argv[2]), scenario = process.argv[3];
-  assert.ok(['transfer', 'error', 'none', 'dht'].includes(scenario));
+  assert.ok(['transfer', 'error', 'none', 'dht', 'occupied', 'cap'].includes(scenario));
   const artifacts = path.resolve(__dirname, '../../build/tests'); fs.mkdirSync(artifacts, { recursive: true });
   const work = fs.mkdtempSync(path.join(artifacts, `network-status-${scenario}-`));
   const data = Buffer.alloc(65536);
@@ -68,6 +68,7 @@ async function main() {
   const bad = net.createServer(socket => {
     serve(socket); socket.once('data', () => socket.end(Buffer.alloc(68)));
   });
+  const occupied = net.createServer(socket => socket.destroy());
   const compact = port => Buffer.from([127, 0, 0, 1, port >> 8, port & 255]);
   const tracker = http.createServer((request, response) => {
     const params = new URL(request.url, 'http://localhost').searchParams;
@@ -98,12 +99,12 @@ async function main() {
     const index = lines.findIndex(line => line.startsWith(marker)); return lines.splice(index, 1)[0];
   }
   const status = async () => JSON.parse((await command('status', 'STATUS ')).slice(7));
-  async function waitStatus(check, description) {
+  async function waitStatus(check, description, allowError = false) {
     let snapshot;
     const deadline = Date.now() + 6000;
     do {
       snapshot = await status();
-      assert.equal(snapshot.error, '', JSON.stringify(snapshot));
+      if (!allowError) assert.equal(snapshot.error, '', JSON.stringify(snapshot));
       if (check(snapshot)) return snapshot;
       await delay(20);
     } while (Date.now() < deadline);
@@ -111,15 +112,18 @@ async function main() {
   }
   try {
     await listen(seed); await listen(bad); await listen(tracker);
+    const listenPort = await availablePort();
+    if (scenario === 'occupied') await new Promise(resolve => occupied.listen(listenPort, '0.0.0.0', resolve));
     if (scenario === 'dht') dht = await createDhtFixture(hash, seed.address().port);
     const url = `http://127.0.0.1:${tracker.address().port}/announce`;
     const metadata = { info };
     if (['transfer', 'error'].includes(scenario)) metadata.announce = url;
     fs.writeFileSync(path.join(work, 'test.torrent'), encode(metadata));
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ download_dir: './files',
-      listen_port: await availablePort(), enable_dht: !!dht, dht_port: 0,
+      listen_port: listenPort, enable_dht: !!dht, dht_port: 0,
       dht_bootstrap_nodes: dht?.routers || [], enable_pex: false, enable_lsd: false,
-      enable_webseeds: false, enable_utp: false, max_peers: 8, enable_ipv6: false, sequential_download: true }));
+      enable_webseeds: false, enable_utp: false, max_peers: scenario === 'cap' ? 1 : 8,
+      enable_ipv6: scenario === 'cap', sequential_download: true }));
     child = spawn(executable, ['test.torrent', 'config.json'], { cwd: work });
     let partial = '';
     child.stdout.on('data', bytes => {
@@ -134,10 +138,13 @@ async function main() {
     const initial = await status();
     assert.equal(initial.tracker.state, metadata.announce ? 'waiting' : 'none');
     assert.equal(initial.peers.length, 0);
+    assert.equal(initial.listener.state, 'not-started');
     await command('start', 'STARTED');
     if (scenario === 'transfer' || scenario === 'dht') {
       let snapshot = await waitStatus(state => state.peers.some(peer => !peer.incoming && peer.state === 'connected'), 'connected peer');
       const outgoing = snapshot.peers.find(peer => !peer.incoming && peer.state === 'connected');
+      assert.equal(snapshot.listener.state, 'listening'); assert.equal(snapshot.listener.port, listenPort);
+      assert.equal(snapshot.listener.ipv6, false); assert.equal(snapshot.outgoing, 1);
       assert.equal(outgoing.port, seed.address().port); assert.equal(outgoing.choked, true);
       if (scenario === 'dht') {
         assert.equal(snapshot.dht, true); assert.ok(snapshot.nodes >= 1); assert.equal(snapshot.tracker.state, 'none');
@@ -161,12 +168,16 @@ async function main() {
         const request = Buffer.alloc(12); request.writeUInt32BE(4096, 8);
         incoming.write(Buffer.concat([packet(2), packet(6, request)]));
         await waitStatus(state => state.peers.some(peer => peer.incoming && peer.uploaded === 4096), 'upload byte count');
+        snapshot = await status(); assert.equal(snapshot.incoming, 1); assert.equal(snapshot.local_incoming, 1);
+        assert.match(snapshot.report, /Доступность из интернета: не проверена/);
         await until(() => received.includes(data.subarray(0, 4096)), 'actual uploaded bytes');
         incoming.destroy();
         await waitStatus(state => !state.peers.some(peer => peer.incoming), 'disconnected incoming peer removed');
+        assert.equal((await status()).incoming, 1, 'Disconnected incoming evidence was lost');
       }
       await command('stop', 'STOPPED');
       snapshot = await status(); assert.equal(snapshot.peers.length, 0); assert.equal(snapshot.queued, 0);
+      assert.equal(snapshot.listener.state, 'stopped');
       if (scenario === 'transfer') {
         full = true;
         await command('start', 'STARTED');
@@ -177,6 +188,7 @@ async function main() {
     } else if (scenario === 'error') {
       await until(() => blockedReply, 'pending tracker request');
       const pending = await waitStatus(state => state.tracker.state === 'announcing', 'visible initial announce');
+      assert.equal(pending.listener.state, 'listening');
       assert.ok(pending.port, 'Initial tracker query must not block publishing listener state');
       blockedReply();
       let snapshot = await waitStatus(state => state.tracker.state === 'error', 'tracker error');
@@ -191,6 +203,37 @@ async function main() {
       assert.equal(snapshot.tracker.error, ''); assert.equal(snapshot.tracker.failures, 0);
       assert.equal(snapshot.tracker.peers, 0); assert.equal(snapshot.peers.length, 0);
       await command('stop', 'STOPPED');
+    } else if (scenario === 'occupied') {
+      const snapshot = await waitStatus(state => !state.busy && state.listener.state === 'error', 'listener error', true);
+      assert.equal(snapshot.listener.port, listenPort); assert.ok(snapshot.error); assert.ok(snapshot.listener.error);
+      assert.match(snapshot.hint, /TCP-порт/); assert.match(snapshot.report, /начальный порт/);
+      await command('stop', 'STOPPED');
+    } else if (scenario === 'cap') {
+      let snapshot = await waitStatus(state => state.listener.state === 'listening', 'listener started');
+      async function inbound(host) {
+        const socket = serve(net.createConnection(snapshot.port, host));
+        await until(() => !socket.connecting, 'inbound connected');
+        socket.write(handshake(hash)); return socket;
+      }
+      const first = await inbound('127.0.0.1');
+      snapshot = await waitStatus(state => state.incoming === 1, 'first incoming handshake');
+      assert.equal(snapshot.local_incoming, 1); assert.match(snapshot.report, /Достигнут лимит пиров: 1/);
+      const rejected = serve(net.createConnection(snapshot.port, '127.0.0.1'));
+      await until(() => rejected.destroyed, 'excess incoming rejected');
+      snapshot = await waitStatus(state => state.rejected === 1, 'cap diagnostics');
+      assert.equal(snapshot.incoming_failed, 0);
+      first.destroy(); await waitStatus(state => state.peers.length === 0, 'first peer gone');
+      const second = await inbound(snapshot.listener.ipv6 ? '::1' : '127.0.0.1');
+      snapshot = await waitStatus(state => state.incoming === 2, 'second incoming handshake');
+      assert.equal(snapshot.local_incoming, 2, 'IPv6 or mapped IPv4 was misclassified as remote evidence');
+      second.destroy(); await waitStatus(state => state.peers.length === 0, 'second peer gone');
+      const invalid = serve(net.createConnection(snapshot.port, '127.0.0.1'));
+      await until(() => !invalid.connecting, 'invalid peer connected'); invalid.end(Buffer.alloc(68));
+      snapshot = await waitStatus(state => state.incoming_failed === 1 && state.peers.length === 0, 'invalid handshake diagnostics');
+      assert.equal(snapshot.incoming, 2); assert.equal(snapshot.local_incoming, 2);
+      assert.equal(snapshot.outgoing, 0); assert.match(snapshot.report, /с других адресов: 0/);
+      await command('stop', 'STOPPED');
+      snapshot = await status(); assert.equal(snapshot.listener.state, 'stopped'); assert.equal(snapshot.incoming, 2);
     } else {
       const snapshot = await waitStatus(state => state.port > 0, 'trackerless session');
       assert.equal(snapshot.tracker.state, 'none'); assert.equal(snapshot.tracker.url, '');
@@ -205,7 +248,7 @@ async function main() {
     if (child && child.exitCode === null) child.kill();
     for (const socket of sockets) socket.destroy();
     if (blockedReply && !healthy) blockedReply();
-    await Promise.all([seed, bad, tracker].filter(server => server.listening).map(server => new Promise(resolve => server.close(resolve))));
+    await Promise.all([seed, bad, tracker, occupied].filter(server => server.listening).map(server => new Promise(resolve => server.close(resolve))));
     if (dht) await dht.close();
     fs.writeFileSync(path.join(work, 'output.log'), output);
   }

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include "torrent/network/peer/listener_status.h"
 
 namespace torrent {
 
@@ -33,6 +34,20 @@ struct TrackerStatus {
 
 // Copied values only. Socket and protocol state remain on their owning workers.
 struct NetworkStatus {
+    ListenerStatus listener;
+    size_t incoming_handshakes = 0;
+    size_t loopback_handshakes = 0;
+    size_t outgoing_handshakes = 0;
+    size_t rejected_incoming = 0;
+    size_t failed_incoming_handshakes = 0;
+    size_t max_peers = 0;
+    int64_t download_limit = 0;
+    int64_t upload_limit = 0;
+    int64_t global_download_limit = 0;
+    int64_t global_upload_limit = 0;
+    bool pex_enabled = false;
+    bool lsd_enabled = false;
+    size_t web_seeds = 0;
     std::vector<PeerStatus> peers;
     size_t queued_peers = 0;
     size_t failed_connections = 0;

@@ -81,6 +81,7 @@ public:
     bool smoke = false;
     bool smokePriorities = false;
     bool smokeGlobalLimits = false;
+    bool smokeNetwork = false;
     std::wstring smokeSource, smokeSecond, smokeFolder, smokeConfig;
     int exitCode = 0;
 
@@ -117,6 +118,7 @@ private:
     bool filling_ = false, fillingJobs_ = false, closing_ = false, smokeStarted_ = false, dirty_ = false;
     bool smokePrioritiesApplied_ = false;
     bool smokeGlobalLimitsApplied_ = false;
+    bool smokeNetworkChecked_ = false;
     ULONGLONG smokeDeadline_ = 0;
     ULONGLONG smokeStartedAt_ = 0;
     DownloadId selected_ = 0, rendered_ = 0;
@@ -523,6 +525,10 @@ private:
                     networkSettings();
                     SendMessageW(handle, WM_COMMAND, Start, 0);
                 }
+            } else if (smokeNetwork && !smokeNetworkChecked_ && busy &&
+                       state.network.listener.state == ListenerState::Listening && state.state == DownloadState::Downloading) {
+                smokeNetworkChecked_ = true;
+                networkDetails();
             } else if (smokeGlobalLimits && !smokeGlobalLimitsApplied_ && busy &&
                        state.state == DownloadState::Downloading && GetTickCount64() >= smokeStartedAt_ + 1500) {
                 smokeGlobalLimitsApplied_ = true;
@@ -540,6 +546,7 @@ private:
             } else if (!busy && state.state == DownloadState::Complete) {
                 if (smokePriorities && !smokePrioritiesApplied_) exitCode = 1;
                 if (smokeGlobalLimits && !smokeGlobalLimitsApplied_) exitCode = 1;
+                if (smokeNetwork && !smokeNetworkChecked_) exitCode = 1;
                 networkDetails(); close();
             }
             else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
@@ -722,10 +729,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     int argc = 0;
     auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv && argc == 5 && (std::wstring(argv[1]) == L"--ui-test" || std::wstring(argv[1]) == L"--ui-test-priorities" ||
-                             std::wstring(argv[1]) == L"--ui-test-global-limits")) {
+                             std::wstring(argv[1]) == L"--ui-test-global-limits" || std::wstring(argv[1]) == L"--ui-test-network")) {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeFolder = argv[3]; window.smokeConfig = argv[4];
         window.smokePriorities = std::wstring(argv[1]) == L"--ui-test-priorities";
         window.smokeGlobalLimits = std::wstring(argv[1]) == L"--ui-test-global-limits";
+        window.smokeNetwork = std::wstring(argv[1]) == L"--ui-test-network";
     }
     if (argv && argc == 6 && std::wstring(argv[1]) == L"--ui-queue-test") {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeSecond = argv[3];

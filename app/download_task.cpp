@@ -10,6 +10,13 @@ namespace {
 NetworkStatus initialNetworkStatus(const TorrentFile& torrent, const Config& config) {
     NetworkStatus result;
     result.dht_enabled = config.enable_dht;
+    result.listener.port = config.listen_port;
+    result.max_peers = config.max_peers;
+    result.download_limit = config.max_download_speed;
+    result.upload_limit = config.max_upload_speed;
+    result.pex_enabled = config.enable_pex;
+    result.lsd_enabled = config.enable_lsd;
+    result.web_seeds = config.enable_webseeds ? torrent.webSeeds().size() : 0;
     if (!torrent.trackerTiers().empty()) result.tracker.url = torrent.trackerTiers().front().front();
     for (const auto& tier : torrent.trackerTiers()) result.tracker.total_trackers += tier.size();
     result.tracker.state = result.tracker.url.empty() ? TrackerState::None : TrackerState::Waiting;
@@ -128,7 +135,13 @@ bool DownloadTask::start(Config config, std::shared_ptr<utils::BandwidthLimits> 
                 std::lock_guard<std::mutex> lock(mutex_);
                 snapshot_.priorities_pending = priority_revision_ != applied_revision;
             };
-            if (!cancelled_) manager.start();
+            try { if (!cancelled_) manager.start(); }
+            catch (...) {
+                auto network = manager.networkStatus();
+                std::lock_guard<std::mutex> lock(mutex_);
+                snapshot_.network = std::move(network);
+                throw;
+            }
             while (!cancelled_ && manager.isRunning()) {
                 apply_priorities();
                 const double progress = manager.progress();
