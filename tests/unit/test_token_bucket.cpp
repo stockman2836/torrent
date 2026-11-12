@@ -48,3 +48,48 @@ TEST(TokenBucket, ThreadsShareOneBudgetAndLargeRatesDoNotOverflow) {
     EXPECT_THROW(bucket.setRate(-1), std::invalid_argument);
     EXPECT_THROW(TokenBucket(-1), std::invalid_argument);
 }
+
+TEST(TokenBucket, SeparateSessionsConsumeOneSharedBudget) {
+    TokenBucket shared(10000), first(0), second(0);
+    ASSERT_TRUE(shared.tryConsume(10000));
+    const auto start = std::chrono::steady_clock::now();
+    const auto cancelled = [&] { return std::chrono::steady_clock::now() - start > 3s; };
+    auto a = std::async(std::launch::async, [&] { return first.waitAndConsume(4000, cancelled, &shared); });
+    auto b = std::async(std::launch::async, [&] { return second.waitAndConsume(4000, cancelled, &shared); });
+    EXPECT_TRUE(a.get()); EXPECT_TRUE(b.get());
+    EXPECT_GE(std::chrono::steady_clock::now() - start, 650ms);
+}
+
+TEST(TokenBucket, SlowLocalLimitDoesNotReserveTheSharedBudget) {
+    TokenBucket shared(10000), local(1);
+    ASSERT_TRUE(local.tryConsume(1));
+    std::atomic<bool> cancel{false};
+    auto blocked = std::async(std::launch::async, [&] { return local.waitAndConsume(16384, [&] { return cancel.load(); }, &shared); });
+    EXPECT_EQ(blocked.wait_for(100ms), std::future_status::timeout);
+    EXPECT_TRUE(shared.tryConsume(9000));
+    cancel = true;
+    ASSERT_EQ(blocked.wait_for(1s), std::future_status::ready);
+    EXPECT_FALSE(blocked.get());
+}
+
+TEST(TokenBucket, RemovingEitherLimitStillHonorsTheOtherAndWakesWaiters) {
+    TokenBucket shared(1), local(1);
+    std::atomic<bool> cancel{false};
+    auto blocked = std::async(std::launch::async, [&] { return local.waitAndConsume(16384, [&] { return cancel.load(); }, &shared); });
+    EXPECT_EQ(blocked.wait_for(60ms), std::future_status::timeout);
+    shared.setRate(0);
+    EXPECT_EQ(blocked.wait_for(60ms), std::future_status::timeout);
+    local.setRate(0);
+    EXPECT_EQ(blocked.wait_for(1s), std::future_status::ready);
+    cancel = true;
+    EXPECT_TRUE(blocked.get());
+
+    shared.setRate(1);
+    cancel = false;
+    auto again = std::async(std::launch::async, [&] { return local.waitAndConsume(16384, [&] { return cancel.load(); }, &shared); });
+    EXPECT_EQ(again.wait_for(60ms), std::future_status::timeout);
+    shared.setRate(0);
+    EXPECT_EQ(again.wait_for(1s), std::future_status::ready);
+    cancel = true;
+    EXPECT_TRUE(again.get());
+}

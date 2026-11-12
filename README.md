@@ -128,6 +128,19 @@ the values currently entered in its fields. Applied limits are saved with the
 download list and restored independently for each torrent. Limits apply to
 payload data; short bursts and protocol traffic can exceed the displayed value.
 
+Click **Overall speed** (**Общая скорость…**) at the top of the window to limit
+the combined download and upload of all torrents. These two budgets are separate
+and apply immediately to active downloads and seeding, as well as jobs started
+later. Individual torrent caps continue to apply; a slow torrent does not reserve
+the unused budget. Values use the same KiB/s format and `0` convention. Overall
+limits are saved in `%LOCALAPPDATA%/TorrentClient/config.json` as
+`global_max_download_speed` and `global_max_upload_speed` in bytes/s. Older
+preferences default to unlimited. They belong to this desktop instance; the CLI
+continues using its individual `max_download_speed` and `max_upload_speed` caps.
+Short bursts, buffered incoming data and protocol traffic can make network-interface
+traffic exceed the configured rate. Bandwidth is shared without a
+guarantee of equal speed for each torrent.
+
 The network status line explains whether the selected torrent is contacting its
 tracker, connecting to peers, waiting for permission to download or waiting for
 requested blocks. Click **Peers and tracker** to see live IPv4/IPv6 addresses,

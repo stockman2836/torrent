@@ -98,6 +98,21 @@ pointer. Downloads share one bucket across peer and web seed delivery within a
 session; uploads use a separate bucket. Waits consume large blocks incrementally,
 wake when a rate changes and check shutdown while waiting. UI values use KiB/s
 and convert to bytes/s without losing the precision of stored integer limits.
+The queue also owns one shared `utils::BandwidthLimits` pair. It passes shared
+ownership through `DownloadTask::start` to each session, including future starts
+and resumes. The pair remains alive until its last session finishes. Changing a
+global rate updates these thread-safe buckets directly without exposing a session
+pointer to the UI or changing per-entry caps. `TokenBucket::waitAndConsume` can
+charge a local and shared bucket together, locking both briefly and consuming
+only the amount available in both. A slow local bucket therefore does not reserve
+a whole block of the shared budget. Both locks are released during waits, with
+cancellation and shared rate changes checked within 50 ms. Download and upload
+use independent budgets; peer and web-seed delivery share the download path.
+The existing two-second burst capacity remains, and fairness between sessions is
+not guaranteed. Only payload is charged, not metadata, protocol headers or bytes
+already buffered by a transport. Global limits are desktop-instance preferences
+in `Config`, saved atomically before applying the update. They do not become
+per-torrent settings in the saved list or affect separate CLI processes.
 `SeedingOptions` validates the enabled flag, ratio and hours, and decides whether
 either limit has been reached. Its elapsed-time input makes timer boundaries
 testable without waiting hours. The task worker starts the timer only when all

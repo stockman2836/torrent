@@ -74,7 +74,9 @@ public:
 
     // Consume incrementally, including requests larger than the burst capacity.
     // Returns false on cancellation; waits check cancellation at least every 50 ms.
-    bool waitAndConsume(size_t bytes, const std::function<bool()>& cancelled = {});
+    // An optional shared bucket is charged together with this one. Neither
+    // budget is reserved while waiting for tokens in the other bucket.
+    bool waitAndConsume(size_t bytes, const std::function<bool()>& cancelled = {}, TokenBucket* shared = nullptr);
 
     // Get current rate limit
     int64_t getRate() const;
@@ -91,6 +93,12 @@ private:
     std::condition_variable changed_;
 
     void refill();
+};
+
+// Shared by all sessions in a desktop queue. Download and upload stay independent.
+struct BandwidthLimits {
+    TokenBucket download{0};
+    TokenBucket upload{0};
 };
 
 // Speed tracking with sliding window

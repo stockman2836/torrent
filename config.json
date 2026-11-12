@@ -4,6 +4,8 @@
     "max_connections": 100,
     "max_download_speed": 0,
     "max_upload_speed": 0,
+    "global_max_download_speed": 0,
+    "global_max_upload_speed": 0,
     "download_dir": "./downloads",
     "sequential_download": false,
     "piece_timeout_seconds": 30,

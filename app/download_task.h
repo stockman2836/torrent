@@ -3,6 +3,7 @@
 #include "input.h"
 #include "seeding_options.h"
 #include "torrent/session/network_status.h"
+#include "torrent/core/utils.h"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -35,7 +36,7 @@ class DownloadTask {
 public:
     ~DownloadTask();
     bool load(const std::string& source, Config config);
-    bool start(Config config);
+    bool start(Config config, std::shared_ptr<utils::BandwidthLimits> global_limits = nullptr);
     bool unload();
     void stop();
     void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);

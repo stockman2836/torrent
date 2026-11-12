@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -41,6 +42,18 @@ bool Config::loadFromFile(const std::string& filepath) {
         if (j.contains("max_upload_speed")) {
             max_upload_speed = j["max_upload_speed"].get<int64_t>();
         }
+        const auto globalSpeed = [&j](const char* key, int64_t fallback) {
+            if (!j.contains(key)) return fallback;
+            const auto& value = j.at(key);
+            if (!value.is_number_integer() || (value.is_number_unsigned() &&
+                value.get<uint64_t>() > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())))
+                throw std::invalid_argument("Invalid global speed limit");
+            const auto speed = value.get<int64_t>();
+            if (speed < 0) throw std::invalid_argument("Invalid global speed limit");
+            return speed;
+        };
+        global_max_download_speed = globalSpeed("global_max_download_speed", global_max_download_speed);
+        global_max_upload_speed = globalSpeed("global_max_upload_speed", global_max_upload_speed);
 
         // Download settings
         if (j.contains("download_dir")) download_dir = j["download_dir"].get<std::string>();
@@ -145,6 +158,8 @@ bool Config::saveToFile(const std::string& filepath) const {
         // Speed limits
         j["max_download_speed"] = max_download_speed;
         j["max_upload_speed"] = max_upload_speed;
+        j["global_max_download_speed"] = global_max_download_speed;
+        j["global_max_upload_speed"] = global_max_upload_speed;
 
         // Download settings
         j["download_dir"] = download_dir;
@@ -291,6 +306,11 @@ bool Config::validate() const {
 
     if (max_upload_speed < 0) {
         LOG_ERROR("Invalid max_upload_speed: {}", max_upload_speed);
+        valid = false;
+    }
+
+    if (global_max_download_speed < 0 || global_max_upload_speed < 0) {
+        LOG_ERROR("Global speed limits must be non-negative");
         valid = false;
     }
 

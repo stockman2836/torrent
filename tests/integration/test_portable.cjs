@@ -66,6 +66,7 @@ async function main() {
   await fixture('test_download.cjs', executable, '--desktop-ui', working, env);
   await fixture('test_queue.cjs', executable, 'ui', working, env);
   await fixture('test_live_priorities.cjs', executable, 'ui', working, env);
+  await fixture('test_download.cjs', executable, '--desktop-global-ui', working, env);
   fs.writeFileSync(path.join(work, 'result.json'), JSON.stringify({ archive, sha256: hash(archive),
     files: packaged, isolatedPath: env.Path, passed: true }, null, 2));
   console.log(`PASS portable: ${packaged.length} files verified; Release window and transfers work with a system-only PATH.`);

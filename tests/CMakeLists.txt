@@ -136,7 +136,8 @@ if(NODE_EXECUTABLE)
     add_executable(queue_driver integration/queue_driver.cpp)
     target_link_libraries(queue_driver PRIVATE torrent_app)
     foreach(scenario serial parallel stop remove collision limited live limited-stop upload upload-live upload-stop
-            seed-ratio seed-unlimited seed-disable seed-resume seed-collision)
+            seed-ratio seed-unlimited seed-disable seed-resume seed-collision
+            global-download global-local global-live global-stop global-upload global-upload-live global-upload-stop global-seed)
         add_test(NAME test_queue_${scenario} COMMAND "${NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_queue.cjs" "$<TARGET_FILE:queue_driver>" ${scenario})
         set_tests_properties(test_queue_${scenario} PROPERTIES TIMEOUT 30)

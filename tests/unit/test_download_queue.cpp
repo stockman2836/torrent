@@ -6,6 +6,7 @@
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <limits>
 
 using namespace torrent;
 using namespace torrent::app;
@@ -68,6 +69,51 @@ TEST_F(DownloadQueueTest, EntriesHaveIndependentSettingsAndDuplicateSourcesAreSe
     EXPECT_TRUE(entries[1].config.file_priorities.empty());
     EXPECT_NE(entries[0].config.listen_port, entries[1].config.listen_port);
     EXPECT_EQ(entries[1].config.dht_port, entries[1].config.listen_port + 1);
+}
+
+TEST_F(DownloadQueueTest, GlobalLimitsPreserveIndividualCapsAndValidateBeforeUpdating) {
+    DownloadQueue queue;
+    const auto first = queue.add(torrent("first"), config);
+    const auto second = queue.add(torrent("second"), config);
+    ASSERT_TRUE(queue.setSpeedLimits(first, 12345, 6789));
+    ASSERT_TRUE(queue.setGlobalSpeedLimits(65536, 32768));
+    EXPECT_THROW(queue.setGlobalSpeedLimits(-1, 0), std::invalid_argument);
+    EXPECT_THROW(queue.setGlobalSpeedLimits(0, -1), std::invalid_argument);
+    const auto states = queue.snapshots();
+    EXPECT_EQ(states[0].config.max_download_speed, 12345);
+    EXPECT_EQ(states[0].config.max_upload_speed, 6789);
+    EXPECT_EQ(states[1].config.max_download_speed, 0);
+    EXPECT_EQ(states[1].id, second);
+    ASSERT_TRUE(queue.setGlobalSpeedLimits(0, 0));
+    queue.close();
+    EXPECT_FALSE(queue.setGlobalSpeedLimits(1024, 1024));
+}
+
+TEST_F(DownloadQueueTest, GlobalSpeedPreferencesRoundTripWithoutChangingIndividualLimits) {
+    config.max_download_speed = 12345;
+    config.max_upload_speed = 6789;
+    config.global_max_download_speed = std::numeric_limits<int64_t>::max();
+    config.global_max_upload_speed = 1;
+    const auto path = directory / "config.json";
+    ASSERT_TRUE(config.saveToFile(path.u8string()));
+    Config restored;
+    ASSERT_TRUE(restored.loadFromFile(path.u8string()));
+    EXPECT_EQ(restored.global_max_download_speed, config.global_max_download_speed);
+    EXPECT_EQ(restored.global_max_upload_speed, 1);
+    EXPECT_EQ(restored.max_download_speed, 12345);
+    EXPECT_EQ(restored.max_upload_speed, 6789);
+    for (const char* value : {"-1", "1.5", "true", "null", "\"1024\"", "18446744073709551615"}) {
+        std::ofstream(path) << "{\"global_max_download_speed\":" << value << "}";
+        Config invalid;
+        EXPECT_FALSE(invalid.loadFromFile(path.u8string())) << value;
+    }
+    std::ofstream(path) << "{}";
+    Config legacy;
+    ASSERT_TRUE(legacy.loadFromFile(path.u8string()));
+    EXPECT_EQ(legacy.global_max_download_speed, 0);
+    EXPECT_EQ(legacy.global_max_upload_speed, 0);
+    legacy.global_max_upload_speed = -1;
+    EXPECT_FALSE(legacy.validate());
 }
 
 TEST_F(DownloadQueueTest, NetworkDefaultsApplyOnNextStartAndToNewEntries) {

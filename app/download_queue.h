@@ -29,6 +29,7 @@ public:
                    const std::map<size_t, FilePriority>& priorities);
     bool enqueue(DownloadId id);
     bool setSpeedLimits(DownloadId id, int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
+    bool setGlobalSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
     bool setSeedingOptions(DownloadId id, const SeedingOptions& options);
     bool setNetworkSettings(const NetworkSettings& settings);
     bool setFilePriorities(DownloadId id, const std::map<size_t, FilePriority>& priorities);
@@ -68,6 +69,7 @@ private:
     size_t limit_ = 1;
     bool closing_ = false;
     std::optional<NetworkSettings> network_settings_;
+    std::shared_ptr<utils::BandwidthLimits> global_limits_ = std::make_shared<utils::BandwidthLimits>();
 };
 
 } // namespace torrent::app

@@ -28,7 +28,8 @@ class PeerListener;
 class DownloadManager {
 public:
     DownloadManager(TorrentFile torrent_file, const Config& config,
-                    std::unique_ptr<dht::DHTManager> existing_dht = nullptr);
+                    std::unique_ptr<dht::DHTManager> existing_dht = nullptr,
+                    std::shared_ptr<utils::BandwidthLimits> global_limits = nullptr);
 
     ~DownloadManager();
 
@@ -157,6 +158,7 @@ private:
     // Speed limiting and tracking
     utils::TokenBucket download_limiter_;
     utils::TokenBucket upload_limiter_;
+    std::shared_ptr<utils::BandwidthLimits> global_limits_;
     utils::SpeedTracker download_tracker_;
     utils::SpeedTracker upload_tracker_;
     const size_t max_peers_;

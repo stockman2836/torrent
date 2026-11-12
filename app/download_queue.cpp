@@ -175,6 +175,15 @@ bool DownloadQueue::setSeedingOptions(DownloadId id, const SeedingOptions& optio
     return true;
 }
 
+bool DownloadQueue::setGlobalSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec) {
+    if (download_bytes_per_sec < 0 || upload_bytes_per_sec < 0)
+        throw std::invalid_argument("Speed limits must be non-negative");
+    if (closing_) return false;
+    global_limits_->download.setRate(download_bytes_per_sec);
+    global_limits_->upload.setRate(upload_bytes_per_sec);
+    return true;
+}
+
 bool DownloadQueue::setFilePriorities(DownloadId id, const std::map<size_t, FilePriority>& priorities) {
     auto entry = find(id);
     if (closing_ || !entry || entry->removing) return false;
@@ -273,7 +282,7 @@ void DownloadQueue::tick() {
         if (collision) { ++it; continue; }
         if (!prepareNetwork(*entry)) { ++it; continue; }
         entry->owned_paths = selectedPaths(entry->config, state);
-        if (entry->task.start(entry->config)) {
+        if (entry->task.start(entry->config, global_limits_)) {
             entry->transferring = entry->downloading = true; entry->queued = false; ++active;
             it = pending_.erase(it);
         } else ++it;

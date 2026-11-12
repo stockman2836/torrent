@@ -14,7 +14,8 @@
 namespace torrent {
 
 DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
-                                std::unique_ptr<dht::DHTManager> existing_dht)
+                                std::unique_ptr<dht::DHTManager> existing_dht,
+                                std::shared_ptr<utils::BandwidthLimits> global_limits)
     : torrent_(std::move(torrent_file))
     , download_dir_(config.download_dir)
     , peer_id_(utils::generatePeerId())
@@ -34,6 +35,7 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
     , total_uploaded_(0)
     , download_limiter_(config.max_download_speed)
     , upload_limiter_(config.max_upload_speed)
+    , global_limits_(std::move(global_limits))
     , download_tracker_(20)  // 20 second window
     , upload_tracker_(20)
     , max_peers_(config.max_peers) {

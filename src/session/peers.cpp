@@ -182,7 +182,8 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                         conn_ptr->addPendingUpload(req_msg.piece_index, req_msg.offset, req_msg.length);
 
                         // Apply upload rate limiting
-                        if (!upload_limiter_.waitAndConsume(block_data.size(), [this] { return !running_.load(); })) break;
+                        if (!upload_limiter_.waitAndConsume(block_data.size(), [this] { return !running_.load(); },
+                            global_limits_ ? &global_limits_->upload : nullptr)) break;
 
                         // Send PIECE message
                         if (conn_ptr->sendPiece(req_msg.piece_index, req_msg.offset, block_data)) {

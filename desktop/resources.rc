@@ -37,6 +37,22 @@ BEGIN
     PUSHBUTTON "Отмена", IDCANCEL, 264, 222, 74, 18
 END
 
+IDD_GLOBAL_SPEED DIALOGEX 0, 0, 350, 199
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Общие лимиты скорости"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Скорость всех торрентов вместе (КиБ/с)", -1, 12, 12, 326, 16
+    LTEXT "Скачивание", -1, 12, 42, 210, 16
+    EDITTEXT IDC_GLOBAL_DOWNLOAD, 242, 39, 96, 20, ES_AUTOHSCROLL
+    LTEXT "Отдача", -1, 12, 72, 210, 16
+    EDITTEXT IDC_GLOBAL_UPLOAD, 242, 69, 96, 20, ES_AUTOHSCROLL
+    LTEXT "0 — без ограничения. Лимиты отдельных торрентов продолжают действовать.", -1, 12, 103, 326, 28
+    LTEXT "Изменения сохраняются и сразу действуют на активные загрузки и раздачи.", -1, 12, 138, 326, 26
+    DEFPUSHBUTTON "Применить", IDOK, 180, 175, 76, 18
+    PUSHBUTTON "Отмена", IDCANCEL, 264, 175, 74, 18
+END
+
 IDD_NETWORK DIALOGEX 0, 0, 640, 368
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Пиры и трекер"

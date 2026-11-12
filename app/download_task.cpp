@@ -87,7 +87,7 @@ bool DownloadTask::load(const std::string& source, Config config) {
     return true;
 }
 
-bool DownloadTask::start(Config config) {
+bool DownloadTask::start(Config config, std::shared_ptr<utils::BandwidthLimits> global_limits) {
     const auto seeding = SeedingOptions::fromConfig(config);
     seeding.validate();
     if (config.max_download_speed < 0 || config.max_upload_speed < 0)
@@ -104,13 +104,13 @@ bool DownloadTask::start(Config config) {
         file_priorities_ = config.file_priorities; priority_revision_ = 0;
         snapshot_.priorities_pending = false;
     }
-    worker_ = std::thread([this, config] {
+    worker_ = std::thread([this, config, global_limits = std::move(global_limits)] {
         try {
             // A magnet can have loaded metadata with the previous network settings.
             // Release its old socket on this worker before binding the new session.
             if (input_->dht && (!config.enable_dht ||
                 (config.dht_port != 0 && input_->dht->port() != config.dht_port))) input_->dht.reset();
-            DownloadManager manager(input_->torrent, config, std::move(input_->dht));
+            DownloadManager manager(input_->torrent, config, std::move(input_->dht), global_limits);
             auto download_limit = config.max_download_speed, upload_limit = config.max_upload_speed;
             std::optional<std::chrono::steady_clock::time_point> seed_started;
             uint64_t applied_revision = 0;

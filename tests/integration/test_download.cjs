@@ -26,7 +26,8 @@ function packet(id, payload = Buffer.alloc(0)) {
 
 async function main() {
   const executable = path.resolve(process.argv[2]);
-  const desktopUI = process.argv[3] === '--desktop-ui';
+  const globalUI = process.argv[3] === '--desktop-global-ui';
+  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI;
   const work = fs.mkdtempSync(path.join(process.cwd(), 'download-test-'));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; i++) data[i] = (i * 37 + 11) % 256;
@@ -95,8 +96,14 @@ async function main() {
       enable_dht: false, enable_pex: false, enable_lsd: false,
       enable_webseeds: false, enable_utp: false, enable_encryption: false,
       download_dir: './files', log_file: './client.log', listen_port: await availablePort() }));
+    if (globalUI) {
+      const file = path.join(work, 'config.json'), config = JSON.parse(fs.readFileSync(file));
+      config.global_max_download_speed = 1; config.global_max_upload_speed = 7;
+      config.max_download_speed = 131072; config.max_upload_speed = 16384;
+      fs.writeFileSync(file, JSON.stringify(config));
+    }
     const args = desktopUI
-      ? ['--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
+      ? [globalUI ? '--ui-test-global-limits' : '--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
       : ['test.torrent', '--config', 'config.json'];
     child = spawn(executable, args, { cwd: work, windowsHide: true });
     child.stdout.on('data', chunk => { output += chunk; });
@@ -110,6 +117,13 @@ async function main() {
     assert.equal(code, 0, `Client failed or timed out:\n${output}`);
     assert.ok(requests >= 4, 'Expected requests spanning multiple pieces and blocks');
     assert.deepEqual(fs.readFileSync(path.join(work, 'files', 'payload.bin')), data);
+    if (globalUI) {
+      const config = JSON.parse(fs.readFileSync(path.join(work, 'config.json')));
+      assert.equal(config.global_max_download_speed, 65536);
+      assert.equal(config.global_max_upload_speed, 32768);
+      assert.equal(config.max_download_speed, 131072);
+      assert.equal(config.max_upload_speed, 16384);
+    }
     if (!desktopUI) assert.ok(output.includes('Download complete!'), output);
     console.log(`PASS: ${data.length} bytes downloaded through local tracker and peer; exact contents verified (${requests} block requests).`);
   } finally {

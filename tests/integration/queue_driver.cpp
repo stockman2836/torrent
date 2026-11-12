@@ -15,6 +15,8 @@ int main(int argc, char* argv[]) {
         if (!config.loadFromFile(argv[3])) return 2;
         const std::string mode = argv[4];
         const bool seeding = mode.rfind("seed-", 0) == 0;
+        const bool global = mode.rfind("global-", 0) == 0;
+        const bool global_seed = mode == "global-seed";
         if (mode == "seed-resume") {
             DownloadTask initial;
             initial.load(argv[1], config); initial.wait();
@@ -35,7 +37,15 @@ int main(int argc, char* argv[]) {
             if (std::chrono::steady_clock::now() >= metadata_deadline) throw std::runtime_error("Metadata loading timed out");
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        queue.setLimit(mode == "parallel" || mode == "collision" ? 2 : 1);
+        queue.setLimit(mode == "parallel" || mode == "collision" || global ? 2 : 1);
+        if (global) {
+            queue.setGlobalSpeedLimits(config.global_max_download_speed, config.global_max_upload_speed);
+            if (mode == "global-local") queue.setSpeedLimits(first, 8192, 0);
+            if (global_seed) {
+                queue.setSeedingOptions(first, {true, 0, 0});
+                queue.setSeedingOptions(second, {true, 0, 0});
+            }
+        }
         if (mode == "limited") queue.setSpeedLimits(first, 16384, 0);
         if (mode == "live" || mode == "limited-stop") queue.setSpeedLimits(first, 1024, 0);
         if (mode == "upload" || mode == "upload-live") queue.setSpeedLimits(first, 0, 8192);
@@ -55,6 +65,26 @@ int main(int argc, char* argv[]) {
             const auto b = std::find_if(entries.begin(), entries.end(), [second](const auto& e) { return e.id == second; });
             for (const auto& entry : entries) if (entry.download.state == DownloadState::Failed)
                 throw std::runtime_error(entry.download.error);
+            if (global && (mode == "global-live" || mode == "global-stop" || mode == "global-upload-live" || mode == "global-upload-stop") &&
+                !changed && std::chrono::steady_clock::now() - started > std::chrono::milliseconds(1500)) {
+                if (mode == "global-stop" || mode == "global-upload-stop") {
+                    queue.stop(first); queue.stop(second); interrupted = true; stop_time = std::chrono::steady_clock::now();
+                } else queue.setGlobalSpeedLimits(0, 0);
+                changed = true;
+            }
+            if (global && interrupted && std::all_of(entries.begin(), entries.end(), [](const auto& e) { return !e.busy; })) {
+                if (std::chrono::steady_clock::now() - stop_time > std::chrono::seconds(3))
+                    throw std::runtime_error("Stopping shared rate waits took too long");
+                queue.setGlobalSpeedLimits(0, 0);
+                queue.enqueue(first); queue.enqueue(second);
+                interrupted = false; resumed = true;
+            }
+            if (global_seed && !changed && a != entries.end() && b != entries.end() &&
+                a->download.state == DownloadState::Seeding && b->download.state == DownloadState::Seeding &&
+                a->download.uploaded_bytes >= 65536 && b->download.uploaded_bytes >= 65536) {
+                queue.setSeedingOptions(first, {false, 0, 0});
+                queue.setSeedingOptions(second, {false, 0, 0}); changed = true;
+            }
             if (seeding && a != entries.end() && a->download.state == DownloadState::Seeding) {
                 saw_seed = true;
                 if (!seeding_started) seeding_started = std::chrono::steady_clock::now();

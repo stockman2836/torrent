@@ -214,8 +214,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 128 CTest suites/scenarios, or 129
-when the OpenSSL executable is available: 121 ordinary checks, an optional local
+Both independent-client options enabled yield 136 CTest suites/scenarios, or 137
+when the OpenSSL executable is available: 129 ordinary checks, an optional local
 TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -299,6 +299,30 @@ system-only PATH:
 ```powershell
 node tests/integration/test_live_priorities.cjs build/desktop/TorrentClient.exe ui
 ```
+
+## Global speed limits
+
+`test_token_bucket` checks combined local/shared budgets, independent session
+buckets, cancellation, live rate removal and a slow local bucket leaving shared
+capacity available. Queue checks preserve per-torrent caps, reject negative
+limits, round-trip global preferences at byte precision and reject malformed,
+fractional or overflowing JSON values. Older preferences default to unlimited.
+
+`test_queue_global_*` runs two local torrents concurrently and verifies aggregate
+download/upload timings, individual caps alongside a global cap, live removal,
+stop/resume while waiting at 1 B/s and uploading from two complete seeds. Each
+scenario compares payload bytes. The reference peers inspect actual upload frames;
+download timing measures accepted payload through completion, not bytes already
+buffered by the network stack. The limiter retains its bounded burst allowance.
+
+```sh
+ctest --test-dir build -R "test_queue_global|test_token_bucket|test_download_queue" --output-on-failure
+```
+
+The portable check also runs `test_download.cjs` with `--desktop-global-ui`.
+It starts with a saved 1 B/s global cap, applies new rates using the real dialog
+during a download, and verifies completed bytes and the saved global/individual
+settings in the fixture's config. It does not write the user's preferences.
 
 ## Portable distribution
 

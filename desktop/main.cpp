@@ -12,6 +12,7 @@
 #include "seeding_dialog.h"
 #include "network_dialog.h"
 #include "network_settings_dialog.h"
+#include "global_speed_dialog.h"
 #include "torrent/core/logger.h"
 #include <algorithm>
 #include <filesystem>
@@ -64,7 +65,7 @@ std::wstring bytes(int64_t value) {
     return out.str();
 }
 enum Control { Source = 100, Browse, Read, Folder, ChooseFolder, Files, SelectAll, SelectNone,
-    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits, SeedSettings, NetworkDetails, EditNetworkSettings };
+    Priority, Apply, Start, Stop, OpenFolder, Jobs, Remove, Limit, DownloadLimit, UploadLimit, ApplyLimits, SeedSettings, NetworkDetails, EditNetworkSettings, GlobalSpeedLimits };
 const wchar_t* priorityName(FilePriority value) {
     switch (value) {
     case FilePriority::High: return L"Высокий";
@@ -79,6 +80,7 @@ public:
     HWND handle = nullptr;
     bool smoke = false;
     bool smokePriorities = false;
+    bool smokeGlobalLimits = false;
     std::wstring smokeSource, smokeSecond, smokeFolder, smokeConfig;
     int exitCode = 0;
 
@@ -107,14 +109,16 @@ private:
     HWND title_, subtitle_, source_, browse_, read_, folderLabel_, folder_, choose_, files_,
         all_, none_, priority_, apply_, summary_, progress_, status_, speeds_, start_, stop_, open_,
         jobs_, jobsLabel_, remove_, limit_, limitLabel_, rateLabel_, downloadLabel_, uploadLabel_,
-        downloadLimit_, uploadLimit_, applyLimits_, seedSettings_, networkStatus_, networkDetails_, networkSettings_;
+        downloadLimit_, uploadLimit_, applyLimits_, seedSettings_, networkStatus_, networkDetails_, networkSettings_, globalSpeedLimits_;
     bool dialogOpen_ = false;
     HFONT font_ = nullptr, heading_ = nullptr;
     std::shared_ptr<const std::vector<FileInfo>> displayed_;
     std::vector<FilePriority> priorities_;
     bool filling_ = false, fillingJobs_ = false, closing_ = false, smokeStarted_ = false, dirty_ = false;
     bool smokePrioritiesApplied_ = false;
+    bool smokeGlobalLimitsApplied_ = false;
     ULONGLONG smokeDeadline_ = 0;
+    ULONGLONG smokeStartedAt_ = 0;
     DownloadId selected_ = 0, rendered_ = 0;
     std::vector<QueueSnapshot> entries_;
     DownloadState previous_ = DownloadState::Idle;
@@ -139,6 +143,7 @@ private:
         SendMessageW(title_, WM_SETFONT, reinterpret_cast<WPARAM>(heading_), TRUE);
         subtitle_ = control(L"STATIC", L"Добавляйте торренты и управляйте загрузками в списке слева", SS_LEFT);
         networkSettings_ = control(L"BUTTON", L"Настройки сети…", WS_TABSTOP, EditNetworkSettings);
+        globalSpeedLimits_ = control(L"BUTTON", L"Общая скорость…", WS_TABSTOP, GlobalSpeedLimits);
         source_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Source);
         SendMessageW(source_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Путь к .torrent или magnet-ссылка"));
         browse_ = control(L"BUTTON", L"Открыть .torrent", WS_TABSTOP, Browse);
@@ -162,7 +167,7 @@ private:
         folderLabel_ = control(L"STATIC", L"Папка загрузки", SS_LEFT);
         folder_ = control(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, Folder);
         choose_ = control(L"BUTTON", L"Выбрать папку", WS_TABSTOP, ChooseFolder);
-        rateLabel_ = control(L"STATIC", L"Лимиты скорости (КиБ/с) · 0 — без ограничений", SS_LEFT);
+        rateLabel_ = control(L"STATIC", L"Лимиты торрента (КиБ/с) · 0 — без ограничений", SS_LEFT);
         downloadLabel_ = control(L"STATIC", L"Скачивание", SS_LEFT);
         uploadLabel_ = control(L"STATIC", L"Отдача", SS_LEFT);
         downloadLimit_ = control(WC_EDITW, L"0", WS_TABSTOP | ES_AUTOHSCROLL, DownloadLimit);
@@ -208,6 +213,7 @@ private:
         if (smoke) {
             config_.loadFromFile(utf8(smokeConfig));
             settings_.clear();
+            if (smokeGlobalLimits) settings_ = fs::path(smokeConfig);
             listPath_.clear();
             config_.download_dir = utf8(smokeFolder);
             SetWindowTextW(source_, smokeSource.c_str());
@@ -216,6 +222,7 @@ private:
         try { Logger::init((home / L"desktop.log").u8string(), Logger::Level::OFF); } catch (...) {}
         SetWindowTextW(folder_, wide(config_.download_dir).c_str());
         queue_.setNetworkSettings(NetworkSettings::fromConfig(config_));
+        queue_.setGlobalSpeedLimits(config_.global_max_download_speed, config_.global_max_upload_speed);
         if (!listPath_.empty() && fs::exists(listPath_)) {
             try { queue_.restore(listPath_.u8string(), config_); }
             catch (const std::exception& error) {
@@ -242,7 +249,8 @@ private:
         RECT bounds{}; GetClientRect(handle, &bounds);
         const int w = bounds.right, h = bounds.bottom, m = 24, left = 328, bottom = h - 237;
         const auto move = [](HWND c, int x, int y, int width, int height) { MoveWindow(c, x, y, std::max(1, width), height, TRUE); };
-        move(title_, m, 18, w-280, 42); move(subtitle_, m, 66, w-48, 25);
+        move(title_, m, 18, w-500, 42); move(subtitle_, m, 66, w-48, 25);
+        move(globalSpeedLimits_, w-434, 25, 200, 34);
         move(networkSettings_, w-224, 25, 200, 34);
         move(source_, m, 107, w-320, 32); move(browse_, w-284, 106, 155, 34); move(read_, w-119, 106, 95, 34);
         move(jobsLabel_, m, 158, 280, 22); move(jobs_, m, 188, 280, h-370);
@@ -391,6 +399,22 @@ private:
         config_ = std::move(updated);
         refresh();
     }
+    void globalSpeedLimits() {
+        if (closing_ || dialogOpen_) return;
+        auto updated = config_;
+        dialogOpen_ = true;
+        bool accepted;
+        try { accepted = editGlobalSpeedLimits(handle, updated.global_max_download_speed, updated.global_max_upload_speed, smoke); }
+        catch (...) { dialogOpen_ = false; throw; }
+        dialogOpen_ = false;
+        if (smoke && !accepted) throw std::runtime_error("Global speed settings dialog did not apply");
+        if (!accepted || closing_) return;
+        if (!settings_.empty() && !updated.saveToFile(settings_.u8string()))
+            throw std::runtime_error(u8"Не удалось сохранить общие лимиты скорости");
+        queue_.setGlobalSpeedLimits(updated.global_max_download_speed, updated.global_max_upload_speed);
+        config_ = std::move(updated);
+        refresh();
+    }
     void populate(const DownloadSnapshot& snapshot, const Config& config) {
         filling_ = true;
         ListView_DeleteAllItems(files_);
@@ -495,9 +519,15 @@ private:
                 if (ListView_GetItemCount(files_) == 0) { exitCode = 1; close(); }
                 else {
                     smokeStarted_ = true;
+                    smokeStartedAt_ = GetTickCount64();
                     networkSettings();
                     SendMessageW(handle, WM_COMMAND, Start, 0);
                 }
+            } else if (smokeGlobalLimits && !smokeGlobalLimitsApplied_ && busy &&
+                       state.state == DownloadState::Downloading && GetTickCount64() >= smokeStartedAt_ + 1500) {
+                smokeGlobalLimitsApplied_ = true;
+                if (state.progress != 0) throw std::runtime_error("Saved global limit did not apply at startup");
+                SendMessageW(handle, WM_COMMAND, GlobalSpeedLimits, 0);
             } else if (smokePriorities && !smokePrioritiesApplied_ && busy && state.progress > 0 &&
                        state.state == DownloadState::Downloading) {
                 smokePrioritiesApplied_ = true;
@@ -509,6 +539,7 @@ private:
                 SendMessageW(handle, WM_COMMAND, Apply, 0);
             } else if (!busy && state.state == DownloadState::Complete) {
                 if (smokePriorities && !smokePrioritiesApplied_) exitCode = 1;
+                if (smokeGlobalLimits && !smokeGlobalLimitsApplied_) exitCode = 1;
                 networkDetails(); close();
             }
             else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
@@ -643,6 +674,7 @@ private:
             case SeedSettings: seedingSettings(); break;
             case NetworkDetails: networkDetails(); break;
             case EditNetworkSettings: networkSettings(); break;
+            case GlobalSpeedLimits: globalSpeedLimits(); break;
             case ApplyLimits: applySpeedLimits(); refresh(); break;
             case Stop: queue_.stop(selected_); refresh(); break;
             case Remove: queue_.remove(selected_); persist(); refresh(); break;
@@ -689,9 +721,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     Window window;
     int argc = 0;
     auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argv && argc == 5 && (std::wstring(argv[1]) == L"--ui-test" || std::wstring(argv[1]) == L"--ui-test-priorities")) {
+    if (argv && argc == 5 && (std::wstring(argv[1]) == L"--ui-test" || std::wstring(argv[1]) == L"--ui-test-priorities" ||
+                             std::wstring(argv[1]) == L"--ui-test-global-limits")) {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeFolder = argv[3]; window.smokeConfig = argv[4];
         window.smokePriorities = std::wstring(argv[1]) == L"--ui-test-priorities";
+        window.smokeGlobalLimits = std::wstring(argv[1]) == L"--ui-test-global-limits";
     }
     if (argv && argc == 6 && std::wstring(argv[1]) == L"--ui-queue-test") {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeSecond = argv[3];

@@ -26,6 +26,9 @@ struct Config {
     // Speed limits (bytes per second, 0 = unlimited)
     int64_t max_download_speed = 0;  // 0 = unlimited
     int64_t max_upload_speed = 0;    // 0 = unlimited
+    // Desktop-wide payload limits; individual torrent caps above still apply.
+    int64_t global_max_download_speed = 0;
+    int64_t global_max_upload_speed = 0;
 
     // Download settings
     std::string download_dir = "./downloads";

@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-11-11.
+Last updated: 2026-11-12.
 
 The main application is the native Windows desktop client. The CLI and automated
 fixtures use the same engine. Follow [architecture](architecture.md) when adding
@@ -19,6 +19,7 @@ code; prefer small concrete modules and keep network work off the window thread.
 - [x] Saved download list, destinations, file choices and per-torrent settings.
 - [x] Stop and continue individual jobs using saved verified pieces.
 - [x] Live per-torrent upload and download limits.
+- [x] Saved global download/upload budgets shared by all desktop sessions with live updates.
 - [x] Optional seeding with ratio and time limits.
 - [x] Incoming IPv4/IPv6 TCP peers with handshake deadlines, a peer cap and verified uploads.
 - [x] Live peer connections, transfer totals, tracker responses/errors and waiting hints in the desktop.
@@ -27,7 +28,7 @@ code; prefer small concrete modules and keep network work off the window thread.
 
 Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
-coverage. The ordinary suite currently has seventeen unit suites and 104
+coverage. The ordinary suite currently has seventeen unit suites and 112
 offline integration scenarios, plus a certificate check when the OpenSSL tool
 is available. See [tests](../tests/README.md) for verification.
 
@@ -89,7 +90,6 @@ encrypted/uTP transfers and other network environments still need validation.
 - Port reachability and connectivity diagnostics across different networks.
 - Optional UPnP/NAT-PMP port mapping with explicit user controls.
 - Serve verified magnet metadata to peers.
-- Global speed limits in addition to the existing per-torrent limits.
 - Tracker-list fallback and richer peer statistics beyond the active tracker and current connections.
 - Windows and POSIX CI plus broader protocol and encryption checks.
 - Profile disk I/O and memory usage before adding caches or tuning performance.

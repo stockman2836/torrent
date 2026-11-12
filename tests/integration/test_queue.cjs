@@ -23,6 +23,9 @@ function packet(id, payload = Buffer.alloc(0)) {
 
 async function main() {
   const executable = path.resolve(process.argv[2]), mode = process.argv[3] || 'serial';
+  const global = mode.startsWith('global-');
+  const globalUpload = ['global-upload', 'global-upload-live', 'global-upload-stop'].includes(mode);
+  const globalSeed = mode === 'global-seed';
   const scratch = fs.existsSync(path.join(process.cwd(), 'build')) ? path.join(process.cwd(), 'build') : process.cwd();
   const work = fs.mkdtempSync(path.join(scratch, 'queue-test-'));
   const seedMode = mode.startsWith('seed-') || mode === 'ui';
@@ -46,7 +49,8 @@ async function main() {
     const timer = setTimeout(() => {
       timers.delete(timer);
       if (socket.destroyed) return;
-      for (let n = 0; n < 2; ++n) {
+      torrent.uploadStarted = Date.now();
+      for (let n = 0; n < (globalSeed ? 4 : 2); ++n) {
         const request = Buffer.alloc(12); request.writeUInt32BE(16384, 8);
         socket.write(packet(6, request));
       }
@@ -74,12 +78,13 @@ async function main() {
           if (pending.length < length + 4) break;
           const message = pending.subarray(4, length + 4); pending = pending.subarray(length + 4);
           if (message[0] === 1) unchoked = true;
-          const uploadMode = torrent.id === 0 && ['upload', 'upload-live', 'upload-stop'].includes(mode);
+          const uploadMode = globalUpload || torrent.id === 0 && ['upload', 'upload-live', 'upload-stop'].includes(mode);
           if (mode === 'seed-resume' && torrent.id === 0 && torrent.stops > 0 && message[0] === 5) {
             assert.equal(message[1] & 0xf0, 0xf0, 'Resumed seed did not advertise verified pieces');
             requestSeededBlocks(torrent, socket);
           }
-          if (uploadMode && message[0] === 4 && message.readUInt32BE(1) === 0 && !torrent.uploadStarted) {
+          if (uploadMode && !torrent.uploadStarted && (message[0] === 4 && message.readUInt32BE(1) === 0 ||
+              globalUpload && torrent.stops > 0 && message[0] === 1)) {
             assert.ok(unchoked, 'Outgoing connection must send UNCHOKE before accepting upload requests');
             torrent.uploadStarted = Date.now();
             for (let n = 0; n < 4; ++n) {
@@ -87,7 +92,7 @@ async function main() {
               socket.write(packet(6, request));
             }
           }
-          if ((uploadMode || seedMode) && message[0] === 7) {
+          if ((uploadMode || seedMode || globalSeed) && message[0] === 7) {
             assert.equal(message.readUInt32BE(1), 0); assert.equal(message.readUInt32BE(5), 0);
             assert.deepEqual(message.subarray(9), torrent.data.subarray(0, 16384));
             torrent.uploads.push(Date.now());
@@ -124,7 +129,7 @@ async function main() {
       if (query.get('event') === 'completed') {
         ++torrent.completed;
         if (torrent.stops > 0) ++torrent.resumedCompleted;
-        if (seedMode && torrent.id === 0 && mode !== 'seed-resume') {
+        if (globalSeed || seedMode && torrent.id === 0 && mode !== 'seed-resume') {
           assert.equal(Number(query.get('left')), 0);
           for (const socket of torrent.sockets) requestSeededBlocks(torrent, socket);
         }
@@ -132,6 +137,7 @@ async function main() {
       if (query.get('event') === 'stopped') {
         active.delete(torrent.id); ++torrent.stops;
         torrent.stopped = Date.now();
+        if (mode === 'global-upload-stop') { torrent.uploadStarted = 0; torrent.held = []; }
         for (const socket of torrent.sockets) socket.end();
       }
       maxActive = Math.max(maxActive, active.size);
@@ -143,8 +149,12 @@ async function main() {
     await listen(peer); await listen(tracker);
     for (const torrent of torrents) fs.writeFileSync(path.join(work, `${torrent.id}.torrent`), encode({
       announce: `http://127.0.0.1:${tracker.address().port}/announce`, info: torrent.info }));
+    const downloadRate = mode === 'global-download' ? 32768 : mode === 'global-local' ? 65536 :
+      ['global-live', 'global-stop'].includes(mode) ? 1 : 0;
+    const uploadRate = ['global-upload-live', 'global-upload-stop'].includes(mode) ? 1 : globalUpload || globalSeed ? 16384 : 0;
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({ enable_dht: false, enable_lsd: false,
       enable_pex: false, enable_utp: false, enable_webseeds: false, enable_encryption: false,
+      global_max_download_speed: downloadRate, global_max_upload_speed: uploadRate,
       sequential_download: true, download_dir: './files', listen_port: await availablePort(2) }));
     const args = mode === 'ui'
       ? ['--ui-queue-test', path.join(work, '0.torrent'), path.join(work, '1.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
@@ -158,7 +168,7 @@ async function main() {
     fs.writeFileSync(path.join(work, 'output.log'), output);
     if (protocolError) throw protocolError;
     assert.equal(code, 0, output);
-    assert.equal(maxActive, mode === 'parallel' || seedMode && !collision ? 2 : 1, 'Unexpected number of overlapping sessions');
+    assert.equal(maxActive, global || mode === 'parallel' || seedMode && !collision ? 2 : 1, 'Unexpected number of overlapping sessions');
     for (const torrent of torrents) {
       if (collision && torrent.id === 0) continue;
       const saved = fs.readFileSync(path.join(work, 'files', torrent.info.name));
@@ -171,6 +181,28 @@ async function main() {
       assert.ok(torrents[1].stopped - torrents[1].started < 3000, 'A per-torrent limit leaked to another job');
     }
     if (mode === 'live') assert.ok(torrents[0].stopped - torrents[0].started < 4000, 'Removing the limit did not release the active transfer');
+    if (mode === 'global-download') {
+      const elapsed = Math.max(...torrents.map(t => t.stopped)) - Math.min(...torrents.map(t => t.started));
+      assert.ok(elapsed >= 5500, `Two downloads exceeded the shared budget: ${elapsed}ms`);
+    }
+    if (mode === 'global-local') {
+      assert.ok(torrents[0].stopped - torrents[0].started >= 10000, 'Shared limit replaced the individual cap');
+      assert.ok(torrents[1].stopped - torrents[1].started < 5000, 'Slow job reserved the shared download budget');
+    }
+    if (['global-live', 'global-upload-live'].includes(mode)) {
+      const elapsed = Math.max(...torrents.map(t => t.stopped)) - Math.min(...torrents.map(t => t.started));
+      assert.ok(elapsed >= 1400 && elapsed < 6000, `Live shared limit removal failed: ${elapsed}ms`);
+    }
+    if (globalUpload || globalSeed) {
+      for (const torrent of torrents) assert.equal(torrent.uploads.length, 4, 'Missing upload payload');
+      if (mode === 'global-upload' || globalSeed) {
+        const elapsed = Math.max(...torrents.flatMap(t => t.uploads)) - Math.min(...torrents.map(t => t.started));
+        assert.ok(elapsed >= 6000, `Two uploads exceeded the shared budget: ${elapsed}ms`);
+      }
+    }
+    if (mode === 'global-stop' || mode === 'global-upload-stop') {
+      for (const torrent of torrents) assert.equal(torrent.stops, 2, 'Shared wait was not stopped and resumed');
+    }
     if (['upload', 'upload-live'].includes(mode)) {
       assert.equal(torrents[0].uploads.length, 4);
       const elapsed = torrents[0].uploads[3] - torrents[0].uploadStarted;

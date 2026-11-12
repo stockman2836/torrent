@@ -199,7 +199,30 @@ bool TokenBucket::tryConsume(size_t bytes) {
     return false;
 }
 
-bool TokenBucket::waitAndConsume(size_t bytes, const std::function<bool()>& cancelled) {
+bool TokenBucket::waitAndConsume(size_t bytes, const std::function<bool()>& cancelled, TokenBucket* shared) {
+    if (shared && shared != this) {
+        double remaining = static_cast<double>(bytes);
+        while (remaining > 0) {
+            if (cancelled && cancelled()) return false;
+            std::unique_lock<std::mutex> local_lock(mutex_, std::defer_lock);
+            std::unique_lock<std::mutex> shared_lock(shared->mutex_, std::defer_lock);
+            std::lock(local_lock, shared_lock);
+            refill();
+            shared->refill();
+            auto consumed = remaining;
+            if (rate_) consumed = std::min(consumed, tokens_);
+            if (shared->rate_) consumed = std::min(consumed, shared->tokens_);
+            if (rate_) tokens_ -= consumed;
+            if (shared->rate_) shared->tokens_ -= consumed;
+            remaining -= consumed;
+            if (remaining <= 0) return !(cancelled && cancelled());
+            // Release the shared mutex before sleeping so other sessions can run.
+            // Polling also observes shared rate changes and cancellation promptly.
+            shared_lock.unlock();
+            changed_.wait_for(local_lock, std::chrono::milliseconds(50));
+        }
+        return true;
+    }
     std::unique_lock<std::mutex> lock(mutex_);
     double remaining = static_cast<double>(bytes);
     while (remaining > 0) {
