@@ -27,7 +27,8 @@ function packet(id, payload = Buffer.alloc(0)) {
 async function main() {
   const executable = path.resolve(process.argv[2]);
   const globalUI = process.argv[3] === '--desktop-global-ui';
-  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI;
+  const fallbackUI = process.argv[3] === '--desktop-fallback-ui';
+  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI || fallbackUI;
   const work = fs.mkdtempSync(path.join(process.cwd(), 'download-test-'));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; i++) data[i] = (i * 37 + 11) % 256;
@@ -38,6 +39,7 @@ async function main() {
   const sockets = new Set();
   let requests = 0;
   let protocolError;
+  const announces = [];
   const peer = net.createServer(socket => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
@@ -78,7 +80,10 @@ async function main() {
     });
   });
   const tracker = http.createServer((req, res) => {
-    if (new URL(req.url, 'http://localhost').searchParams.get('event') === 'stopped') {
+    const url = new URL(req.url, 'http://localhost'), event = url.searchParams.get('event');
+    announces.push({ path: url.pathname, event });
+    if (fallbackUI && url.pathname === '/failed') { res.writeHead(503); res.end(); return; }
+    if (event === 'stopped') {
       for (const socket of sockets) socket.end();
     }
     const compact = Buffer.from([127, 0, 0, 1, 0, 0]);
@@ -90,8 +95,10 @@ async function main() {
   try {
     await listen(peer);
     await listen(tracker);
+    const trackerUrl = `http://127.0.0.1:${tracker.address().port}`;
     fs.writeFileSync(path.join(work, 'test.torrent'), encode({
-      announce: `http://127.0.0.1:${tracker.address().port}/announce`, info }));
+      announce: trackerUrl + '/announce', info,
+      ...(fallbackUI ? { 'announce-list': [[trackerUrl + '/failed'], [trackerUrl + '/backup']] } : {}) }));
     fs.writeFileSync(path.join(work, 'config.json'), JSON.stringify({
       enable_dht: false, enable_pex: false, enable_lsd: false,
       enable_webseeds: false, enable_utp: false, enable_encryption: false,
@@ -117,6 +124,11 @@ async function main() {
     assert.equal(code, 0, `Client failed or timed out:\n${output}`);
     assert.ok(requests >= 4, 'Expected requests spanning multiple pieces and blocks');
     assert.deepEqual(fs.readFileSync(path.join(work, 'files', 'payload.bin')), data);
+    if (fallbackUI) {
+      assert.equal(announces.filter(a => a.path === '/failed').length, 1);
+      assert.ok(!announces.some(a => a.path === '/announce'), 'Legacy URL overrode tracker tiers');
+      assert.deepEqual(announces.filter(a => a.path === '/backup').map(a => a.event), ['started', 'completed', 'stopped']);
+    }
     if (globalUI) {
       const config = JSON.parse(fs.readFileSync(path.join(work, 'config.json')));
       assert.equal(config.global_max_download_speed, 65536);

@@ -55,7 +55,7 @@ void MagnetDownloadManager::findPeersViaTrackers() {
         if (!running_) return;
         try {
             TrackerClient tracker(url, magnet_uri_.infoHash(), peer_id_);
-            const auto response = tracker.announce(0, 0, 0, listen_port_, "started");
+            const auto response = tracker.announce(0, 0, 0, listen_port_, "started", 30, [this] { return !running_.load(); });
             if (!response.isSuccess()) continue;
             if (!response.peers.empty() && working_tracker_.empty()) working_tracker_ = url;
             for (const auto& peer : response.peers) {

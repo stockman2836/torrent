@@ -214,8 +214,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 136 CTest suites/scenarios, or 137
-when the OpenSSL executable is available: 129 ordinary checks, an optional local
+Both independent-client options enabled yield 154 CTest suites/scenarios, or 155
+when the OpenSSL executable is available: 147 ordinary checks, an optional local
 TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -299,6 +299,30 @@ system-only PATH:
 ```powershell
 node tests/integration/test_live_priorities.cjs build/desktop/TorrentClient.exe ui
 ```
+
+## Tracker fallback
+
+`test_torrent_file` covers tier boundaries, legacy precedence/fallback,
+list-only torrents, duplicate/empty entries and ordered magnet trackers.
+`test_tracker_fallback_*` uses the production task/session with isolated local
+HTTP and UDP trackers. Eighteen scenarios cover failure reasons, HTTP errors,
+invalid/empty bodies, timeouts, list-only metadata, UDP fallback in both directions,
+promotion within a tier, interval handling, empty peer responses, switching during
+a transfer, higher-tier recovery, all-failed backoff, cancellation in both
+transports, completion timeouts and bounded final notifications. A 32-cycle
+start/stop scenario checks that service workers wake without waiting for their
+normal timers. Transfer cases
+compare exact payload bytes; wire events distinguish registered trackers from
+untried/unavailable backups. Artifact directories are `build/tests/tracker-fallback-*`.
+
+```sh
+ctest --test-dir build -R "test_tracker_fallback|test_torrent_file|test_network_status|test_tracker_tls" --output-on-failure
+```
+
+Portable verification additionally runs the native window through
+`test_download.cjs --desktop-fallback-ui`: its first tracker returns HTTP 503,
+the backup supplies the peer, and the fixture verifies final bytes and lifecycle
+events. The window opens its network-details dialog after completion.
 
 ## Global speed limits
 

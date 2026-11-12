@@ -75,6 +75,11 @@ if(NODE_EXECUTABLE)
     endforeach()
     add_executable(network_status_driver integration/network_status_driver.cpp)
     target_link_libraries(network_status_driver PRIVATE torrent_app nlohmann_json::nlohmann_json)
+    foreach(scenario failure http malformed empty timeout list-only udp-timeout udp-backup promotion mid-download recover completion-timeout all-fail cancel-http cancel-udp empty-peers stop-bounded shutdown-race)
+        add_test(NAME test_tracker_fallback_${scenario} COMMAND "${NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_tracker_fallback.cjs" "$<TARGET_FILE:network_status_driver>" ${scenario})
+        set_tests_properties(test_tracker_fallback_${scenario} PROPERTIES TIMEOUT 25)
+    endforeach()
     foreach(scenario transfer error none dht)
         add_test(NAME test_network_status_${scenario} COMMAND "${NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/integration/test_network_status.cjs" "$<TARGET_FILE:network_status_driver>" ${scenario})

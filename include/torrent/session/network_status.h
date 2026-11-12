@@ -26,6 +26,8 @@ struct TrackerStatus {
     TrackerState state = TrackerState::None;
     size_t peers_returned = 0;
     size_t consecutive_failures = 0;
+    size_t total_trackers = 0;
+    size_t attempt = 0;
     std::string error;
 };
 

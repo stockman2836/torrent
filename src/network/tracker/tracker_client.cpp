@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <curl/curl.h>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -96,7 +97,13 @@ static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* use
 }
 
 // Helper function to perform HTTP GET request using libcurl
-static std::string httpGet(const std::string& url, std::string& error_msg) {
+static int cancelledTransfer(void* context, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    const auto& cancelled = *static_cast<const std::function<bool()>*>(context);
+    return cancelled && cancelled() ? 1 : 0;
+}
+
+static std::string httpGet(const std::string& url, std::string& error_msg, int timeout_seconds,
+                           const std::function<bool()>& cancelled) {
     LOG_DEBUG("HTTP GET request to: {}", url);
 
     CURL* curl = curl_easy_init();
@@ -116,9 +123,11 @@ static std::string httpGet(const std::string& url, std::string& error_msg) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
 
-    // Set timeout (30 seconds)
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(timeout_seconds));
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, static_cast<long>(std::min(10, timeout_seconds)));
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, cancelledTransfer);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelled);
 
     // Set user agent
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "BitTorrent Client/1.0");
@@ -208,19 +217,26 @@ TrackerResponse TrackerClient::announce(int64_t uploaded,
                                        int64_t downloaded,
                                        int64_t left,
                                        uint16_t port,
-                                       const std::string& event) {
-    if (is_udp_) {
-        return announceUDP(uploaded, downloaded, left, port, event);
-    } else {
-        return announceHTTP(uploaded, downloaded, left, port, event);
+                                       const std::string& event, int timeout_seconds,
+                                       const std::function<bool()>& cancelled) {
+    if (timeout_seconds < 1) throw std::invalid_argument("Tracker timeout must be positive");
+    if (cancelled && cancelled()) {
+        TrackerResponse response; response.failure_reason = "Tracker request cancelled"; return response;
     }
+    if (is_udp_) {
+        return announceUDP(uploaded, downloaded, left, port, event, timeout_seconds, cancelled);
+    } else if (announce_url_.rfind("http://", 0) == 0 || announce_url_.rfind("https://", 0) == 0) {
+        return announceHTTP(uploaded, downloaded, left, port, event, timeout_seconds, cancelled);
+    }
+    TrackerResponse response; response.failure_reason = "Unsupported tracker URL scheme"; return response;
 }
 
 TrackerResponse TrackerClient::announceHTTP(int64_t uploaded,
                                            int64_t downloaded,
                                            int64_t left,
                                            uint16_t port,
-                                           const std::string& event) {
+                                           const std::string& event, int timeout_seconds,
+                                           const std::function<bool()>& cancelled) {
     LOG_INFO("HTTP tracker announce: uploaded={}, downloaded={}, left={}, port={}, event={}",
              uploaded, downloaded, left, port, event);
 
@@ -228,7 +244,7 @@ TrackerResponse TrackerClient::announceHTTP(int64_t uploaded,
 
     // Perform HTTP GET request
     std::string error_msg;
-    std::string response_body = httpGet(url, error_msg);
+    std::string response_body = httpGet(url, error_msg, timeout_seconds, cancelled);
 
     // Handle HTTP errors
     if (response_body.empty()) {
@@ -237,7 +253,7 @@ TrackerResponse TrackerClient::announceHTTP(int64_t uploaded,
         error_response.interval = 1800;
         error_response.complete = 0;
         error_response.incomplete = 0;
-        error_response.failure_reason = error_msg;
+        error_response.failure_reason = error_msg.empty() ? "Empty tracker response" : error_msg;
         return error_response;
     }
 
@@ -249,10 +265,11 @@ TrackerResponse TrackerClient::announceUDP(int64_t uploaded,
                                           int64_t downloaded,
                                           int64_t left,
                                           uint16_t port,
-                                          const std::string& event) {
+                                          const std::string& event, int timeout_seconds,
+                                          const std::function<bool()>& cancelled) {
     try {
         UDPTrackerClient udp_client(announce_url_, info_hash_, peer_id_);
-        return udp_client.announce(uploaded, downloaded, left, port, event);
+        return udp_client.announce(uploaded, downloaded, left, port, event, timeout_seconds, cancelled);
     } catch (const std::exception& e) {
         LOG_ERROR("UDP tracker announce exception: {}", e.what());
         TrackerResponse error_response;

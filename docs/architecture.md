@@ -85,6 +85,31 @@ serialized, and shutdown joins announce workers before sending `stopped`.
 The final snapshot clears active peers while retaining the last useful tracker
 response/error. Starting or loading a job resets its session diagnostics.
 
+`TorrentFile::trackerTiers()` preserves BEP 12 group boundaries and removes empty
+and duplicate URLs. Effective groups come from `announce-list`, falling back to
+the legacy URL when no usable group exists. Magnet tracker URLs form separate
+ordered groups so the metadata stage's working tracker keeps its preference.
+`session/tracker.cpp` owns the per-session order and acknowledgement flags; no
+additional service layer is needed. Groups retain precedence, URLs are shuffled
+within each group once and a successful URL is promoted only within its group.
+Each announce round stops at the first successful response, including zero peers.
+Periodic updates respect its interval. All-failed rounds back off for 30 seconds.
+
+The tracker worker also sends completion; `beginSeeding()` signals it without
+blocking the task owner. This lets stop cancel a pending completion request.
+Per-URL flags distinguish accepted starts, attempted completion notifications and
+acknowledged completions. Every registered tracker receives completion, with
+failed acknowledgements left pending during seeding. After workers join,
+`stopTrackers()` flushes never-attempted completion notifications and sends stopped
+only to registered URLs, preferring the current tracker. These final notifications
+share a two-second best-effort budget and preserve prior diagnostics. They do not
+discover another tracker. HTTP uses libcurl's timeout and progress cancellation;
+UDP polls a connected IPv4 socket for cancellation and a total attempt deadline.
+Synchronous hostname resolution can delay shutdown. Tracker peers are merged into
+the discovery queue so an empty tracker reply does not erase DHT/LSD addresses.
+Shutdown changes the running predicate under the same mutex used by service
+condition-variable waits, preventing a missed notification at the wait boundary.
+
 One background worker exclusively
 owns input resolution and the download session. Start, stop and close never join
 network workers on the window thread. Stop persists verified pieces; continuing

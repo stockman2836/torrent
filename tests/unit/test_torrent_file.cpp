@@ -3,6 +3,7 @@
 #include "torrent/metainfo/bencode.h"
 #include <vector>
 #include <map>
+#include "torrent/core/utils.h"
 
 using namespace torrent;
 
@@ -331,6 +332,50 @@ TEST_F(TorrentFileTest, VeryLargePieceLength) {
     TorrentFile torrent = TorrentFile::fromData(data);
     EXPECT_EQ(torrent.pieceLength(), 16777216);
     EXPECT_EQ(torrent.totalLength(), 1073741824);
+}
+
+TEST_F(TorrentFileTest, PreservesTrackerTiersAndPrefersAnnounceListOverLegacyUrl) {
+    const auto torrent = TorrentFile::fromData(createTorrentWithAnnounceList());
+    ASSERT_EQ(torrent.trackerTiers().size(), 2u);
+    EXPECT_EQ(torrent.trackerTiers()[0], (std::vector<std::string>{
+        "http://tracker1.example.com/announce", "http://tracker2.example.com/announce"}));
+    EXPECT_EQ(torrent.trackerTiers()[1], (std::vector<std::string>{"http://tracker3.example.com/announce"}));
+    auto root = BencodeParser::parse(createTorrentWithAnnounceList());
+    root.getDictionary()["announce"] = BencodeValue(std::string("http://ignored.example/announce"));
+    const auto encoded = BencodeParser::encode(root);
+    EXPECT_EQ(TorrentFile::fromData({encoded.begin(), encoded.end()}).trackerTiers(), torrent.trackerTiers());
+}
+
+TEST_F(TorrentFileTest, IgnoresEmptyInvalidAndDuplicateTierEntries) {
+    auto root = BencodeParser::parse(createMockSingleFileTorrent());
+    auto& dictionary = root.getDictionary();
+    const BencodeValue first(std::string("http://first/announce")), second(std::string("http://second/announce"));
+    dictionary["announce-list"] = BencodeValue(BencodeValue::List{
+        BencodeValue(int64_t(7)), BencodeValue(BencodeValue::List{}),
+        BencodeValue(BencodeValue::List{BencodeValue(std::string("")), first, first, BencodeValue(int64_t(1))}),
+        BencodeValue(BencodeValue::List{first, second}), BencodeValue(BencodeValue::List{second})});
+    auto encoded = BencodeParser::encode(root);
+    auto torrent = TorrentFile::fromData({encoded.begin(), encoded.end()});
+    EXPECT_EQ(torrent.trackerTiers(), (std::vector<std::vector<std::string>>{{"http://first/announce"}, {"http://second/announce"}}));
+    dictionary.erase("announce");
+    encoded = BencodeParser::encode(root);
+    EXPECT_EQ(TorrentFile::fromData({encoded.begin(), encoded.end()}).trackerTiers(), torrent.trackerTiers());
+    dictionary["announce-list"] = BencodeValue(BencodeValue::List{});
+    encoded = BencodeParser::encode(root);
+    EXPECT_TRUE(TorrentFile::fromData({encoded.begin(), encoded.end()}).trackerTiers().empty());
+    dictionary["announce"] = BencodeValue(std::string("http://legacy/announce"));
+    encoded = BencodeParser::encode(root);
+    EXPECT_EQ(TorrentFile::fromData({encoded.begin(), encoded.end()}).trackerTiers(),
+        (std::vector<std::vector<std::string>>{{"http://legacy/announce"}}));
+}
+
+TEST_F(TorrentFileTest, MagnetTrackersKeepPreferenceOrderWithoutDuplicatingUrls) {
+    const auto root = BencodeParser::parse(createMockSingleFileTorrent());
+    const auto metadata = BencodeParser::encode(root.getDictionary().at("info"));
+    const auto torrent = TorrentFile::fromMetadata(utils::sha1(metadata), {metadata.begin(), metadata.end()},
+        {"http://working/announce", "", "http://backup/announce", "http://working/announce"});
+    EXPECT_EQ(torrent.announce(), "http://working/announce");
+    EXPECT_EQ(torrent.trackerTiers(), (std::vector<std::vector<std::string>>{{"http://working/announce"}, {"http://backup/announce"}}));
 }
 
 // ==================== Main ====================

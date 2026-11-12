@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <algorithm>
 
 namespace torrent {
 
@@ -72,10 +73,8 @@ TorrentFile TorrentFile::fromMetadata(const std::vector<uint8_t>& info_hash,
     torrent.info_hash_ = info_hash;
 
     // Set trackers from magnet link
-    if (!trackers.empty()) {
-        torrent.announce_ = trackers[0];
-        torrent.announce_list_ = trackers;
-    }
+    for (const auto& url : trackers) torrent.addTrackerTier({url});
+    if (!torrent.announce_list_.empty()) torrent.announce_ = torrent.announce_list_.front();
 
     return torrent;
 }
@@ -83,7 +82,7 @@ TorrentFile TorrentFile::fromMetadata(const std::vector<uint8_t>& info_hash,
 void TorrentFile::parse(const BencodeValue& root) {
     const auto& dict = root.getDictionary();
 
-    // Announce URL (required)
+    // Legacy announce URL; a usable BEP 12 announce-list takes precedence.
     auto it = dict.find("announce");
     if (it != dict.end() && it->second.isString()) {
         announce_ = it->second.getString();
@@ -94,14 +93,17 @@ void TorrentFile::parse(const BencodeValue& root) {
     if (it != dict.end() && it->second.isList()) {
         for (const auto& tier : it->second.getList()) {
             if (tier.isList()) {
+                std::vector<std::string> urls;
                 for (const auto& url : tier.getList()) {
                     if (url.isString()) {
-                        announce_list_.push_back(url.getString());
+                        urls.push_back(url.getString());
                     }
                 }
+                addTrackerTier(urls);
             }
         }
     }
+    if (tracker_tiers_.empty() && !announce_.empty()) tracker_tiers_.push_back({announce_});
 
     // Comment (optional)
     it = dict.find("comment");
@@ -146,6 +148,17 @@ void TorrentFile::parse(const BencodeValue& root) {
     }
 
     parseInfo(it->second);
+}
+
+void TorrentFile::addTrackerTier(const std::vector<std::string>& urls) {
+    std::vector<std::string> tier;
+    for (const auto& url : urls) {
+        if (url.find_first_not_of(" \t\r\n") == std::string::npos ||
+            std::find(announce_list_.begin(), announce_list_.end(), url) != announce_list_.end()) continue;
+        tier.push_back(url);
+        announce_list_.push_back(url);
+    }
+    if (!tier.empty()) tracker_tiers_.push_back(std::move(tier));
 }
 
 void TorrentFile::parseInfo(const BencodeValue& info) {

@@ -31,6 +31,7 @@ public:
     // Getters
     const std::string& announce() const { return announce_; }
     const std::vector<std::string>& announceList() const { return announce_list_; }
+    const std::vector<std::vector<std::string>>& trackerTiers() const { return tracker_tiers_; }
     const std::string& name() const { return name_; }
     int64_t pieceLength() const { return piece_length_; }
     const std::vector<uint8_t>& pieces() const { return pieces_; }
@@ -51,9 +52,11 @@ private:
     void parse(const BencodeValue& root);
     void parseInfo(const BencodeValue& info);
     void calculateInfoHash(const std::string& rawInfoDict);
+    void addTrackerTier(const std::vector<std::string>& urls);
 
     std::string announce_;
     std::vector<std::string> announce_list_;
+    std::vector<std::vector<std::string>> tracker_tiers_;
     std::string name_;
     int64_t piece_length_;
     std::vector<uint8_t> pieces_;  // SHA1 hashes concatenated

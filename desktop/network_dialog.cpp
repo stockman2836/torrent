@@ -86,6 +86,8 @@ void refresh(HWND dialog, const DialogState& state) {
     SetDlgItemTextW(dialog, IDC_NET_SUMMARY, summary.c_str());
     SetDlgItemTextW(dialog, IDC_NET_TRACKER_URL, wide(network.tracker.url).c_str());
     auto tracker = std::wstring(trackerState(network.tracker.state));
+    if (network.tracker.state == TrackerState::Announcing && network.tracker.total_trackers > 1)
+        tracker += L" · попытка " + std::to_wstring(network.tracker.attempt) + L" из " + std::to_wstring(network.tracker.total_trackers);
     if (network.tracker.state == TrackerState::Working)
         tracker += L" · адресов в последнем ответе: " + std::to_wstring(network.tracker.peers_returned);
     if (network.tracker.consecutive_failures)

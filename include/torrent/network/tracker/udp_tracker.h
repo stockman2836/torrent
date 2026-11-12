@@ -112,7 +112,8 @@ public:
                             int64_t downloaded,
                             int64_t left,
                             uint16_t port,
-                            const std::string& event);
+                            const std::string& event, int timeout_seconds = 30,
+                            const std::function<bool()>& cancelled = {});
 
 private:
     // Connect to tracker (get connection_id)
@@ -136,6 +137,8 @@ private:
     int socket_fd_;
     int64_t connection_id_;
     bool connected_;
+    std::function<bool()> cancelled_;
+    std::chrono::steady_clock::time_point deadline_;
 
     std::random_device rd_;
     std::mt19937 rng_;

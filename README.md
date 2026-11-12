@@ -148,8 +148,26 @@ incoming/outgoing direction, connection stage, per-peer payload byte totals and
 pending requests. The dialog also shows queued peer addresses, known DHT nodes,
 failed connection attempts and the active tracker's last response/error. Counts
 belong to the current session; stopped jobs retain the last tracker result, and
-restarting resets the session counters. Only the tracker actually queried by the
-engine is shown; this does not add fallback across a torrent's entire tracker list.
+restarting resets the session counters. The dialog follows the URL currently
+being queried and shows the attempt number while trying alternatives.
+
+Downloads automatically try backup trackers on transport errors, timeouts,
+invalid responses or explicit tracker failures. Tracker groups retain their
+[BEP 12](https://www.bittorrent.org/beps/bep_0012.html) precedence: URLs within a
+group are shuffled once per session and a working URL moves to the front of its
+group. A usable `announce-list` takes precedence over legacy `announce`, including
+torrents with no `announce` key. Empty and duplicate entries are ignored; if no
+usable group remains, the legacy URL is used. A successful response with no peers
+does not trigger fallback. HTTP, HTTPS and IPv4 UDP share the same fallback path.
+Normal announces follow the successful tracker's interval; an entirely failed
+round waits 30 seconds before retrying. `tracker_timeout_seconds` in the config
+sets the per-attempt budget (30 seconds by default).
+
+Each tracker receives `started` before ordinary updates. Trackers that accepted
+the session receive completion and best-effort `stopped` notifications. Shutdown
+does not query untried backups and shares a two-second budget for final
+notifications. Cancellation interrupts HTTP/UDP waits; blocking hostname lookup
+can still delay cancellation. HTTPS certificate verification remains enabled.
 
 Click **Network settings** at the top of the window to set the first connection
 port (1024–65534), the peer cap per torrent (1–1000), DHT and PEX. These are shared

@@ -1,52 +1,181 @@
 #include "torrent/session/download_manager.h"
+#include "peer_state.h"
+#include <algorithm>
 #include <iostream>
+#include <random>
 
 namespace torrent {
 
+void DownloadManager::initializeTrackers(int timeout_seconds) {
+    if (timeout_seconds < 1) throw std::invalid_argument("Tracker timeout must be positive");
+    tracker_timeout_ = timeout_seconds;
+    std::mt19937 random(std::random_device{}());
+    for (const auto& urls : torrent_.trackerTiers()) {
+        std::vector<TrackerEntry> tier;
+        for (const auto& url : urls) tier.push_back({url});
+        std::shuffle(tier.begin(), tier.end(), random);
+        tracker_status_.total_trackers += tier.size();
+        tracker_tiers_.push_back(std::move(tier));
+    }
+    if (!tracker_tiers_.empty()) {
+        tracker_status_.url = tracker_tiers_.front().front().url;
+        tracker_status_.state = TrackerState::Waiting;
+    }
+}
+
 void DownloadManager::trackerLoop() {
     while (running_) {
-        updateTracker();
-        waitForStop(std::chrono::seconds(30));
+        if (seeding_mode_ && !complete_at_start_ && !completion_pending_ && !tracker_tiers_.empty()) {
+            announceTracker("completed");
+            continue;
+        }
+        std::chrono::steady_clock::time_point next;
+        { std::lock_guard<std::mutex> lock(tracker_mutex_); next = next_tracker_announce_; }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next) updateTracker();
+        else waitForStop(std::min(std::chrono::milliseconds(1000),
+            std::chrono::duration_cast<std::chrono::milliseconds>(next - now) + std::chrono::milliseconds(1)));
     }
 }
 
 TrackerResponse DownloadManager::announceTracker(const std::string& event) {
-    // Completion and periodic announces can originate on different workers.
+    // Periodic and completion announces share the same per-tracker lifecycle.
     std::lock_guard<std::mutex> announce_lock(tracker_mutex_);
     TrackerResponse response;
-    if (!running_) return response;
-    {
-        std::lock_guard<std::mutex> lock(peers_mutex_);
-        tracker_status_.state = TrackerState::Announcing;
+    response.failure_reason = "No tracker responded";
+    if (!running_ || tracker_tiers_.empty()) return response;
+    if (event == "completed") completion_pending_ = true;
+    size_t attempt = 0;
+    const auto query = [&](TrackerEntry& entry, const std::string& wire_event) {
+        {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            tracker_status_.url = entry.url;
+            tracker_status_.attempt = attempt;
+            tracker_status_.state = TrackerState::Announcing;
+            tracker_status_.peers_returned = 0;
+        }
+        TrackerResponse result;
+        if (wire_event == "completed") entry.completion_attempted = true;
+        try {
+            TrackerClient client(entry.url, torrent_.infoHash(), peer_id_);
+            result = client.announce(total_uploaded_, total_downloaded_, bytesRemaining(),
+                listen_port_, wire_event, tracker_timeout_, [this] { return !running_.load(); });
+        } catch (const std::exception& error) { result.failure_reason = error.what(); }
+        // Cancellation is not a new tracker failure and must not trigger fallback.
+        if (!running_) return result;
+        if (result.isSuccess()) {
+            if (wire_event == "started") entry.started = true;
+            if (wire_event == "completed") entry.completed = true;
+        }
+        {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            tracker_status_.state = result.isSuccess() ? TrackerState::Working : TrackerState::Error;
+            tracker_status_.error = result.failure_reason;
+            if (result.isSuccess()) {
+                tracker_status_.peers_returned = result.peers.size();
+                tracker_status_.consecutive_failures = 0;
+            } else ++tracker_status_.consecutive_failures;
+        }
+        return result;
+    };
+
+    if (event == "completed") {
+        // Notify all trackers that accepted started. Failures stay pending.
+        std::vector<TrackerEntry*> registered;
+        for (auto& tier : tracker_tiers_) for (auto& entry : tier)
+            if (entry.started && !entry.completed) registered.push_back(&entry);
+        if (registered.empty()) {
+            next_tracker_announce_ = {}; // Completion can precede the first announce via DHT/web seeds.
+            return response;
+        }
+        std::string current;
+        { std::lock_guard<std::mutex> lock(peers_mutex_); current = tracker_status_.url; }
+        // Leave the current tracker's result visible after notifying older ones.
+        std::stable_partition(registered.begin(), registered.end(), [&](const auto* entry) { return entry->url != current; });
+        for (auto* entry : registered) {
+            if (!running_) return response;
+            ++attempt; response = query(*entry, "completed");
+        }
+    } else {
+        for (auto& tier : tracker_tiers_) {
+            for (size_t index = 0; index < tier.size() && running_; ++index) {
+                auto& entry = tier[index];
+                ++attempt;
+                response = query(entry, entry.started ? "" : "started");
+                if (!running_) return response;
+                if (!response.isSuccess()) continue;
+                if (completion_pending_ && !entry.completed) response = query(entry, "completed");
+                if (!running_) return response;
+                if (!response.isSuccess()) continue;
+                // BEP 12: promote within this tier, preserving tier precedence.
+                std::rotate(tier.begin(), tier.begin() + index, tier.begin() + index + 1);
+                next_tracker_announce_ = std::chrono::steady_clock::now() +
+                    std::chrono::seconds(std::max(response.interval, 1));
+                return response; // A successful empty peer list is still a success.
+            }
+        }
     }
-    try {
-        response = tracker_client_->announce(total_uploaded_, total_downloaded_,
-            bytesRemaining(), listen_port_, event);
-    } catch (const std::exception& error) { response.failure_reason = error.what(); }
-    {
-        std::lock_guard<std::mutex> lock(peers_mutex_);
-        tracker_status_.state = response.isSuccess() ? TrackerState::Working : TrackerState::Error;
-        tracker_status_.error = response.failure_reason;
-        if (response.isSuccess()) {
-            tracker_status_.peers_returned = response.peers.size();
-            tracker_status_.consecutive_failures = 0;
-        } else ++tracker_status_.consecutive_failures;
-    }
+    next_tracker_announce_ = std::chrono::steady_clock::now() +
+        std::chrono::seconds(response.isSuccess() ? std::max(response.interval, 1) : 30);
     return response;
 }
 
+void DownloadManager::stopTrackers() {
+    // Workers have joined. Do not walk untried/unavailable backups on shutdown.
+    std::vector<TrackerEntry*> registered;
+    for (auto& tier : tracker_tiers_) for (auto& entry : tier) if (entry.started) registered.push_back(&entry);
+    std::string current;
+    { std::lock_guard<std::mutex> lock(peers_mutex_); current = tracker_status_.url; }
+    std::stable_partition(registered.begin(), registered.end(), [&](const auto* entry) { return entry->url == current; });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    for (auto* entry : registered) {
+        if (std::chrono::steady_clock::now() >= deadline) break;
+        try {
+            TrackerClient client(entry->url, torrent_.infoHash(), peer_id_);
+            // A fast finish can stop the worker before it sends completion.
+            // Flush only notifications never attempted, within the same budget.
+            if (seeding_mode_ && !complete_at_start_ && !entry->completion_attempted) {
+                entry->completion_attempted = true;
+                client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), listen_port_, "completed", 2,
+                    [deadline] { return std::chrono::steady_clock::now() >= deadline; });
+            }
+            client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), listen_port_, "stopped", 2,
+                [deadline] { return std::chrono::steady_clock::now() >= deadline; });
+        } catch (const std::exception&) {} // Best effort; preserve useful diagnostics.
+        entry->started = false;
+    }
+    std::lock_guard<std::mutex> lock(peers_mutex_);
+    if (tracker_status_.state == TrackerState::Announcing) {
+        tracker_status_.state = TrackerState::Waiting;
+        tracker_status_.error.clear();
+    }
+}
+
 void DownloadManager::updateTracker() {
-    if (!tracker_client_ || !running_) return;
-    const std::string event = first_announce_ ? "started" : "";
-    first_announce_ = false;
-    const auto response = announceTracker(event);
+    if (tracker_tiers_.empty() || !running_) {
+        std::lock_guard<std::mutex> lock(tracker_mutex_);
+        next_tracker_announce_ = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        return;
+    }
+    const auto response = announceTracker("");
     if (!response.isSuccess()) {
-        std::cerr << "Tracker error: " << response.failure_reason << '\n';
+        if (running_) std::cerr << "Tracker error: " << response.failure_reason << '\n';
         return;
     }
     {
         std::lock_guard<std::mutex> lock(peers_mutex_);
-        available_peers_ = response.peers;
+        for (const auto& peer : response.peers) {
+            const auto same = [&](const Peer& known) { return known.ip == peer.ip && known.port == peer.port; };
+            if (std::any_of(active_peers_.begin(), active_peers_.end(), [&](const auto& active) {
+                return !active->finished && same(active->peer_data);
+            }) || std::any_of(connecting_peers_.begin(), connecting_peers_.end(), [&](const PeerStatus& known) {
+                return known.ip == peer.ip && known.port == peer.port;
+            })) continue;
+            const auto duplicate = std::find_if(available_peers_.begin(), available_peers_.end(), [&](const Peer& known) {
+                return same(known);
+            });
+            if (duplicate == available_peers_.end()) available_peers_.push_back(peer);
+        }
     }
     if (running_) connectToPeers();
 }

@@ -58,13 +58,7 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
 
     file_manager_ = std::make_unique<FileManager>(torrent_, download_dir_, selection);
 
-    if (!torrent_.announce().empty()) tracker_client_ = std::make_unique<TrackerClient>(
-        torrent_.announce(),
-        torrent_.infoHash(),
-        peer_id_
-    );
-    tracker_status_.url = torrent_.announce();
-    tracker_status_.state = tracker_client_ ? TrackerState::Waiting : TrackerState::None;
+    initializeTrackers(config.tracker_timeout_seconds);
 
     // Use existing DHT or create new one
     if (existing_dht) {
@@ -204,8 +198,11 @@ void DownloadManager::start() {
 }
 
 void DownloadManager::stop() {
-    if (!running_.exchange(false)) {
-        return;
+    {
+        // Match waitForStop's predicate lock so shutdown cannot notify between
+        // a worker's predicate check and the actual condition-variable wait.
+        std::lock_guard<std::mutex> lock(stop_mutex_);
+        if (!running_.exchange(false)) return;
     }
 
     std::cout << "Stopping client...\n";
@@ -247,8 +244,7 @@ void DownloadManager::stop() {
     worker_threads_.clear();
     // The initial announce now runs on the tracker worker. Join all announce
     // callers before sending stopped, so it cannot precede a delayed started.
-    if (tracker_client_ && !first_announce_) tracker_client_->announce(
-        total_uploaded_, total_downloaded_, bytesRemaining(), listen_port_, "stopped");
+    stopTrackers();
     for (auto& worker : peer_threads_) {
         if (worker.thread.joinable()) worker.thread.join();
     }
@@ -345,13 +341,9 @@ void DownloadManager::downloadLoop() {
 }
 
 void DownloadManager::beginSeeding() {
-    if (!canSeed() || seeding_mode_.exchange(true) || complete_at_start_ || !tracker_client_) return;
-    try {
-        const auto response = announceTracker("completed");
-        if (!response.isSuccess()) std::cerr << "Failed to announce completion: " << response.failure_reason << '\n';
-    } catch (const std::exception& error) {
-        std::cerr << "Completion announce failed: " << error.what() << '\n';
-    }
+    if (!canSeed() || seeding_mode_.exchange(true) || complete_at_start_ || tracker_tiers_.empty()) return;
+    // The tracker worker sends completion so the task owner remains able to stop.
+    stop_cv_.notify_all();
 }
 
 } // namespace torrent

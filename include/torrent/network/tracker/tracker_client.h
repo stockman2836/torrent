@@ -49,7 +49,8 @@ public:
                             int64_t downloaded,
                             int64_t left,
                             uint16_t port,
-                            const std::string& event = "");
+                            const std::string& event = "", int timeout_seconds = 30,
+                            const std::function<bool()>& cancelled = {});
 
     // Check if tracker is UDP
     bool isUDP() const;
@@ -68,13 +69,15 @@ private:
                                 int64_t downloaded,
                                 int64_t left,
                                 uint16_t port,
-                                const std::string& event);
+                                const std::string& event, int timeout_seconds,
+                                const std::function<bool()>& cancelled);
 
     TrackerResponse announceUDP(int64_t uploaded,
                                int64_t downloaded,
                                int64_t left,
                                uint16_t port,
-                               const std::string& event);
+                               const std::string& event, int timeout_seconds,
+                               const std::function<bool()>& cancelled);
 
     std::string announce_url_;
     std::vector<uint8_t> info_hash_;

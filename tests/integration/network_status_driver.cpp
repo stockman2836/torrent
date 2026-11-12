@@ -1,12 +1,24 @@
 #include "download_task.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
+#include <fstream>
+#include <mutex>
 
 namespace {
 struct QuietOutput {
     struct Buffer : std::streambuf {
-        int_type overflow(int_type c) override { return traits_type::not_eof(c); }
-        std::streamsize xsputn(const char*, std::streamsize size) override { return size; }
+        std::ofstream log{"engine.log"};
+        std::mutex mutex;
+        int_type overflow(int_type c) override {
+            if (!traits_type::eq_int_type(c, traits_type::eof())) {
+                const char value = traits_type::to_char_type(c); xsputn(&value, 1);
+            }
+            return traits_type::not_eof(c);
+        }
+        std::streamsize xsputn(const char* data, std::streamsize size) override {
+            std::lock_guard<std::mutex> lock(mutex);
+            log.write(data, size); log.flush(); return size;
+        }
     } buffer;
     std::streambuf* previous = std::cout.rdbuf(&buffer);
     ~QuietOutput() { std::cout.rdbuf(previous); }
@@ -57,11 +69,13 @@ int main(int argc, char* argv[]) {
                     {"state", peerState(peer.state)}, {"incoming", peer.incoming}, {"choked", peer.choked},
                     {"pending", peer.pending_requests}, {"downloaded", peer.downloaded_bytes}, {"uploaded", peer.uploaded_bytes}});
                 output << "STATUS " << nlohmann::json{{"busy", task.busy()}, {"progress", state.progress},
+                    {"state", static_cast<int>(state.state)},
                     {"error", state.error}, {"uploaded", state.uploaded_bytes}, {"port", state.listen_port},
                     {"peers", peers}, {"queued", network.queued_peers}, {"failed", network.failed_connections},
                     {"peer_error", network.last_peer_error}, {"dht", network.dht_enabled}, {"nodes", network.dht_nodes},
                     {"tracker", {{"url", network.tracker.url}, {"state", trackerState(network.tracker.state)},
                         {"peers", network.tracker.peers_returned}, {"failures", network.tracker.consecutive_failures},
+                        {"total", network.tracker.total_trackers}, {"attempt", network.tracker.attempt},
                         {"error", network.tracker.error}}}}.dump() << '\n' << std::flush;
             } else throw std::runtime_error("Unknown command");
         }

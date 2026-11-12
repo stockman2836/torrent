@@ -4,6 +4,7 @@
 #include <sstream>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -283,6 +284,7 @@ int32_t UDPTrackerClient::generateTransactionId() {
 bool UDPTrackerClient::sendRequest(const std::vector<uint8_t>& request,
                                   std::vector<uint8_t>& response,
                                   int timeout_seconds) {
+    if ((cancelled_ && cancelled_()) || std::chrono::steady_clock::now() >= deadline_) return false;
     // Parse tracker URL
     std::string host;
     uint16_t port;
@@ -302,27 +304,23 @@ bool UDPTrackerClient::sendRequest(const std::vector<uint8_t>& request,
     }
 
     // Create UDP socket
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    auto sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock == INVALID_SOCKET) {
         LOG_ERROR("Failed to create UDP socket");
         freeaddrinfo(result);
         return false;
     }
 
-    // Set socket timeout
-    struct timeval tv;
-    tv.tv_sec = timeout_seconds;
-    tv.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
-
-    // Send request
-    ssize_t sent = sendto(sock, reinterpret_cast<const char*>(request.data()),
-                         request.size(), 0, result->ai_addr, result->ai_addrlen);
+    // A connected UDP socket accepts replies only from this tracker endpoint.
+    if (::connect(sock, result->ai_addr, static_cast<int>(result->ai_addrlen)) != 0) {
+        closesocket(sock); freeaddrinfo(result); return false;
+    }
+    freeaddrinfo(result);
+    ssize_t sent = send(sock, reinterpret_cast<const char*>(request.data()), request.size(), 0);
 
     if (sent != static_cast<ssize_t>(request.size())) {
         LOG_ERROR("Failed to send UDP request");
         closesocket(sock);
-        freeaddrinfo(result);
         return false;
     }
 
@@ -330,14 +328,20 @@ bool UDPTrackerClient::sendRequest(const std::vector<uint8_t>& request,
 
     // Receive response
     uint8_t buffer[2048];
-    struct sockaddr_in from_addr;
-    socklen_t from_len = sizeof(from_addr);
-
-    ssize_t received = recvfrom(sock, reinterpret_cast<char*>(buffer), sizeof(buffer),
-                               0, (struct sockaddr*)&from_addr, &from_len);
+    const auto deadline = std::min(deadline_, std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds));
+    ssize_t received = -1;
+    while ((!cancelled_ || !cancelled_()) && std::chrono::steady_clock::now() < deadline) {
+        fd_set readable; FD_ZERO(&readable); FD_SET(sock, &readable);
+        timeval delay{0, 50000};
+        const auto ready = select(static_cast<int>(sock + 1), &readable, nullptr, nullptr, &delay);
+        if (ready < 0) break;
+        if (ready > 0) {
+            received = recv(sock, reinterpret_cast<char*>(buffer), sizeof(buffer), 0);
+            break;
+        }
+    }
 
     closesocket(sock);
-    freeaddrinfo(result);
 
     if (received <= 0) {
         LOG_WARN("UDP receive timeout or error");
@@ -383,7 +387,11 @@ TrackerResponse UDPTrackerClient::announce(int64_t uploaded,
                                           int64_t downloaded,
                                           int64_t left,
                                           uint16_t port,
-                                          const std::string& event) {
+                                          const std::string& event, int timeout_seconds,
+                                          const std::function<bool()>& cancelled) {
+    if (timeout_seconds < 1) throw std::invalid_argument("Tracker timeout must be positive");
+    deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+    cancelled_ = cancelled;
     TrackerResponse result;
     result.interval = 1800;
     result.complete = 0;

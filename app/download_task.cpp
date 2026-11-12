@@ -10,7 +10,8 @@ namespace {
 NetworkStatus initialNetworkStatus(const TorrentFile& torrent, const Config& config) {
     NetworkStatus result;
     result.dht_enabled = config.enable_dht;
-    result.tracker.url = torrent.announce();
+    if (!torrent.trackerTiers().empty()) result.tracker.url = torrent.trackerTiers().front().front();
+    for (const auto& tier : torrent.trackerTiers()) result.tracker.total_trackers += tier.size();
     result.tracker.state = result.tracker.url.empty() ? TrackerState::None : TrackerState::Waiting;
     return result;
 }

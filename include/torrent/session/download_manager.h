@@ -72,6 +72,8 @@ private:
 
     void connectToPeers();
     void updateTracker();
+    void initializeTrackers(int timeout_seconds);
+    void stopTrackers();
     TrackerResponse announceTracker(const std::string& event);
     void updateDHT();   // Get peers from DHT
     void updatePEX();   // Exchange peers via PEX
@@ -102,7 +104,6 @@ private:
 
     std::unique_ptr<PieceManager> piece_manager_;
     std::unique_ptr<FileManager> file_manager_;
-    std::unique_ptr<TrackerClient> tracker_client_;
     std::unique_ptr<dht::DHTManager> dht_manager_;
     std::unique_ptr<LSD> lsd_manager_;
     std::unique_ptr<WebSeedManager> webseed_manager_;
@@ -152,7 +153,16 @@ private:
     std::atomic<int64_t> total_uploaded_;
 
     // Tracker state
-    bool first_announce_ = true;
+    struct TrackerEntry {
+        std::string url;
+        bool started = false;
+        bool completed = false;
+        bool completion_attempted = false;
+    };
+    std::vector<std::vector<TrackerEntry>> tracker_tiers_; // Serialized by tracker_mutex_.
+    int tracker_timeout_ = 30;
+    bool completion_pending_ = false;
+    std::chrono::steady_clock::time_point next_tracker_announce_{};
     bool complete_at_start_ = false;
 
     // Speed limiting and tracking
