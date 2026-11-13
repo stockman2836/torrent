@@ -14,7 +14,8 @@ Includes always name their module, for example
 | `storage` / `Torrent::Storage` | Piece assembly, integrity checks, files and resume bitfields | Metainfo |
 | `network` / `Torrent::Network` | Trackers, peer protocol, DHT, discovery and transports | Metainfo |
 | `session` / `Torrent::Session` | Coordinate one torrent and own its workers and services | Storage, Network |
-| `app` / `torrent_app` | CLI parsing, input resolution and background download lifecycle | Session |
+| `app` / `torrent_app` | Input resolution, queue, background tasks and preferences | Session |
+| `app/cli` / `torrent_cli` | CLI parsing and console download lifecycle | App (including Session) |
 | `desktop` / `torrent_desktop` | Native Win32 controls and user interactions | App |
 
 Storage and networking are independent targets. Neither depends on the CLI or
@@ -24,7 +25,9 @@ There are no global include directories or compiler definitions.
 
 ```mermaid
 flowchart TD
-    App[CLI application] --> Session
+    CLI[torrent_cli] --> App[torrent_app]
+    Desktop[Windows desktop] --> App
+    App --> Session
     Session --> Storage
     Session --> Network
     Storage --> Metainfo
@@ -33,6 +36,23 @@ flowchart TD
 ```
 
 ## Application flow
+
+`desktop/main.cpp` initializes Win32, creates `MainWindow` and runs the message
+loop. One concrete window owns its controls and presentation state. Its methods
+are grouped by responsibility rather than adding controller/service interfaces:
+
+- `main_window.cpp`: startup, preferences, lifecycle and Win32 message dispatch.
+- `main_window_layout.cpp`: control construction and positions.
+- `main_window_actions.cpp`: user commands and application queue calls.
+- `main_window_view.cpp`: render copied queue/download snapshots.
+- `main_window_smoke.cpp`: explicit automated UI modes and their state transitions.
+
+`smoke_test.h` groups test-only options/progress, kept private by `MainWindow`.
+Ordinary launches leave it disabled. The existing fixture argument forms,
+isolated preference files, forced loopback router endpoints and cancellation
+paths remain the same. `win32.h` owns Windows/Winsock include ordering and macro
+isolation. `win32_helpers` supplies the shared Unicode conversion, control text,
+numeric field reads and byte formatting used by the window and dialogs.
 
 The desktop window issues commands to `app::DownloadQueue`. It owns independent
 `DownloadTask` instances with stable IDs, source paths, configurations and snapshots.
@@ -198,14 +218,20 @@ and applies live policy updates. Empty torrents and incomplete selections finish
 without seeding. Session completion announces are sent once; an already complete
 resumed torrent announces `started` with `left=0` without another `completed`.
 The list saves sources, destinations, file choices and the concurrency limit as
-versioned JSON using a temporary file and atomic replacement. Seeding and speed
+versioned JSON using a temporary file and atomic replacement. The schema,
+validation and file operations live in `app/download_queue_state.cpp`, separate
+from scheduling/admission in `download_queue.cpp`. Both use `app/paths.cpp` for
+canonical paths and Windows case-insensitive ownership keys. Seeding and speed
 settings are saved per entry; missing seeding settings in older lists default to
 stopping after download. Restored entries
 resolve metadata but remain outside the download queue until the user starts them.
 The original file is preserved when restoration fails. The desktop target is
 Windows-only; the shared queue supports Windows and POSIX file replacement.
 
-`app/main.cpp` calls `app::run`. The application parses and validates CLI values,
+`app/cli/main.cpp` calls `app::run` from the separate `torrent_cli` target. Only
+the CLI and fixtures that parse CLI arguments link this target; the desktop links
+`torrent_app` directly. No console argument headers leak through the shared app
+include directory. The CLI parses and validates values,
 loads configuration, resolves either input form to a `TorrentFile`, and starts
 one `DownloadManager`. Magnet resolution transfers its existing DHT instance
 into the download session. Both input forms use the same download lifecycle.

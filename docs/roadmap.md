@@ -9,6 +9,7 @@ code; prefer small concrete modules and keep network work off the window thread.
 ## Delivered
 
 - [x] Module structure with explicit CMake dependencies.
+- [x] Separate CLI target, focused desktop units, shared Win32 helpers and queue persistence outside scheduling.
 - [x] TCP downloads with SHA1 verification, multi-file storage and resume.
 - [x] Multi-peer scheduling and bounded endgame requests with cancellation.
 - [x] Tracker-based magnet metadata acquisition with hash verification and fallback.

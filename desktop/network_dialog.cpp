@@ -1,6 +1,7 @@
 #include "network_dialog.h"
 #include "resource.h"
 #include "network_diagnostics.h"
+#include "win32_helpers.h"
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <algorithm>
@@ -11,22 +12,10 @@
 
 using namespace torrent;
 using namespace torrent::app;
+using torrent::desktop::wide;
+using torrent::desktop::bytes;
 
 namespace {
-std::wstring wide(const std::string& value) {
-    if (value.empty()) return {};
-    const auto size = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    std::wstring result(size, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), size);
-    return result;
-}
-std::wstring bytes(int64_t count) {
-    const wchar_t* units[] = {L"Б", L"КиБ", L"МиБ", L"ГиБ"};
-    double value = static_cast<double>(count); int unit = 0;
-    while (value >= 1024 && unit < 3) { value /= 1024; ++unit; }
-    std::wostringstream out; out << std::fixed << std::setprecision(unit ? 1 : 0) << value << L' ' << units[unit];
-    return out.str();
-}
 const wchar_t* trackerState(TrackerState state) {
     switch (state) {
     case TrackerState::Waiting: return L"Ещё не запрашивался";

@@ -1,7 +1,7 @@
 #include "global_speed_dialog.h"
 #include "resource.h"
 #include "speed_limits.h"
-#include <algorithm>
+#include "win32_helpers.h"
 #include <stdexcept>
 #include <string>
 
@@ -11,14 +11,6 @@ struct DialogState {
     int64_t upload;
     bool automatic;
 };
-
-std::string field(HWND dialog, int id) {
-    wchar_t value[64]{};
-    const auto size = GetDlgItemTextW(dialog, id, value, 64);
-    if (std::any_of(value, value + size, [](wchar_t c) { return c > 127; }))
-        throw std::invalid_argument("Use decimal digits");
-    return {value, value + size};
-}
 
 INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) {
     auto state = reinterpret_cast<DialogState*>(GetWindowLongPtrW(dialog, DWLP_USER));
@@ -44,8 +36,8 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
     }
     if (message == WM_COMMAND && LOWORD(wparam) == IDOK) {
         try {
-            const auto download = torrent::app::parseSpeedLimit(field(dialog, IDC_GLOBAL_DOWNLOAD));
-            const auto upload = torrent::app::parseSpeedLimit(field(dialog, IDC_GLOBAL_UPLOAD));
+            const auto download = torrent::app::parseSpeedLimit(torrent::desktop::asciiField(dialog, IDC_GLOBAL_DOWNLOAD));
+            const auto upload = torrent::app::parseSpeedLimit(torrent::desktop::asciiField(dialog, IDC_GLOBAL_UPLOAD));
             state->download = download;
             state->upload = upload;
             EndDialog(dialog, IDOK);

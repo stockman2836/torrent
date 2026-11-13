@@ -14,8 +14,9 @@ environments need broader testing.
 ## Project structure
 
 ```text
-app/                     Shared background controller, CLI and input resolution
-desktop/                 Native Windows interface without a console window
+app/                     Shared queue, background tasks, input resolution and preferences
+  cli/                   Console entry point, argument parsing and CLI lifecycle
+desktop/                 Native Windows window, dialogs and explicit UI test hooks
 include/torrent/         Public headers organized by module
   core/                  Configuration, logging, crypto and shared helpers
   metainfo/              Bencode, torrent metadata, magnet URIs and block types
@@ -23,12 +24,12 @@ include/torrent/         Public headers organized by module
   network/               Peer protocol, trackers, DHT, discovery and transports
   session/               Download coordination and metadata acquisition
 src/                     Implementations mirroring the public module layout
-cmake/                   Dependency discovery
+cmake/                   Dependencies and portable packaging
 config/examples/         Full and minimal example configurations
 examples/                Standalone API examples (optional build)
 tools/                   Manual network diagnostics (optional build)
 tests/unit/              Google Test suites
-tests/integration/       Offline tracker/peer download test
+tests/integration/       Local protocol, queue, GUI and independent-client fixtures
 docs/architecture.md     Module boundaries and development rules
 docs/protocols/          Protocol-specific notes
 docs/roadmap.md          Future work

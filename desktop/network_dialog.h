@@ -1,8 +1,6 @@
 #pragma once
 
-#include <windows.h>
-// Win32's ERROR macro conflicts with the DHT message enum in shared headers.
-#undef ERROR
+#include "win32.h"
 #include "download_task.h"
 #include <functional>
 #include <string>

@@ -15,6 +15,11 @@ For Visual Studio, build with `--config Release` and run CTest with `-C Release`
 Google Test is found as an installed package or fetched during configuration.
 Node.js is optional; CMake registers the integration test when it finds `node`.
 
+The CLI parser suite and desktop-controller fixtures that use CLI arguments link
+`torrent_cli`. Queue/task fixtures link `torrent_app`; protocol suites link the
+narrow engine module they exercise. The actual Windows window remains covered by
+the portable GUI fixtures after changes to layout/actions/rendering or test hooks.
+
 ## Suites
 
 | Executable | Scope | Linked module |

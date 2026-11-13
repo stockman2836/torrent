@@ -1,6 +1,6 @@
 #include "network_settings_dialog.h"
 #include "resource.h"
-#include <algorithm>
+#include "win32_helpers.h"
 #include <stdexcept>
 #include <string>
 
@@ -11,14 +11,6 @@ struct DialogState {
     bool automatic;
     bool automatic_mapping;
 };
-
-std::string field(HWND dialog, int id) {
-    wchar_t value[32]{};
-    const auto size = GetDlgItemTextW(dialog, id, value, 32);
-    if (std::any_of(value, value + size, [](wchar_t c) { return c > 127; }))
-        throw std::invalid_argument("Use decimal digits");
-    return {value, value + size};
-}
 
 INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lparam) {
     auto state = reinterpret_cast<DialogState*>(GetWindowLongPtrW(dialog, DWLP_USER));
@@ -42,8 +34,8 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
     }
     if (message == WM_COMMAND && LOWORD(wparam) == IDOK) {
         try {
-            const auto settings = torrent::app::NetworkSettings::parse(field(dialog, IDC_NET_FIRST_PORT),
-                field(dialog, IDC_NET_MAX_PEERS), IsDlgButtonChecked(dialog, IDC_NET_DHT) == BST_CHECKED,
+            const auto settings = torrent::app::NetworkSettings::parse(torrent::desktop::asciiField(dialog, IDC_NET_FIRST_PORT),
+                torrent::desktop::asciiField(dialog, IDC_NET_MAX_PEERS), IsDlgButtonChecked(dialog, IDC_NET_DHT) == BST_CHECKED,
                 IsDlgButtonChecked(dialog, IDC_NET_PEX) == BST_CHECKED,
                 IsDlgButtonChecked(dialog, IDC_NET_PORT_MAPPING) == BST_CHECKED);
             settings.validate(state->downloads);
