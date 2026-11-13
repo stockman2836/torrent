@@ -9,6 +9,7 @@ struct DialogState {
     torrent::app::NetworkSettings settings;
     size_t downloads;
     bool automatic;
+    bool automatic_mapping;
 };
 
 std::string field(HWND dialog, int id) {
@@ -28,6 +29,8 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
         SetDlgItemTextW(dialog, IDC_NET_MAX_PEERS, std::to_wstring(state->automatic ? 8 : state->settings.max_peers).c_str());
         CheckDlgButton(dialog, IDC_NET_DHT, state->settings.enable_dht ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dialog, IDC_NET_PEX, state->settings.enable_pex ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dialog, IDC_NET_PORT_MAPPING, state->settings.enable_port_mapping ? BST_CHECKED : BST_UNCHECKED);
+        if (state->automatic_mapping) CheckDlgButton(dialog, IDC_NET_PORT_MAPPING, BST_CHECKED);
         SendDlgItemMessageW(dialog, IDC_NET_FIRST_PORT, EM_SETLIMITTEXT, 6, 0);
         SendDlgItemMessageW(dialog, IDC_NET_MAX_PEERS, EM_SETLIMITTEXT, 5, 0);
         if (state->automatic) PostMessageW(dialog, WM_COMMAND, IDOK, 0);
@@ -41,7 +44,8 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
         try {
             const auto settings = torrent::app::NetworkSettings::parse(field(dialog, IDC_NET_FIRST_PORT),
                 field(dialog, IDC_NET_MAX_PEERS), IsDlgButtonChecked(dialog, IDC_NET_DHT) == BST_CHECKED,
-                IsDlgButtonChecked(dialog, IDC_NET_PEX) == BST_CHECKED);
+                IsDlgButtonChecked(dialog, IDC_NET_PEX) == BST_CHECKED,
+                IsDlgButtonChecked(dialog, IDC_NET_PORT_MAPPING) == BST_CHECKED);
             settings.validate(state->downloads);
             state->settings = settings;
             EndDialog(dialog, IDOK);
@@ -57,8 +61,8 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
 }
 }
 
-bool editNetworkSettings(HWND owner, torrent::app::NetworkSettings& settings, size_t downloads, bool automatic) {
-    DialogState state{settings, downloads, automatic};
+bool editNetworkSettings(HWND owner, torrent::app::NetworkSettings& settings, size_t downloads, bool automatic, bool automatic_mapping) {
+    DialogState state{settings, downloads, automatic, automatic_mapping};
     const auto result = DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_NETWORK_SETTINGS), owner,
         procedure, reinterpret_cast<LPARAM>(&state));
     if (result == -1) throw std::runtime_error("Cannot open network settings");

@@ -2,6 +2,7 @@
     "listen_port": 6881,
     "max_peers": 50,
     "max_connections": 100,
+    "enable_port_mapping": false,
     "max_download_speed": 0,
     "max_upload_speed": 0,
     "global_max_download_speed": 0,

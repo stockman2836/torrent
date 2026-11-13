@@ -1,6 +1,8 @@
 #include "network_settings.h"
 #include <gtest/gtest.h>
 #include <filesystem>
+#include <fstream>
+#include <chrono>
 
 using namespace torrent;
 using namespace torrent::app;
@@ -50,4 +52,24 @@ TEST(NetworkSettings, ChangesOnlyTheSelectedNetworkFields) {
     EXPECT_FALSE(config.enable_lsd);
     ASSERT_EQ(config.dht_bootstrap_nodes.size(), 1u);
     EXPECT_EQ(config.dht_bootstrap_nodes[0].port, 49123);
+}
+
+TEST(NetworkSettings, RouterMappingRequiresExplicitOptInAndRoundTripsInPreferences) {
+    Config config;
+    EXPECT_FALSE(config.enable_port_mapping);
+    EXPECT_FALSE(NetworkSettings::fromConfig(config).enable_port_mapping);
+    auto settings = NetworkSettings::parse("24567", "8", false, true, true);
+    settings.applyTo(config);
+    EXPECT_TRUE(config.enable_port_mapping);
+    const auto path = std::filesystem::temp_directory_path() / ("mapping-settings-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+    ASSERT_TRUE(config.saveToFile(path.u8string()));
+    Config restored;
+    ASSERT_TRUE(restored.loadFromFile(path.u8string()));
+    EXPECT_TRUE(restored.enable_port_mapping);
+    std::ofstream(path) << "{}";
+    Config legacy;
+    EXPECT_TRUE(legacy.loadFromFile(path.u8string()));
+    EXPECT_FALSE(legacy.enable_port_mapping);
+    std::filesystem::remove(path);
 }

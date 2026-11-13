@@ -17,11 +17,11 @@ int number(std::string_view text) {
 }
 
 NetworkSettings NetworkSettings::fromConfig(const Config& config) {
-    return {config.listen_port, config.max_peers, config.enable_dht, config.enable_pex};
+    return {config.listen_port, config.max_peers, config.enable_dht, config.enable_pex, config.enable_port_mapping};
 }
 
-NetworkSettings NetworkSettings::parse(std::string_view port, std::string_view peers, bool dht, bool pex) {
-    NetworkSettings result{number(port), number(peers), dht, pex};
+NetworkSettings NetworkSettings::parse(std::string_view port, std::string_view peers, bool dht, bool pex, bool port_mapping) {
+    NetworkSettings result{number(port), number(peers), dht, pex, port_mapping};
     result.validate();
     return result;
 }
@@ -43,6 +43,7 @@ void NetworkSettings::applyTo(Config& config) const {
     config.max_peers = max_peers;
     config.enable_dht = enable_dht;
     config.enable_pex = enable_pex;
+    config.enable_port_mapping = enable_port_mapping;
 }
 
 } // namespace torrent::app

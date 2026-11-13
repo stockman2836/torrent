@@ -27,6 +27,8 @@ NetworkStatus DownloadManager::networkStatus() const {
         }
     }
     result.max_peers = max_peers_;
+    if (port_mapper_) result.port_mapping = port_mapper_->status();
+    else result.port_mapping.enabled = port_mapping_enabled_;
     result.download_limit = download_limiter_.getRate();
     result.upload_limit = upload_limiter_.getRate();
     if (global_limits_) {

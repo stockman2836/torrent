@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <cwchar>
 
 namespace fs = std::filesystem;
 using namespace torrent;
@@ -82,6 +83,8 @@ public:
     bool smokePriorities = false;
     bool smokeGlobalLimits = false;
     bool smokeNetwork = false;
+    bool smokeMapping = false;
+    uint16_t smokeNatPort = 0, smokeSsdpPort = 0;
     std::wstring smokeSource, smokeSecond, smokeFolder, smokeConfig;
     int exitCode = 0;
 
@@ -119,6 +122,7 @@ private:
     bool smokePrioritiesApplied_ = false;
     bool smokeGlobalLimitsApplied_ = false;
     bool smokeNetworkChecked_ = false;
+    bool smokeMappingChecked_ = false;
     ULONGLONG smokeDeadline_ = 0;
     ULONGLONG smokeStartedAt_ = 0;
     DownloadId selected_ = 0, rendered_ = 0;
@@ -213,9 +217,20 @@ private:
         if (fs::exists(settings_)) config_.loadFromFile(settings_.u8string());
         config_.seed_after_download = false; // New jobs opt in; older desktop versions ignored this JSON field.
         if (smoke) {
+            config_.enable_port_mapping = false; // Smoke fixtures never inherit live router opt-in from user preferences.
             config_.loadFromFile(utf8(smokeConfig));
+            if (smokeMapping) {
+                config_.port_mapping_options.gateway = "127.0.0.1";
+                config_.port_mapping_options.discovery_address = "127.0.0.1";
+                config_.port_mapping_options.natpmp_port = smokeNatPort;
+                config_.port_mapping_options.discovery_port = smokeSsdpPort;
+                config_.port_mapping_options.lease_seconds = 2;
+                config_.port_mapping_options.request_timeout_ms = 250;
+                config_.port_mapping_options.discovery_timeout_ms = 500;
+                config_.port_mapping_options.retry_delay_ms = 1000;
+            }
             settings_.clear();
-            if (smokeGlobalLimits) settings_ = fs::path(smokeConfig);
+            if (smokeGlobalLimits || smokeMapping) settings_ = fs::path(smokeConfig);
             listPath_.clear();
             config_.download_dir = utf8(smokeFolder);
             SetWindowTextW(source_, smokeSource.c_str());
@@ -387,7 +402,7 @@ private:
         auto settings = NetworkSettings::fromConfig(config_);
         dialogOpen_ = true;
         bool accepted;
-        try { accepted = editNetworkSettings(handle, settings, queue_.snapshots().size(), smoke); }
+        try { accepted = editNetworkSettings(handle, settings, queue_.snapshots().size(), smoke, smokeMapping); }
         catch (...) { dialogOpen_ = false; throw; }
         dialogOpen_ = false;
         if (smoke && !accepted) throw std::runtime_error("Network settings dialog did not save");
@@ -525,6 +540,9 @@ private:
                     networkSettings();
                     SendMessageW(handle, WM_COMMAND, Start, 0);
                 }
+            } else if (smokeMapping && !smokeMappingChecked_ && busy && state.network.port_mapping.state == MappingState::Active) {
+                smokeMappingChecked_ = true;
+                networkDetails();
             } else if (smokeNetwork && !smokeNetworkChecked_ && busy &&
                        state.network.listener.state == ListenerState::Listening && state.state == DownloadState::Downloading) {
                 smokeNetworkChecked_ = true;
@@ -547,6 +565,7 @@ private:
                 if (smokePriorities && !smokePrioritiesApplied_) exitCode = 1;
                 if (smokeGlobalLimits && !smokeGlobalLimitsApplied_) exitCode = 1;
                 if (smokeNetwork && !smokeNetworkChecked_) exitCode = 1;
+                if (smokeMapping && !smokeMappingChecked_) exitCode = 1;
                 networkDetails(); close();
             }
             else if (state.state == DownloadState::Failed || GetTickCount64() > smokeDeadline_) { exitCode = 1; close(); }
@@ -738,6 +757,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (argv && argc == 6 && std::wstring(argv[1]) == L"--ui-queue-test") {
         window.smoke = true; window.smokeSource = argv[2]; window.smokeSecond = argv[3];
         window.smokeFolder = argv[4]; window.smokeConfig = argv[5];
+    }
+    if (argv && argc == 7 && std::wstring(argv[1]) == L"--ui-test-port-mapping") {
+        const auto port = [](const wchar_t* value) -> uint16_t {
+            wchar_t* end = nullptr; const auto number = std::wcstoul(value, &end, 10);
+            return end != value && !*end && number > 0 && number <= 65535 ? static_cast<uint16_t>(number) : 0;
+        };
+        window.smokeNatPort = port(argv[5]); window.smokeSsdpPort = port(argv[6]);
+        if (!window.smokeNatPort || !window.smokeSsdpPort) { LocalFree(argv); OleUninitialize(); return 2; }
+        window.smoke = window.smokeMapping = true;
+        window.smokeSource = argv[2]; window.smokeFolder = argv[3]; window.smokeConfig = argv[4];
     }
     if (argv) LocalFree(argv);
     WNDCLASSEXW cls{}; cls.cbSize = sizeof(cls); cls.hInstance = instance;

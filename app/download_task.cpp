@@ -11,6 +11,7 @@ NetworkStatus initialNetworkStatus(const TorrentFile& torrent, const Config& con
     NetworkStatus result;
     result.dht_enabled = config.enable_dht;
     result.listener.port = config.listen_port;
+    result.port_mapping.enabled = config.enable_port_mapping;
     result.max_peers = config.max_peers;
     result.download_limit = config.max_download_speed;
     result.upload_limit = config.max_upload_speed;
@@ -103,6 +104,7 @@ bool DownloadTask::start(Config config, std::shared_ptr<utils::BandwidthLimits> 
     if (busy_ || !input_ || !begin(DownloadState::Downloading)) return false;
     setSpeedLimits(config.max_download_speed, config.max_upload_speed);
     setSeedingOptions(seeding);
+    setPortMappingEnabled(config.enable_port_mapping);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshot_.uploaded_bytes = snapshot_.seed_seconds = 0;
@@ -120,6 +122,7 @@ bool DownloadTask::start(Config config, std::shared_ptr<utils::BandwidthLimits> 
                 (config.dht_port != 0 && input_->dht->port() != config.dht_port))) input_->dht.reset();
             DownloadManager manager(input_->torrent, config, std::move(input_->dht), global_limits);
             auto download_limit = config.max_download_speed, upload_limit = config.max_upload_speed;
+            auto mapping_enabled = config.enable_port_mapping;
             std::optional<std::chrono::steady_clock::time_point> seed_started;
             uint64_t applied_revision = 0;
             const auto apply_priorities = [&] {
@@ -156,6 +159,10 @@ bool DownloadTask::start(Config config, std::shared_ptr<utils::BandwidthLimits> 
                                                  : std::chrono::seconds(0);
                 {
                     std::unique_lock<std::mutex> lock(mutex_);
+                    if (mapping_enabled != port_mapping_enabled_) {
+                        mapping_enabled = port_mapping_enabled_;
+                        manager.setPortMappingEnabled(mapping_enabled);
+                    }
                     if (download_limit != download_limit_ || upload_limit != upload_limit_) {
                         download_limit = download_limit_; upload_limit = upload_limit_;
                         manager.setSpeedLimits(download_limit, upload_limit);
@@ -205,6 +212,11 @@ bool DownloadTask::start(Config config, std::shared_ptr<utils::BandwidthLimits> 
 void DownloadTask::setSeedingOptions(const SeedingOptions& options) {
     options.validate();
     { std::lock_guard<std::mutex> lock(mutex_); seeding_ = options; }
+    wake_.notify_all();
+}
+
+void DownloadTask::setPortMappingEnabled(bool enabled) {
+    { std::lock_guard<std::mutex> lock(mutex_); port_mapping_enabled_ = enabled; }
     wake_.notify_all();
 }
 

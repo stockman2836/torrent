@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-11-12.
+Last updated: 2026-11-13.
 
 The main application is the native Windows desktop client. The CLI and automated
 fixtures use the same engine. Follow [architecture](architecture.md) when adding
@@ -25,12 +25,13 @@ code; prefer small concrete modules and keep network work off the window thread.
 - [x] Incoming IPv4/IPv6 TCP peers with handshake deadlines, a peer cap and verified uploads.
 - [x] Live peer connections, transfer totals, tracker responses/errors and waiting hints in the desktop.
 - [x] Local listening-port diagnostics, incoming handshake evidence, contextual advice and a copyable report.
+- [x] Opt-in NAT-PMP/UPnP finite port mappings with renewal, ownership checks, cleanup and diagnostics.
 - [x] Saved network settings for the first port, per-torrent peer cap, DHT and PEX, applied on the next session.
 - [x] Offline tracker/peer regression tests for transfers and application lifecycle.
 
 Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
-coverage. The ordinary suite currently has eighteen unit suites and 132
+coverage. The ordinary suite currently has nineteen unit suites and 148
 offline integration scenarios, plus a certificate check when the OpenSSL tool
 is available. See [tests](../tests/README.md) for verification.
 
@@ -90,7 +91,7 @@ encrypted/uTP transfers and other network environments still need validation.
 ## Later improvements
 
 - Verify public port reachability from another network; local socket diagnostics are already available.
-- Optional UPnP/NAT-PMP port mapping with explicit user controls.
+- Check port mapping compatibility on physical routers and across upstream NAT/firewall configurations.
 - Serve verified magnet metadata to peers.
 - Richer per-tracker history and peer statistics beyond the current connection snapshots.
 - Windows and POSIX CI plus broader protocol and encryption checks.

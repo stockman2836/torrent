@@ -115,6 +115,10 @@ bool DownloadQueue::setNetworkSettings(const NetworkSettings& settings) {
     settings.validate(entries_.size());
     if (closing_) return false;
     network_settings_ = settings;
+    for (auto& entry : entries_) {
+        entry->config.enable_port_mapping = settings.enable_port_mapping;
+        entry->task.setPortMappingEnabled(settings.enable_port_mapping);
+    }
     return true;
 }
 

@@ -11,6 +11,7 @@ struct NetworkDiagnostics {
     std::string incoming;
     std::string advice;
     std::string limits;
+    std::string mapping;
 };
 
 NetworkDiagnostics diagnoseNetwork(const DownloadSnapshot& snapshot);

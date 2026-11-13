@@ -31,6 +31,7 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_download_queue` | Scheduling, settings, persistence and file conflicts | Application |
 | `test_speed_limits` | UI rate parsing and exact byte conversion | Application |
 | `test_network_diagnostics` | Connection advice and report evidence | Application |
+| `test_port_mapper` | Disabled defaults and bounded finite-lease options | Network |
 | `test_token_bucket` | Throttling, live changes and cancellation | Core |
 | `test_seeding_options` | Ratio/time limits and policy validation | Application |
 | `test_peer_listener` | Port ownership and bitfield validation | Network |
@@ -215,8 +216,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 157 CTest suites/scenarios, or 158
-when the OpenSSL executable is available: 150 ordinary checks, an optional local
+Both independent-client options enabled yield 174 CTest suites/scenarios, or 175
+when the OpenSSL executable is available: 167 ordinary checks, an optional local
 TLS certificate check and seven interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -300,6 +301,33 @@ system-only PATH:
 ```powershell
 node tests/integration/test_live_priorities.cjs build/desktop/TorrentClient.exe ui
 ```
+
+## Router port mapping
+
+`test_port_mapping_*` uses a loopback NAT-PMP responder, SSDP responder, HTTP IGD
+description and SOAP endpoint. Sixteen scenarios cover disabled defaults, TCP/DHT
+UDP leases, renewal, alternate external ports, tracker/DHT advertisement, expiry
+during an unanswered renewal, partial success, concurrent torrents, live toggling,
+restoring idle entries, unsupported routers, lost create replies, cancellation,
+foreign/replaced UPnP ownership, permanent-only devices and foreign control URLs.
+The UPnP case verifies the local socket remains reserved during deletion. The
+unsupported-router case completes and checks payload bytes. All protocol frames
+and owned rules are recorded under `build/tests/port-mapping-*`.
+
+The driver accepts only loopback overrides. The ordinary desktop smoke modes
+explicitly clear inherited opt-in before loading fixture preferences. The portable
+check runs a separate native-window mapping case with loopback ports fixed in its
+test mode. It checks the actual settings checkbox, saved opt-in, diagnostics,
+payload and cleanup. It never queries or changes the machine's real router.
+
+```sh
+ctest --test-dir build -R "test_port_mapping|test_port_mapper|test_network_settings|test_network_diagnostics" --output-on-failure
+```
+
+These checks establish local protocol/lifecycle behavior, not interoperability
+with every hardware IGD/NAT-PMP implementation or public reachability. IPv4
+default-gateway lookup is implemented for Windows and Linux. Runtime endpoint and
+short-lease overrides are C++ fixture/embedding options and are not persisted.
 
 ## Connection diagnostics
 

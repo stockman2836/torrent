@@ -1,6 +1,7 @@
 # ZIP packaging is separate from the normal CLI/desktop install under bin/.
 set(PORTABLE_RUNTIME_DIRECTORIES "" CACHE STRING "Extra search directories for portable runtime DLLs")
 set(PORTABLE_LICENSE_FILES "" CACHE STRING "Upstream license/notice files to include in the portable archive")
+list(APPEND PORTABLE_LICENSE_FILES "${PROJECT_SOURCE_DIR}/packaging/licenses/tinyxml2/LICENSE.txt")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$" OR
    CMAKE_GENERATOR_PLATFORM MATCHES "^[Aa][Rr][Mm]64$" OR

@@ -32,15 +32,24 @@ void DownloadManager::dhtLoop() {
         }
 
         // Periodically re-announce
+        auto advertised = announcePort();
         if (dht_manager_->getNodeCount() > 0) {
-            dht_manager_->announcePeer(torrent_.infoHash(), listen_port_);
+            dht_manager_->announcePeer(torrent_.infoHash(), advertised);
         }
 
         // Log DHT statistics
         auto stats = dht_manager_->getRoutingStats();
         std::cout << "DHT: " << stats.total_nodes << " nodes in routing table ("
                   << stats.good_nodes << " good)\n";
-        waitForStop(std::chrono::seconds(active_peer_count ? 60 : 5));
+        const auto next_lookup = std::chrono::steady_clock::now() + std::chrono::seconds(active_peer_count ? 60 : 5);
+        while (running_ && std::chrono::steady_clock::now() < next_lookup) {
+            waitForStop(std::chrono::seconds(1));
+            const auto port = announcePort();
+            if (running_ && port != advertised && dht_manager_->getNodeCount() > 0) {
+                dht_manager_->announcePeer(torrent_.infoHash(), port);
+                advertised = port;
+            }
+        }
         if (running_ && !dht_manager_->getNodeCount())
             dht_manager_->bootstrap(dht_bootstrap_nodes_, [this] { return !running_; });
     }

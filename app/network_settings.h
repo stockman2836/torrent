@@ -10,9 +10,10 @@ struct NetworkSettings {
     int max_peers = 50;
     bool enable_dht = true;
     bool enable_pex = true;
+    bool enable_port_mapping = false;
 
     static NetworkSettings fromConfig(const Config& config);
-    static NetworkSettings parse(std::string_view port, std::string_view peers, bool dht, bool pex);
+    static NetworkSettings parse(std::string_view port, std::string_view peers, bool dht, bool pex, bool port_mapping = false);
     void validate(size_t downloads = 1) const;
     void applyTo(Config& config) const;
 };

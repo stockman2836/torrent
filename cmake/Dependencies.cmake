@@ -1,7 +1,20 @@
 include(FetchContent)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(CURL REQUIRED)
+find_package(CURL 7.62 REQUIRED)
+
+find_package(tinyxml2 10.0.0 EXACT CONFIG QUIET COMPONENTS static)
+if(NOT TARGET tinyxml2::tinyxml2)
+    set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(tinyxml2_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(tinyxml2
+        URL https://codeload.github.com/leethomason/tinyxml2/tar.gz/refs/tags/10.0.0
+        URL_HASH SHA256=3bdf15128ba16686e69bce256cc468e76c7b94ff2c7f391cc5ec09e40bff3839)
+    FetchContent_MakeAvailable(tinyxml2)
+endif()
 
 find_package(spdlog CONFIG QUIET)
 if(NOT TARGET spdlog::spdlog)

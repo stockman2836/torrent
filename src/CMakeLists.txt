@@ -18,6 +18,10 @@ target_link_libraries(torrent_storage PUBLIC Torrent::Metainfo)
 add_library(torrent_network STATIC
     network/tracker/tracker_client.cpp
     network/tracker/udp_tracker.cpp
+    network/port_mapping/gateway.cpp
+    network/port_mapping/natpmp.cpp
+    network/port_mapping/upnp.cpp
+    network/port_mapping/port_mapper.cpp
     network/dht/dht_node.cpp
     network/dht/dht_krpc.cpp
     network/dht/dht_routing_table.cpp
@@ -38,7 +42,10 @@ add_library(torrent_network STATIC
     network/transport/web_seed.cpp
     network/transport/utp_socket.cpp)
 torrent_target(torrent_network Network)
-target_link_libraries(torrent_network PUBLIC Torrent::Metainfo PRIVATE CURL::libcurl)
+target_link_libraries(torrent_network PUBLIC Torrent::Metainfo PRIVATE CURL::libcurl tinyxml2::tinyxml2)
+if(WIN32)
+    target_link_libraries(torrent_network PRIVATE iphlpapi)
+endif()
 if(ENABLE_UTP)
     target_include_directories(torrent_network PUBLIC "${LIBUTP_INCLUDE_DIR}")
     target_compile_definitions(torrent_network PUBLIC HAVE_LIBUTP)

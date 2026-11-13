@@ -32,6 +32,29 @@ const char* trackerState(TrackerState value) {
 NetworkDiagnostics diagnoseNetwork(const DownloadSnapshot& snapshot) {
     const auto& network = snapshot.network;
     NetworkDiagnostics result;
+    const auto& mapping = network.port_mapping;
+    const char* mapping_state = u8"выключено";
+    switch (mapping.state) {
+    case MappingState::Discovering: mapping_state = u8"поиск роутера…"; break;
+    case MappingState::Mapping: mapping_state = u8"настройка или продление правил…"; break;
+    case MappingState::Active: mapping_state = u8"роутер подтвердил правила"; break;
+    case MappingState::Partial: mapping_state = u8"подтверждена часть правил"; break;
+    case MappingState::Error: mapping_state = u8"настройка не подтверждена"; break;
+    case MappingState::Removing: mapping_state = u8"удаление правил…"; break;
+    case MappingState::Stopped:
+        mapping_state = mapping.error.empty() ? u8"сеанс остановлен, своих правил нет" : u8"удаление правил не подтверждено"; break;
+    default:
+        if (!mapping.error.empty()) mapping_state = u8"выключено, удаление правил не подтверждено";
+        else if (mapping.enabled) mapping_state = u8"включится при запуске загрузки";
+        break;
+    }
+    result.mapping = std::string(u8"Автооткрытие портов: ") + mapping_state;
+    if (mapping.protocol != MappingProtocol::None)
+        result.mapping += mapping.protocol == MappingProtocol::NatPmp ? " (NAT-PMP)" : " (UPnP)";
+    for (const auto& port : mapping.ports) if (port.active)
+        result.mapping += std::string(" · ") + (port.transport == PortTransport::Tcp ? "TCP " : "UDP ") +
+            std::to_string(port.internal_port) + " → " + std::to_string(port.external_port);
+    if (!mapping.error.empty()) result.mapping += ". " + mapping.error;
     const auto port = std::to_string(network.listener.port);
     auto listener = network.listener.state;
     // Failed tasks retain their last snapshot after the session has unwound.
@@ -134,7 +157,8 @@ std::string networkReport(const DownloadSnapshot& snapshot) {
     const auto& network = snapshot.network;
     std::ostringstream report;
     report << u8"Диагностика TorrentClient\nТоррент: " << snapshot.name << '\n' << diagnosis.summary << '\n'
-           << diagnosis.port << '\n' << diagnosis.incoming << '\n' << diagnosis.advice << '\n' << diagnosis.limits << '\n'
+           << diagnosis.port << '\n' << diagnosis.incoming << '\n' << diagnosis.mapping << '\n' << diagnosis.advice << '\n' << diagnosis.limits << '\n'
+           << u8"Роутер: " << network.port_mapping.gateway << u8" · внешний адрес: " << network.port_mapping.external_address << '\n'
            << u8"Исходящих BitTorrent за сеанс: " << network.outgoing_handshakes
            << u8"\nОтклонено по лимиту пиров: " << network.rejected_incoming
            << u8"\nОшибок входящего приветствия: " << network.failed_incoming_handshakes

@@ -34,6 +34,7 @@ bool Config::loadFromFile(const std::string& filepath) {
         if (j.contains("listen_port")) listen_port = j["listen_port"].get<uint16_t>();
         if (j.contains("max_peers")) max_peers = j["max_peers"].get<int>();
         if (j.contains("max_connections")) max_connections = j["max_connections"].get<int>();
+        if (j.contains("enable_port_mapping")) enable_port_mapping = j["enable_port_mapping"].get<bool>();
 
         // Speed limits
         if (j.contains("max_download_speed")) {
@@ -154,6 +155,7 @@ bool Config::saveToFile(const std::string& filepath) const {
         j["listen_port"] = listen_port;
         j["max_peers"] = max_peers;
         j["max_connections"] = max_connections;
+        j["enable_port_mapping"] = enable_port_mapping;
 
         // Speed limits
         j["max_download_speed"] = max_download_speed;

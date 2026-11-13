@@ -86,6 +86,18 @@ TEST(NetworkDiagnostics, WebSeedTransfersAreVisibleWithoutPeerConnections) {
     EXPECT_TRUE(contains(diagnoseNetwork(state).summary, u8"HTTP-источников"));
 }
 
+TEST(NetworkDiagnostics, RouterAcknowledgementIsSeparateFromPublicReachability) {
+    auto state = active();
+    state.network.port_mapping.enabled = true;
+    state.network.port_mapping.state = MappingState::Active;
+    state.network.port_mapping.protocol = MappingProtocol::NatPmp;
+    state.network.port_mapping.ports.push_back({PortTransport::Tcp, 24567, 45000, 3600, true, {}});
+    const auto diagnosis = diagnoseNetwork(state);
+    EXPECT_TRUE(contains(diagnosis.mapping, "NAT-PMP"));
+    EXPECT_TRUE(contains(diagnosis.mapping, "45000"));
+    EXPECT_TRUE(contains(diagnosis.port, u8"Доступность из интернета: не проверена"));
+}
+
 TEST(NetworkDiagnostics, ReportIncludesEffectiveCapsLimitsAndFailures) {
     auto state = active();
     state.name = u8"Тестовая раздача";

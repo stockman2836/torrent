@@ -60,6 +60,8 @@ DownloadManager::DownloadManager(TorrentFile torrent_file, const Config& config,
 
     initializeTrackers(config.tracker_timeout_seconds);
     listener_status_.port = listen_port_;
+    port_mapping_enabled_ = config.enable_port_mapping;
+    port_mapping_options_ = config.port_mapping_options;
 
     // Use existing DHT or create new one
     if (existing_dht) {
@@ -144,6 +146,9 @@ void DownloadManager::start() {
         }
     }
 
+    port_mapper_ = std::make_unique<PortMapper>(listen_port_, enable_dht_ && dht_manager_ ? dht_manager_->port() : 0, port_mapping_options_);
+    port_mapper_->setEnabled(port_mapping_enabled_);
+
     // Start LSD if enabled
     if (enable_lsd_ && lsd_manager_) {
         std::cout << "Starting LSD...\n";
@@ -217,6 +222,8 @@ void DownloadManager::stop() {
     std::cout << "Stopping client...\n";
     stop_cv_.notify_all();
     if (listener_thread_.joinable()) listener_thread_.join();
+    // Keep local sockets reserved while removing their router rules.
+    if (port_mapper_) port_mapper_->stop();
     listener_.reset();
     {
         std::lock_guard<std::mutex> lock(peers_mutex_);
@@ -285,6 +292,17 @@ void DownloadManager::setSpeedLimits(int64_t download_bytes_per_sec, int64_t upl
         throw std::invalid_argument("Speed limits must be non-negative");
     download_limiter_.setRate(download_bytes_per_sec);
     upload_limiter_.setRate(upload_bytes_per_sec);
+}
+
+void DownloadManager::setPortMappingEnabled(bool enabled) {
+    port_mapping_enabled_ = enabled;
+    if (port_mapper_) port_mapper_->setEnabled(enabled);
+}
+
+uint16_t DownloadManager::announcePort() const {
+    if (port_mapper_) for (const auto& port : port_mapper_->status().ports)
+        if (port.transport == PortTransport::Tcp && port.active && port.external_port) return port.external_port;
+    return listen_port_;
 }
 
 void DownloadManager::waitForStop(std::chrono::milliseconds delay) {

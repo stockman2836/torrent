@@ -42,9 +42,11 @@ rules.
 ## Requirements
 
 - CMake 3.16+ and a C++17 compiler (MSVC, GCC or Clang).
-- OpenSSL, libcurl and platform thread/socket libraries.
+- OpenSSL, libcurl 7.62+ and platform thread/socket libraries.
 - spdlog, nlohmann/json and Google Test: installed CMake packages are preferred;
   missing packages are fetched at the pinned versions during configuration.
+- TinyXML2 10.0.0 for UPnP XML: an installed static package is preferred;
+  otherwise the release archive is fetched and checked against a pinned SHA256.
 - Node.js is optional and enables the offline end-to-end test.
 - libutp is optional and required only with `ENABLE_UTP=ON`.
 
@@ -194,6 +196,30 @@ their current settings. Newly added torrents use the saved values immediately.
 The queue assigns separate TCP/DHT port pairs starting at the chosen port, so a
 particular torrent may use a higher port. Its actual listening port is shown in
 the window. A port range too small for the current list is rejected before saving.
+
+The same dialog has **Open ports on router (UPnP/NAT-PMP)**, disabled by default.
+Opting in creates finite IPv4 rules for each active torrent's actual TCP listener
+and its DHT UDP socket when DHT is running. Toggling this option applies immediately
+to active jobs; changing local port/DHT settings still takes effect on their next
+start. Resolving metadata or restoring an idle list creates no rules. The option
+is saved as `enable_port_mapping` in the application preferences.
+
+The mapper tries NAT-PMP on the IPv4 default gateway, then UPnP IGD discovery.
+It requests one-hour leases by default, renews them halfway through the granted
+lifetime and removes its own rules when disabled or stopped. UPnP ownership is
+checked before updating/deleting a rule; pre-existing rules are left alone.
+Permanent-only UPnP routers are reported as unsupported. Shutdown cleanup is best
+effort with a shared two-second budget per session; an unconfirmed removal is
+shown in diagnostics. Finite leases also bound stale rules after a crash.
+
+**Peers and tracker** shows the protocol, assigned ports and errors. A different
+external TCP port is announced to trackers and DHT. Expired or unconfirmed leases
+stop being advertised. Router acknowledgement remains separate from Internet
+reachability, including with another upstream NAT or firewall. No IPv6 firewall,
+Windows firewall or experimental uTP rule is changed by this option. Automatic
+gateway discovery is implemented for Windows and Linux; other systems report an
+unavailable gateway. Verification uses isolated local router emulators; physical
+routers still need their own compatibility check.
 
 Settings are saved through a temporary file and atomic replacement. An unsuccessful
 write keeps the previous preferences. When a magnet's saved metadata still owns a

@@ -14,7 +14,7 @@ and does not require a separate CA bundle. See [curl's Schannel behavior](https:
 
 ## Build
 
-Configure the ordinary OpenSSL, curl, spdlog and JSON dependencies first, as
+Configure the ordinary OpenSSL, curl, spdlog, JSON and TinyXML2 dependencies first, as
 described in the root README. For a single-configuration generator:
 
 ```powershell
@@ -51,6 +51,7 @@ cmake -S . -B build/release '-DPORTABLE_LICENSE_FILES=C:/deps/curl/COPYING;C:/de
 
 Pass the matching notices for all bundled dependencies. The reference build
 includes curl, spdlog, JSON, OpenSSL, iconv, IDN2, unistring and zlib notices.
+The statically linked TinyXML2 10.0.0 notice is included automatically.
 Recreate the archive after changing dependency binaries or notices. To package
 already built binaries without rebuilding, run:
 

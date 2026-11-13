@@ -72,7 +72,7 @@ void refresh(HWND dialog, const DialogState& state) {
     SetDlgItemTextW(dialog, IDC_NET_HINT, networkHint(snapshot).c_str());
     SetDlgItemTextW(dialog, IDC_NET_PORT, wide(diagnosis.port).c_str());
     SetDlgItemTextW(dialog, IDC_NET_INCOMING, wide(diagnosis.incoming).c_str());
-    auto advice = diagnosis.advice;
+    auto advice = diagnosis.mapping + "\r\n" + diagnosis.advice;
     if (network.download_limit || network.upload_limit || network.global_download_limit || network.global_upload_limit)
         advice += "\r\n" + diagnosis.limits;
     SetDlgItemTextW(dialog, IDC_NET_ADVICE, wide(advice).c_str());

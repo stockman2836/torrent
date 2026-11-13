@@ -73,9 +73,10 @@ void DHTManager::start() {
     address.sin_family = AF_INET; address.sin_port = htons(port_); address.sin_addr.s_addr = INADDR_ANY;
 #ifdef _WIN32
     BOOL exclusive = TRUE;
-    setsockopt(socket_fd_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+    const bool reserved = setsockopt(socket_fd_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+        reinterpret_cast<const char*>(&exclusive), sizeof(exclusive)) == 0;
     u_long mode = 1;
-    const bool nonblocking = ioctlsocket(socket_fd_, FIONBIO, &mode) == 0;
+    const bool nonblocking = reserved && ioctlsocket(socket_fd_, FIONBIO, &mode) == 0;
 #else
     const int flags = fcntl(socket_fd_, F_GETFL, 0);
     const bool nonblocking = flags >= 0 && fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK) == 0;

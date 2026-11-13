@@ -39,6 +39,7 @@ public:
     void pause();
     void resume();
     void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
+    void setPortMappingEnabled(bool enabled);
     void setFilePriorities(const std::map<size_t, FilePriority>& priorities);
 
     // Status
@@ -48,6 +49,7 @@ public:
     int64_t uploadSpeed() const;
     int64_t uploadedBytes() const { return total_uploaded_.load(); }
     uint16_t listenPort() const { return listen_port_; }
+    uint16_t announcePort() const;
     NetworkStatus networkStatus() const;
     bool canSeed() const;
     void beginSeeding();
@@ -109,6 +111,9 @@ private:
     std::unique_ptr<WebSeedManager> webseed_manager_;
     std::unique_ptr<utp::UtpManager> utp_manager_;
     std::unique_ptr<PeerListener> listener_;
+    std::unique_ptr<PortMapper> port_mapper_;
+    bool port_mapping_enabled_ = false;
+    PortMappingOptions port_mapping_options_;
     std::thread listener_thread_;
 
     std::vector<Peer> available_peers_;
@@ -164,11 +169,13 @@ private:
         bool started = false;
         bool completed = false;
         bool completion_attempted = false;
+        uint16_t announced_port = 0;
     };
     std::vector<std::vector<TrackerEntry>> tracker_tiers_; // Serialized by tracker_mutex_.
     int tracker_timeout_ = 30;
     bool completion_pending_ = false;
     std::chrono::steady_clock::time_point next_tracker_announce_{};
+    uint16_t last_tracker_port_ = 0;
     bool complete_at_start_ = false;
 
     // Speed limiting and tracking

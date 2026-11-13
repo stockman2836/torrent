@@ -130,6 +130,37 @@ the discovery queue so an empty tracker reply does not erase DHT/LSD addresses.
 Shutdown changes the running predicate under the same mutex used by service
 condition-variable waits, preventing a missed notification at the wait boundary.
 
+`network/port_mapping` contains a concrete `GatewayClient` for routing, bounded
+NAT-PMP UDP requests, SSDP discovery and UPnP SOAP, plus `PortMapper`, which owns
+one session's finite leases and worker. TinyXML2 parses device/fault responses;
+libcurl handles bounded HTTP without redirects/proxies. Device/control URLs must
+remain on the selected numeric IPv4 gateway. XML/HTTP bodies are size-limited.
+NAT-PMP requests are serialized within the process, validate the responding
+endpoint/opcode/internal port and use zero suggested external port for deletion
+as specified by [RFC 6886](https://www.rfc-editor.org/rfc/rfc6886.html#section-3.4).
+UPnP supports WANIPConnection 1/2 and WANPPPConnection 1. Preflight and cleanup
+queries compare the internal endpoint and per-session description token. Rules
+belonging to another owner are neither replaced nor deleted. No permanent-lease
+fallback or wildcard deletion is issued.
+
+The session starts the mapper only after binding its local TCP/DHT sockets, and
+keeps those sockets reserved until cleanup finishes. The worker renews at half the
+granted lifetime, using a conservative request-start timestamp. Copied status
+checks expiry even while a renewal request is pending. The task passes live opt-in
+changes asynchronously; other network defaults retain their next-start semantics.
+All router I/O stays off the window/task control thread. Disabled defaults create
+no worker or discovery packets. Cleanup has a two-second best-effort budget per
+session and preserves failures in status rather than claiming removal succeeded.
+
+Tracker entries remember the port on which they registered. A mapped endpoint
+change triggers stopped on the previous port and started on the new port; final
+notifications use the registered endpoint even after router cleanup. DHT announces
+refresh the advertised TCP port without increasing the peer-lookup frequency.
+LSD continues advertising the local port. Runtime `PortMappingOptions` allow
+embedding overrides and loopback emulators; they are not loaded/saved in JSON.
+Only the global opt-in flag is persisted. Tests and native-window smoke modes
+force loopback endpoints and never inherit the user's router opt-in.
+
 One background worker exclusively
 owns input resolution and the download session. Start, stop and close never join
 network workers on the window thread. Stop persists verified pieces; continuing

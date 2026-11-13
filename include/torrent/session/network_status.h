@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "torrent/network/peer/listener_status.h"
+#include "torrent/network/port_mapping/port_mapper.h"
 
 namespace torrent {
 
@@ -35,6 +36,7 @@ struct TrackerStatus {
 // Copied values only. Socket and protocol state remain on their owning workers.
 struct NetworkStatus {
     ListenerStatus listener;
+    PortMappingStatus port_mapping;
     size_t incoming_handshakes = 0;
     size_t loopback_handshakes = 0;
     size_t outgoing_handshakes = 0;

@@ -19,7 +19,7 @@ BEGIN
     PUSHBUTTON "Отмена", IDCANCEL, 226, 151, 72, 20
 END
 
-IDD_NETWORK_SETTINGS DIALOGEX 0, 0, 350, 244
+IDD_NETWORK_SETTINGS DIALOGEX 0, 0, 350, 283
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Настройки сети"
 FONT 9, "Segoe UI"
@@ -31,10 +31,11 @@ BEGIN
     EDITTEXT IDC_NET_MAX_PEERS, 242, 69, 96, 20, ES_NUMBER | ES_AUTOHSCROLL
     CONTROL "DHT — поиск пиров без трекера", IDC_NET_DHT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 101, 326, 18
     CONTROL "PEX — обмен адресами между пирами", IDC_NET_PEX, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 126, 326, 18
-    LTEXT "Для нескольких раздач порты назначаются автоматически начиная с указанного. Фактический порт показан у раздачи.", -1, 12, 156, 326, 28
-    LTEXT "Изменения сохраняются и применяются при следующем запуске раздачи. Текущие подключения продолжают работу.", -1, 12, 189, 326, 27
-    DEFPUSHBUTTON "Сохранить", IDOK, 180, 222, 76, 18
-    PUSHBUTTON "Отмена", IDCANCEL, 264, 222, 74, 18
+    CONTROL "Открывать порты на роутере (UPnP/NAT-PMP)", IDC_NET_PORT_MAPPING, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 151, 326, 18
+    LTEXT "Для нескольких раздач порты назначаются автоматически начиная с указанного. Фактический порт показан у раздачи.", -1, 12, 180, 326, 28
+    LTEXT "Порты, лимит пиров, DHT и PEX применяются при следующем запуске раздачи. Автооткрытие портов включается и выключается сразу для всех активных раздач.", -1, 12, 213, 326, 38
+    DEFPUSHBUTTON "Сохранить", IDOK, 180, 259, 76, 18
+    PUSHBUTTON "Отмена", IDCANCEL, 264, 259, 74, 18
 END
 
 IDD_GLOBAL_SPEED DIALOGEX 0, 0, 350, 199

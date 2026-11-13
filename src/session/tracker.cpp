@@ -32,7 +32,7 @@ void DownloadManager::trackerLoop() {
         std::chrono::steady_clock::time_point next;
         { std::lock_guard<std::mutex> lock(tracker_mutex_); next = next_tracker_announce_; }
         const auto now = std::chrono::steady_clock::now();
-        if (now >= next) updateTracker();
+        if (now >= next || (last_tracker_port_ && last_tracker_port_ != announcePort())) updateTracker();
         else waitForStop(std::min(std::chrono::milliseconds(1000),
             std::chrono::duration_cast<std::chrono::milliseconds>(next - now) + std::chrono::milliseconds(1)));
     }
@@ -44,9 +44,11 @@ TrackerResponse DownloadManager::announceTracker(const std::string& event) {
     TrackerResponse response;
     response.failure_reason = "No tracker responded";
     if (!running_ || tracker_tiers_.empty()) return response;
+    const auto public_port = announcePort();
+    if (event.empty()) last_tracker_port_ = public_port;
     if (event == "completed") completion_pending_ = true;
     size_t attempt = 0;
-    const auto query = [&](TrackerEntry& entry, const std::string& wire_event) {
+    const auto query = [&](TrackerEntry& entry, const std::string& wire_event, uint16_t port) {
         {
             std::lock_guard<std::mutex> lock(peers_mutex_);
             tracker_status_.url = entry.url;
@@ -59,12 +61,12 @@ TrackerResponse DownloadManager::announceTracker(const std::string& event) {
         try {
             TrackerClient client(entry.url, torrent_.infoHash(), peer_id_);
             result = client.announce(total_uploaded_, total_downloaded_, bytesRemaining(),
-                listen_port_, wire_event, tracker_timeout_, [this] { return !running_.load(); });
+                port, wire_event, tracker_timeout_, [this] { return !running_.load(); });
         } catch (const std::exception& error) { result.failure_reason = error.what(); }
         // Cancellation is not a new tracker failure and must not trigger fallback.
         if (!running_) return result;
         if (result.isSuccess()) {
-            if (wire_event == "started") entry.started = true;
+            if (wire_event == "started") { entry.started = true; entry.announced_port = port; }
             if (wire_event == "completed") entry.completed = true;
         }
         {
@@ -94,17 +96,22 @@ TrackerResponse DownloadManager::announceTracker(const std::string& event) {
         std::stable_partition(registered.begin(), registered.end(), [&](const auto* entry) { return entry->url != current; });
         for (auto* entry : registered) {
             if (!running_) return response;
-            ++attempt; response = query(*entry, "completed");
+            ++attempt; response = query(*entry, "completed", entry->announced_port);
         }
     } else {
         for (auto& tier : tracker_tiers_) {
             for (size_t index = 0; index < tier.size() && running_; ++index) {
                 auto& entry = tier[index];
                 ++attempt;
-                response = query(entry, entry.started ? "" : "started");
+                if (entry.started && entry.announced_port != public_port) {
+                    query(entry, "stopped", entry.announced_port);
+                    if (!running_) return response;
+                    entry.started = entry.completed = entry.completion_attempted = false;
+                }
+                response = query(entry, entry.started ? "" : "started", public_port);
                 if (!running_) return response;
                 if (!response.isSuccess()) continue;
-                if (completion_pending_ && !entry.completed) response = query(entry, "completed");
+                if (completion_pending_ && !entry.completed) response = query(entry, "completed", public_port);
                 if (!running_) return response;
                 if (!response.isSuccess()) continue;
                 // BEP 12: promote within this tier, preserving tier precedence.
@@ -136,10 +143,10 @@ void DownloadManager::stopTrackers() {
             // Flush only notifications never attempted, within the same budget.
             if (seeding_mode_ && !complete_at_start_ && !entry->completion_attempted) {
                 entry->completion_attempted = true;
-                client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), listen_port_, "completed", 2,
+                client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), entry->announced_port, "completed", 2,
                     [deadline] { return std::chrono::steady_clock::now() >= deadline; });
             }
-            client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), listen_port_, "stopped", 2,
+            client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), entry->announced_port, "stopped", 2,
                 [deadline] { return std::chrono::steady_clock::now() >= deadline; });
         } catch (const std::exception&) {} // Best effort; preserve useful diagnostics.
         entry->started = false;

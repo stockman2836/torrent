@@ -41,6 +41,7 @@ public:
     void stop();
     void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
     void setSeedingOptions(const SeedingOptions& options);
+    void setPortMappingEnabled(bool enabled);
     bool setFilePriorities(const std::map<size_t, FilePriority>& priorities);
     void wait();
     bool busy() const { return busy_.load(); }
@@ -55,6 +56,7 @@ private:
     int64_t download_limit_ = 0;
     int64_t upload_limit_ = 0;
     SeedingOptions seeding_;
+    bool port_mapping_enabled_ = false;
     std::map<size_t, FilePriority> file_priorities_;
     uint64_t priority_revision_ = 0;
     std::unique_ptr<ResolvedInput> input_;

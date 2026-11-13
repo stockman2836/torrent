@@ -8,6 +8,7 @@
 #include <map>
 #include <utility>
 #include "torrent/core/file_priority.h"
+#include "torrent/core/port_mapping_options.h"
 
 namespace torrent {
 
@@ -22,6 +23,8 @@ struct Config {
     uint16_t listen_port = 6881;
     int max_peers = 50;
     int max_connections = 100;
+    bool enable_port_mapping = false;
+    PortMappingOptions port_mapping_options; // Runtime overrides; never loaded from JSON.
 
     // Speed limits (bytes per second, 0 = unlimited)
     int64_t max_download_speed = 0;  // 0 = unlimited
