@@ -29,10 +29,7 @@ void DownloadManager::incomingLoop() {
             peer_threads_.push_back({peer, std::thread([this, peer] {
                 try {
                     if (peer->connection->acceptHandshake(piece_manager_->getBitfield())) {
-                        if (enable_pex_) {
-                            peer->connection->enablePex();
-                            peer->connection->sendExtendedHandshake();
-                        }
+                        configurePeerExtensions(*peer->connection);
                         {
                             std::lock_guard<std::mutex> lock(peers_mutex_);
                             peer->handshaking = false;

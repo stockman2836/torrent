@@ -309,6 +309,16 @@ TEST(BencodePrefix, RejectsMalformedAndOverflowingLengths) {
     }
 }
 
+TEST(BencodeDictionaryBytes, ExtractsExactTopLevelBytesAndRejectsAmbiguity) {
+    const std::string value = "d4:infod1:zi2e1:ai1ee1:x4:infoe";
+    const auto raw = BencodeParser::dictionaryValueBytes({value.begin(), value.end()}, "info");
+    EXPECT_EQ(std::string(raw.begin(), raw.end()), "d1:zi2e1:ai1ee");
+    for (const auto* invalid : {"de", "d4:infoi1e4:infoi2ee", "d4:infoi1eex", "li1ee"}) {
+        const std::string data(invalid);
+        EXPECT_THROW(BencodeParser::dictionaryValueBytes({data.begin(), data.end()}, "info"), BencodeError);
+    }
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

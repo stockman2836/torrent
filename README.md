@@ -243,9 +243,20 @@ Different torrents use separate ports, and incoming handshakes must match the
 torrent's info hash. Connections work over IPv4 and, when enabled, IPv6. Unknown
 torrents and self connections are rejected; only verified pieces are uploaded.
 The listener closes on stop or removal. Incoming handshakes use a five-second
-deadline and count toward the peer limit. The application does not configure
-router port forwarding or firewall rules. These controls apply to desktop jobs;
+deadline and count toward the peer limit. Router port mapping is available through
+the opt-in network setting described above; firewall rules are not changed. These controls apply to desktop jobs;
 the CLI keeps its download-and-exit behavior.
+
+During downloading or seeding, peers can obtain verified magnet metadata from
+the session over incoming or outgoing TCP connections ([BEP 9](https://www.bittorrent.org/beps/bep_0009.html)).
+The original `info` dictionary bytes are preserved, including unknown fields;
+responses never reconstruct metadata from the displayed file list. This works
+with PEX disabled and requires the peer's extension-protocol support. Metadata
+replies share the local/global upload budgets but do not increase payload totals
+or the seeding ratio. Each connection can receive at most four times the metadata
+block count in data replies; further requests receive rejects. Blocks are at most
+16 KiB. Serving is limited to 4 MiB
+of complete metadata and ends when the session stops. No new setting is needed.
 
 Preferences and the desktop log live in `%LOCALAPPDATA%/TorrentClient`; the default
 download folder is `%USERPROFILE%/Downloads/TorrentClient`. Resume data stays with

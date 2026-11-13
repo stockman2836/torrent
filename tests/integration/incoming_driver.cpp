@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
         DownloadQueue queue;
         std::vector<DownloadId> ids;
         for (const auto& source : argc == 4 ? std::vector<std::string>{argv[1], argv[3]} : std::vector<std::string>{argv[1]}) {
-            prepareResume(source, config);
+            if (source.rfind("magnet:", 0) != 0) prepareResume(source, config);
             auto id = queue.add(source, config); ids.push_back(id);
             queue.setSeedingOptions(id, {true, 0, 0}); queue.enqueue(id);
         }

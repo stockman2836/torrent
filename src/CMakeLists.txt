@@ -36,6 +36,7 @@ add_library(torrent_network STATIC
     network/peer/extensions.cpp
     network/peer/extension_protocol.cpp
     network/peer/metadata_exchange.cpp
+    network/peer/metadata_responder.cpp
     network/peer/mse_handshake.cpp
     network/discovery/pex_manager.cpp
     network/discovery/lsd.cpp
@@ -55,6 +56,7 @@ endif()
 add_library(torrent_session STATIC
     session/download_manager.cpp
     session/peers.cpp
+    session/peer_extensions.cpp
     session/incoming.cpp
     session/transfer.cpp
     session/scheduling.cpp

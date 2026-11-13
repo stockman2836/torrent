@@ -238,6 +238,7 @@ public:
     ExtensionProtocol& extensions();
     const ExtensionProtocol* extensionProtocol() const { return extension_protocol_.get(); }
     bool supportsExtensions() const { return extension_protocol_ != nullptr; }
+    bool peerSupportsExtensions() const { return peer_supports_extensions_; }
 
     // Encryption support (MSE/PE)
     bool performMSEHandshake(bool is_initiator, const std::vector<uint8_t>& info_hash);
@@ -313,6 +314,7 @@ private:
 
     // Extension protocol support (optional, for magnet links)
     std::unique_ptr<ExtensionProtocol> extension_protocol_;
+    bool peer_supports_extensions_ = false;
 
     // Encryption support (optional, for MSE/PE)
     std::unique_ptr<EncryptedStream> encrypted_stream_;

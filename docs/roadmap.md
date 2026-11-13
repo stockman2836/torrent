@@ -12,6 +12,7 @@ code; prefer small concrete modules and keep network work off the window thread.
 - [x] TCP downloads with SHA1 verification, multi-file storage and resume.
 - [x] Multi-peer scheduling and bounded endgame requests with cancellation.
 - [x] Tracker-based magnet metadata acquisition with hash verification and fallback.
+- [x] Serve verified magnet metadata through incoming/outgoing TCP with request and upload limits.
 - [x] File selection and startup priorities, including shared boundary pieces.
 - [x] Live file priorities and selection with cancellation, cached-data reuse and queue ownership checks.
 - [x] Native Windows interface with background loading and responsive shutdown.
@@ -31,7 +32,7 @@ code; prefer small concrete modules and keep network work off the window thread.
 
 Protocol modules also exist for UDP trackers, PEX, local discovery, web
 seeds, MSE and optional uTP. Their presence does not establish interoperability
-coverage. The ordinary suite currently has nineteen unit suites and 148
+coverage. The ordinary suite currently has twenty unit suites and 156
 offline integration scenarios, plus a certificate check when the OpenSSL tool
 is available. See [tests](../tests/README.md) for verification.
 
@@ -43,16 +44,17 @@ and a local tracker. Compare final payload bytes and piece hashes.
 - [x] Download files from qBittorrent.
 - [x] Upload to qBittorrent through incoming and outgoing TCP connections.
 - [x] Resolve a magnet's metadata from qBittorrent and download its files.
+- [x] Let qBittorrent acquire our metadata from a magnet and download files in both TCP directions.
 - [x] Stop a partial download and reuse verified pieces after restarting.
 - [x] Keep these checks reproducible as optional integration tests.
 
-Reference: qBittorrent 4.6.2 with libtorrent 1.2.19 on Windows. All five
+Reference: qBittorrent 4.6.2 with libtorrent 1.2.19 on Windows. All seven TCP
 interoperability scenarios pass. The tests are opt-in and do not replace the
 ordinary offline regression suite.
 
 This optional suite covers local plaintext TCP and tracker-based discovery.
-Public-swarm evidence is recorded separately below. Encryption and metadata
-serving by our client require separate verification.
+Public-swarm evidence is recorded separately below. Encrypted transfers require
+separate verification.
 
 ## Verified: trackerless magnets
 
@@ -92,7 +94,6 @@ encrypted/uTP transfers and other network environments still need validation.
 
 - Verify public port reachability from another network; local socket diagnostics are already available.
 - Check port mapping compatibility on physical routers and across upstream NAT/firewall configurations.
-- Serve verified magnet metadata to peers.
 - Richer per-tracker history and peer statistics beyond the current connection snapshots.
 - Windows and POSIX CI plus broader protocol and encryption checks.
 - Profile disk I/O and memory usage before adding caches or tuning performance.

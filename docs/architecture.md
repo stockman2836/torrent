@@ -185,8 +185,9 @@ a whole block of the shared budget. Both locks are released during waits, with
 cancellation and shared rate changes checked within 50 ms. Download and upload
 use independent budgets; peer and web-seed delivery share the download path.
 The existing two-second burst capacity remains, and fairness between sessions is
-not guaranteed. Only payload is charged, not metadata, protocol headers or bytes
-already buffered by a transport. Global limits are desktop-instance preferences
+not guaranteed. Payload and outgoing BEP 9 replies (including their Bencode header)
+are charged; metadata acquisition, other protocol messages and bytes already
+buffered by a transport are outside these budgets. Global limits are desktop-instance preferences
 in `Config`, saved atomically before applying the update. They do not become
 per-torrent settings in the saved list or affect separate CLI processes.
 `SeedingOptions` validates the enabled flag, ratio and hours, and decides whether
@@ -229,6 +230,26 @@ metadata hash before publishing a `TorrentFile`. Each peer attempt owns its
 exchange state, while progress is exposed atomically. Rejected, corrupt or idle
 attempts can fall back to another peer; the working tracker is retained for the
 subsequent download session.
+
+`TorrentFile` keeps the original `info` dictionary bytes for both file and magnet
+inputs. `BencodeParser::dictionaryValueBytes` extracts a top-level value without
+re-encoding and rejects ambiguous duplicate `info` keys. File hashes are calculated
+over those exact bytes, including noncanonical key ordering and unknown binary
+fields. Magnet inputs retain bytes only after verifying the expected info hash.
+
+`configurePeerExtensions` registers metadata serving for both incoming and outgoing
+session peers, independently of PEX, after checking the peer's BEP 10 reserved bit.
+It advertises `ut_metadata` and the verified size, with one `MetadataResponder`
+reply budget per connection. The responder borrows immutable session-owned bytes;
+session shutdown joins all peer workers before destroying the torrent. Requests
+are bounded to 256 bytes, invalid indices receive rejects and unknown/malformed
+messages are ignored. Only complete metadata up to 4 MiB is advertised. The reply
+budget allows four rounds of metadata blocks and survives extension-ID changes.
+Replies use the peer's current ID, including disable/re-enable handshakes, and
+send at most 16 KiB plus the Bencode header. The owning peer worker applies both
+upload buckets with cancellation before sending. Metadata never contributes to
+payload traffic counters or the seeding ratio. See [BEP 9](https://www.bittorrent.org/beps/bep_0009.html)
+and [BEP 10](https://www.bittorrent.org/beps/bep_0010.html).
 
 `DownloadManager` takes metadata and a `Config`, avoiding positional boolean
 arguments and duplicate initialization. The configuration remains a plain value
@@ -280,6 +301,7 @@ The coordinator's implementation is divided by responsibility:
 - `download_manager.cpp`: construction, lifecycle and status.
 - `peers.cpp`: peer workers and transfer processing.
 - `incoming.cpp`: listener admission and incoming handshake workers.
+- `peer_extensions.cpp`: common extension negotiation and bounded metadata replies.
 - `transfer.cpp`: block acceptance, completion and remaining byte counts.
 - `scheduling.cpp`: piece assignment, selection and stale-peer cleanup.
 - `tracker.cpp`: announces and tracker refreshes.

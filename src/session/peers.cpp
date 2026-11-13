@@ -319,11 +319,7 @@ void DownloadManager::connectToPeers() {
             connection->generateAllowedFastSet(torrent_.numPieces(), 10);
         }
 
-        // Enable PEX if configured
-        if (enable_pex_) {
-            connection->enablePex();
-            connection->sendExtendedHandshake();
-        }
+        configurePeerExtensions(*connection);
 
         // Add to active peers
         std::lock_guard<std::mutex> lock(peers_mutex_);

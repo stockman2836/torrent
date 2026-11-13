@@ -73,6 +73,7 @@ private:
     void utpLoop();     // uTP operations
 
     void connectToPeers();
+    void configurePeerExtensions(PeerConnection& connection);
     void updateTracker();
     void initializeTrackers(int timeout_seconds);
     void stopTrackers();

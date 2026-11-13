@@ -378,6 +378,26 @@ TEST_F(TorrentFileTest, MagnetTrackersKeepPreferenceOrderWithoutDuplicatingUrls)
     EXPECT_EQ(torrent.trackerTiers(), (std::vector<std::vector<std::string>>{{"http://working/announce"}, {"http://backup/announce"}}));
 }
 
+TEST_F(TorrentFileTest, PreservesOriginalInfoBytesAndUnknownFieldsForMetadataServing) {
+    auto info = BencodeParser::parse(createMockSingleFileTorrent()).getDictionary().at("info").getDictionary();
+    info["source"] = BencodeValue(std::string("binary\0ed:i123e", 14));
+    std::string raw = "d";
+    for (auto it = info.rbegin(); it != info.rend(); ++it)
+        raw += BencodeParser::encode(BencodeValue(it->first)) + BencodeParser::encode(it->second);
+    raw += "e";
+    const auto encoded = std::string("d7:comment4:info4:info") + raw + "e";
+    const auto torrent = TorrentFile::fromData({encoded.begin(), encoded.end()});
+    const std::vector<uint8_t> expected(raw.begin(), raw.end());
+    EXPECT_EQ(torrent.metadata(), expected);
+    EXPECT_EQ(torrent.infoHash(), utils::sha1(expected));
+    EXPECT_NE(torrent.infoHash(), utils::sha1(BencodeParser::encode(BencodeValue(info))));
+    const auto magnet = TorrentFile::fromMetadata(torrent.infoHash(), expected);
+    EXPECT_EQ(magnet.metadata(), expected);
+    EXPECT_EQ(magnet.name(), torrent.name());
+    auto corrupted = expected; corrupted[corrupted.size() - 2] ^= 1;
+    EXPECT_THROW(TorrentFile::fromMetadata(torrent.infoHash(), corrupted), std::exception);
+}
+
 // ==================== Main ====================
 
 int main(int argc, char **argv) {

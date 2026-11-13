@@ -24,6 +24,27 @@ std::pair<BencodeValue, size_t> BencodeParser::parsePrefix(const std::vector<uin
     return {std::move(value), parser.pos_};
 }
 
+std::vector<uint8_t> BencodeParser::dictionaryValueBytes(const std::vector<uint8_t>& data, const std::string& key) {
+    BencodeParser parser(std::string(data.begin(), data.end()));
+    if (parser.consume() != 'd') throw BencodeError("Expected a dictionary");
+    std::vector<uint8_t> result;
+    bool found = false;
+    while (parser.peek() != 'e') {
+        const auto name = parser.parseString().getString();
+        const auto start = parser.pos_;
+        parser.parseValue();
+        if (name == key) {
+            if (found) throw BencodeError("Duplicate dictionary key: " + key);
+            result.assign(data.begin() + start, data.begin() + parser.pos_);
+            found = true;
+        }
+    }
+    parser.consume();
+    if (parser.hasMore()) throw BencodeError("Unexpected trailing data");
+    if (!found) throw BencodeError("Missing dictionary key: " + key);
+    return result;
+}
+
 char BencodeParser::peek() const {
     if (!hasMore()) {
         throw BencodeError("Unexpected end of data");

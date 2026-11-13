@@ -26,6 +26,7 @@ bool PeerConnection::receiveHandshake() {
     remote_peer_id_.assign(bytes.begin() + 48, bytes.end());
     if (remote_peer_id_ == peer_id_) return false;
     peer_supports_fast_extension_ = (bytes[27] & 0x04) != 0;
+    peer_supports_extensions_ = (bytes[25] & 0x10) != 0;
     return true;
 }
 

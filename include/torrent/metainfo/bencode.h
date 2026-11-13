@@ -57,6 +57,8 @@ public:
     static BencodeValue parse(const std::vector<uint8_t>& data);
     // Parse one value followed by arbitrary binary data (BEP 9 message bodies).
     static std::pair<BencodeValue, size_t> parsePrefix(const std::vector<uint8_t>& data);
+    // Exact encoded bytes of a top-level dictionary value, without re-encoding.
+    static std::vector<uint8_t> dictionaryValueBytes(const std::vector<uint8_t>& data, const std::string& key);
 
     static std::string encode(const BencodeValue& value);
 

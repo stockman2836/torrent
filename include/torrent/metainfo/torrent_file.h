@@ -38,6 +38,7 @@ public:
     int64_t totalLength() const { return total_length_; }
     const std::vector<FileInfo>& files() const { return files_; }
     const std::vector<uint8_t>& infoHash() const { return info_hash_; }
+    const std::vector<uint8_t>& metadata() const { return metadata_; }
     const std::vector<std::string>& webSeeds() const { return web_seeds_; }
 
     // Info
@@ -63,9 +64,10 @@ private:
     int64_t total_length_;
     std::vector<FileInfo> files_;
     std::vector<uint8_t> info_hash_;  // SHA1 hash of info dictionary
+    std::vector<uint8_t> metadata_;   // Verified original info dictionary bytes (BEP 9).
     std::string comment_;
     std::string created_by_;
-    int64_t creation_date_;
+    int64_t creation_date_ = 0;
     std::vector<std::string> web_seeds_;  // BEP 19: HTTP/FTP web seed URLs
 };
 

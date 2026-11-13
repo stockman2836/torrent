@@ -61,20 +61,22 @@ async function main() {
   assert.equal(process.platform, 'win32', 'This fixture currently supports Windows qBittorrent 4.6.x');
   const [driverArg, cliArg, qbtArg, mode = 'download'] = process.argv.slice(2);
   assert.ok(driverArg && cliArg && qbtArg, 'Usage: test_interop.cjs <incoming_driver> <torrent_client> <qbittorrent> <scenario>');
-  assert.ok(['download', 'upload-incoming', 'upload-outgoing', 'magnet', 'resume', 'dht'].includes(mode), 'Unknown scenario');
+  assert.ok(['download', 'upload-incoming', 'upload-outgoing', 'magnet', 'resume', 'dht', 'metadata-incoming', 'metadata-outgoing'].includes(mode), 'Unknown scenario');
   const driver = path.resolve(driverArg), cli = path.resolve(cliArg), qbt = path.resolve(qbtArg);
   for (const executable of [driver, cli, qbt]) assert.ok(fs.existsSync(executable), `Missing executable: ${executable}`);
   const artifacts = path.resolve(__dirname, '../../build/tests'); fs.mkdirSync(artifacts, { recursive: true });
   const work = fs.mkdtempSync(path.join(artifacts, `interop-${mode}-`));
   const profile = path.join(work, 'profile'), qbtFiles = path.join(work, 'qbt-files'), files = path.join(work, 'files');
   const ports = await availablePort(3), qbtPort = ports, webPort = ports + 2, enginePort = ports + 4;
-  const uploads = mode.startsWith('upload');
+  const servesMetadata = mode.startsWith('metadata-');
+  const uploads = mode.startsWith('upload') || servesMetadata;
   const payload = Buffer.alloc(1024 * 1024 + 137);
   for (let i = 0; i < payload.length; ++i) payload[i] = (i * 37 + (i >>> 8) * 13 + 11) % 256;
   const pieceLength = 32768, hashes = [];
   for (let offset = 0; offset < payload.length; offset += pieceLength) hashes.push(sha1(payload.subarray(offset, offset + pieceLength)));
   const parts = [{ path: ['alpha.bin'], length: 17003 }, { path: ['nested', 'beta.bin'], length: payload.length - 17003 }];
   const info = { files: parts, name: 'fixture', 'piece length': pieceLength, pieces: Buffer.concat(hashes) };
+  if (servesMetadata) info.source = 'metadata-blocks-ed:i123e'.repeat(1000);
   const hash = sha1(encode(info)).toString('hex');
   const writePayload = root => {
     let offset = 0;
@@ -94,7 +96,7 @@ async function main() {
     const url = new URL(req.url, 'http://127.0.0.1');
     const port = Number(url.searchParams.get('port'));
     const item = Object.fromEntries(url.searchParams); announces.push(item);
-    const outgoing = mode !== 'upload-incoming';
+    const outgoing = !['upload-incoming', 'metadata-incoming'].includes(mode);
     const target = outgoing ? (port === enginePort ? qbtPort : 0) : (port === qbtPort ? enginePort : 0);
     const peers = target ? Buffer.from([127, 0, 0, 1, target >> 8, target & 255]) : Buffer.alloc(0);
     res.end(encode({ interval: 1, 'min interval': 1, complete: 1, incomplete: 1, peers }));
@@ -172,10 +174,14 @@ PortForwardingEnabled=false
       Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="torrents"; filename="fixture.torrent"\r\nContent-Type: application/x-bittorrent\r\n\r\n`), torrentBytes,
       Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="savepath"\r\n\r\n${qbtFiles}\r\n--${boundary}--\r\n`)
     ]);
-    assert.equal((await request(webPort, 'torrents/add', undefined, body, `multipart/form-data; boundary=${boundary}`)).trim(), 'Ok.');
+    const added = servesMetadata
+      ? await api('torrents/add', { urls: `magnet:?xt=urn:btih:${hash}&tr=${encodeURIComponent(announce)}`, savepath: qbtFiles })
+      : await request(webPort, 'torrents/add', undefined, body, `multipart/form-data; boundary=${boundary}`);
+    assert.equal(added.trim(), 'Ok.');
     await until(async () => {
       const state = await torrentState();
-      const readyStates = uploads ? ['downloading', 'stalledDL', 'forcedDL'] : ['uploading', 'stalledUP', 'forcedUP'];
+      const readyStates = servesMetadata ? ['metaDL', 'forcedMetaDL']
+        : uploads ? ['downloading', 'stalledDL', 'forcedDL'] : ['uploading', 'stalledUP', 'forcedUP'];
       return state && readyStates.includes(state.state) && (uploads || state.progress === 1);
     }, 'qBittorrent hash check');
     await until(() => announces.some(item => Number(item.port) === qbtPort && item.event === 'started'), 'qBittorrent first announce');
@@ -186,7 +192,7 @@ PortForwardingEnabled=false
         if (engine.code !== undefined) throw new Error(engine.output);
         return engine.output.includes('INCOMING_READY');
       }, 'seeding session');
-      if (mode === 'upload-incoming') await api('torrents/addPeers', { hashes: hash, peers: `127.0.0.1:${enginePort}` });
+      if (['upload-incoming', 'metadata-incoming'].includes(mode)) await api('torrents/addPeers', { hashes: hash, peers: `127.0.0.1:${enginePort}` });
       await until(async () => (await torrentState())?.progress === 1, 'qBittorrent download');
       await api('torrents/pause', { hashes: hash });
       verifyPayload(qbtFiles);
@@ -215,7 +221,8 @@ PortForwardingEnabled=false
         assert.ok(!announces.some(item => Number(item.port) === enginePort), 'Trackerless client contacted a tracker');
       }
     }
-    const result = { scenario: mode, qBittorrent: version, buildInfo, bytes: payload.length, infoHash: hash, passed: true };
+    const result = { scenario: mode, qBittorrent: version, buildInfo, bytes: payload.length, infoHash: hash,
+      ...(servesMetadata ? { source: 'magnet', metadataBytes: encode(info).length } : {}), passed: true };
     fs.writeFileSync(path.join(work, 'result.json'), JSON.stringify(result, null, 2));
     console.log(`PASS interop ${mode}: qBittorrent ${version}; ${payload.length} bytes verified.`);
   } finally {

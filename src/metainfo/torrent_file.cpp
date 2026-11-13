@@ -32,13 +32,8 @@ TorrentFile TorrentFile::fromData(const std::vector<uint8_t>& data) {
 
     torrent.parse(root);
 
-    // Calculate info hash
-    const auto& dict = root.getDictionary();
-    auto it = dict.find("info");
-    if (it != dict.end()) {
-        std::string encoded_info = BencodeParser::encode(it->second);
-        torrent.calculateInfoHash(encoded_info);
-    }
+    torrent.metadata_ = BencodeParser::dictionaryValueBytes(data, "info");
+    torrent.calculateInfoHash(std::string(torrent.metadata_.begin(), torrent.metadata_.end()));
 
     return torrent;
 }
@@ -71,6 +66,7 @@ TorrentFile TorrentFile::fromMetadata(const std::vector<uint8_t>& info_hash,
 
     // Set info hash
     torrent.info_hash_ = info_hash;
+    torrent.metadata_ = metadata;
 
     // Set trackers from magnet link
     for (const auto& url : trackers) torrent.addTrackerTier({url});

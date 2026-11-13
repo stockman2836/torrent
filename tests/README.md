@@ -26,6 +26,7 @@ Node.js is optional; CMake registers the integration test when it finds `node`.
 | `test_command_line` | Help, overrides, invalid numbers and overflow rejection | Application |
 | `test_extension_protocol` | Payload framing, ID dispatch and extension disable updates | Network |
 | `test_metadata_exchange` | Binary assembly, size validation, rejects and callback locking | Network |
+| `test_metadata_responder` | Exact blocks, rejects, per-peer budgets and malformed requests | Network |
 | `test_file_selection` | File-to-piece masks, boundaries, empty files and invalid metadata | Metainfo |
 | `test_download_task` | Background task state and cancellation | Application |
 | `test_download_queue` | Scheduling, settings, persistence and file conflicts | Application |
@@ -110,6 +111,19 @@ valid Bencode but has a wrong info hash, checking verification separately from
 decoding. Logs remain in `build/tests/magnet-*`. Run these cases with
 `ctest --test-dir build -R test_magnet --output-on-failure`.
 
+`test_metadata_serving_*` checks the reverse transfer through the desktop queue
+controller. It serves original, deliberately unsorted `info` bytes with an unknown
+binary field in multiple blocks, then compares the full bytes and SHA1. Incoming
+requests also work while the payload is incomplete; outgoing sessions cover a
+seed, and a magnet input first acquires metadata/payload from a separate fixture
+peer before serving it. Other cases verify malformed requests and invalid indices,
+unknown message IDs, per-peer reply budgets, ID remapping/disable/re-enable,
+budget preservation across renegotiation and cancellation during upload throttling.
+Peers without BEP 10 receive ordinary payload messages without extended messages.
+PEX and all public discovery are disabled. Run with
+`ctest --test-dir build -R test_metadata_serving --output-on-failure`;
+artifacts remain in `build/tests/metadata-serving-*`.
+
 Endgame fixtures check exact `CANCEL` index/offset/length fields and compare the
 finished 229,499-byte payload. The late-response case sends corrupt data after
 `CANCEL` while another block remains pending; it must neither enter the piece
@@ -141,7 +155,7 @@ Integration checks belong under `integration/` and should not depend on public
 trackers or external swarms.
 
 The suite does not yet establish interoperability with public swarms,
-metadata seeding, encryption, optional libutp or all
+encryption, optional libutp or all
 cross-platform socket paths.
 
 Queue scenarios also cover concurrency, file conflicts, removal, upload/download
@@ -175,17 +189,20 @@ are disabled. On Windows the GUI starts hidden and exits through its API.
 | `upload-incoming` | qBittorrent initiates a TCP connection and downloads our verified pieces |
 | `upload-outgoing` | Our seed connects to qBittorrent and uploads the full payload |
 | `magnet` | Our client acquires metadata from qBittorrent before downloading files |
+| `metadata-incoming` | qBittorrent starts with a magnet and obtains our metadata/files through its TCP connection |
+| `metadata-outgoing` | Our seed connects to qBittorrent and serves its magnet metadata followed by files |
 | `resume` | A partial desktop-controller session stops and the CLI resumes its verified pieces |
 
 Each scenario checks 1,048,713 payload bytes and all piece hashes, including a
 piece spanning two files. Resume additionally checks the stopped and restarted
-tracker `left` values. Artifacts retain engine output, tracker announces,
+tracker `left` values. Metadata-serving scenarios use more than 16 KiB of metadata
+and a fresh qBittorrent profile without the `.torrent` input. Artifacts retain engine output, tracker announces,
 qBittorrent's own logs and a `result.json` recording the reference build.
 
 The fixture uses the documented [WebUI API](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-%28qBittorrent-4.1%29)
 and a separate [portable profile](https://github.com/qbittorrent/qBittorrent/wiki/How-to-use-portable-mode).
 It establishes loopback plaintext TCP compatibility with that reference build;
-public-swarm, encrypted and reverse metadata transfers remain separate work.
+public-swarm and encrypted transfers remain separate work.
 
 ## DHT interoperability
 
@@ -216,9 +233,9 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 174 CTest suites/scenarios, or 175
-when the OpenSSL executable is available: 167 ordinary checks, an optional local
-TLS certificate check and seven interoperability checks. Test artifacts stay
+Both independent-client options enabled yield 185 CTest suites/scenarios, or 186
+when the OpenSSL executable is available: 176 ordinary checks, an optional local
+TLS certificate check and nine interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
 
