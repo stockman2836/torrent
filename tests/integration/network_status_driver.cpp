@@ -1,5 +1,6 @@
 #include "download_task.h"
 #include "network_diagnostics.h"
+#include "tracker_diagnostics.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <fstream>
@@ -62,6 +63,8 @@ int main(int argc, char* argv[]) {
             } else if (command == "reload") {
                 if (!task.load(argv[1], config)) throw std::runtime_error("Cannot reload task");
                 task.wait(); output << "RELOADED\n" << std::flush;
+            } else if (command == "update") {
+                output << "UPDATED " << (task.requestTrackerUpdate() ? 1 : 0) << '\n' << std::flush;
             } else if (command == "status") {
                 const auto state = task.snapshot();
                 const auto& network = state.network;
@@ -73,6 +76,17 @@ int main(int argc, char* argv[]) {
                 default: break;
                 }
                 auto peers = nlohmann::json::array();
+                auto trackers = nlohmann::json::array();
+                for (const auto& tracker : network.trackers) {
+                    auto history = nlohmann::json::array();
+                    for (const auto& event : tracker.history) history.push_back({{"time", event.time_ms}, {"event", event.event},
+                        {"result", event.result == torrent::TrackerEventResult::Success ? "success" :
+                            event.result == torrent::TrackerEventResult::Cancelled ? "cancelled" : "failure"},
+                        {"peers", event.peers_returned}, {"error", event.error}, {"duration", event.duration_ms}});
+                    trackers.push_back({{"url", tracker.url}, {"tier", tracker.tier}, {"state", trackerState(tracker.state)},
+                        {"requests", tracker.requests}, {"peers", tracker.peers_returned}, {"failures", tracker.consecutive_failures},
+                        {"last_response", tracker.last_response_ms}, {"error", tracker.error}, {"history", history}});
+                }
                 for (const auto& peer : network.peers) peers.push_back({{"ip", peer.ip}, {"port", peer.port},
                     {"state", peerState(peer.state)}, {"incoming", peer.incoming}, {"choked", peer.choked},
                     {"pending", peer.pending_requests}, {"downloaded", peer.downloaded_bytes}, {"uploaded", peer.uploaded_bytes}});
@@ -86,9 +100,13 @@ int main(int argc, char* argv[]) {
                     {"error", state.error}, {"uploaded", state.uploaded_bytes}, {"port", state.listen_port},
                     {"peers", peers}, {"queued", network.queued_peers}, {"failed", network.failed_connections},
                     {"peer_error", network.last_peer_error}, {"dht", network.dht_enabled}, {"nodes", network.dht_nodes},
+                    {"trackers", trackers}, {"can_update", torrent::app::canUpdateTrackers(state)},
                     {"tracker", {{"url", network.tracker.url}, {"state", trackerState(network.tracker.state)},
                         {"peers", network.tracker.peers_returned}, {"failures", network.tracker.consecutive_failures},
                         {"total", network.tracker.total_trackers}, {"attempt", network.tracker.attempt},
+                        {"pending", network.tracker.retry_pending},
+                        {"retry_in", torrent::app::trackerWaitSeconds(network.tracker.retry_after)},
+                        {"next_in", torrent::app::trackerWaitSeconds(network.tracker.next_announce)},
                         {"error", network.tracker.error}}}}.dump() << '\n' << std::flush;
             } else throw std::runtime_error("Unknown command");
         }

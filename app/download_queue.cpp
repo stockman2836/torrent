@@ -146,6 +146,11 @@ bool DownloadQueue::setGlobalSpeedLimits(int64_t download_bytes_per_sec, int64_t
     return true;
 }
 
+bool DownloadQueue::requestTrackerUpdate(DownloadId id) {
+    auto entry = find(id);
+    return !closing_ && entry && !entry->removing && entry->task.requestTrackerUpdate();
+}
+
 bool DownloadQueue::setFilePriorities(DownloadId id, const std::map<size_t, FilePriority>& priorities) {
     auto entry = find(id);
     if (closing_ || !entry || entry->removing) return false;

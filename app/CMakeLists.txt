@@ -7,7 +7,8 @@ add_library(torrent_app STATIC
     speed_limits.cpp
     seeding_options.cpp
     network_settings.cpp
-    network_diagnostics.cpp)
+    network_diagnostics.cpp
+    tracker_diagnostics.cpp)
 target_compile_features(torrent_app PUBLIC cxx_std_17)
 target_include_directories(torrent_app PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(torrent_app PUBLIC Torrent::Session)

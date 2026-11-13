@@ -8,6 +8,7 @@
 #include <cstring>
 #include <curl/curl.h>
 #include <algorithm>
+#include <limits>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -307,7 +308,18 @@ TrackerResponse TrackerClient::parseResponse(const std::string& response) {
         // Interval
         it = dict.find("interval");
         if (it != dict.end() && it->second.isInteger()) {
-            result.interval = static_cast<int32_t>(it->second.getInteger());
+            const auto value = it->second.getInteger();
+            if (value < 0 || value > std::numeric_limits<int32_t>::max())
+                throw std::invalid_argument("Invalid tracker interval");
+            result.interval = static_cast<int32_t>(std::max(int64_t(1), value));
+        }
+
+        it = dict.find("min interval");
+        if (it != dict.end()) {
+            if (!it->second.isInteger() || it->second.getInteger() < 0 ||
+                it->second.getInteger() > std::numeric_limits<int32_t>::max())
+                throw std::invalid_argument("Invalid tracker minimum interval");
+            result.min_interval = static_cast<int32_t>(it->second.getInteger());
         }
 
         // Complete (seeders)

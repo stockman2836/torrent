@@ -1,4 +1,5 @@
 #include "download_task.h"
+#include "tracker_diagnostics.h"
 #include "torrent/session/download_manager.h"
 #include "torrent/core/utils.h"
 #include <chrono>
@@ -19,7 +20,15 @@ NetworkStatus initialNetworkStatus(const TorrentFile& torrent, const Config& con
     result.lsd_enabled = config.enable_lsd;
     result.web_seeds = config.enable_webseeds ? torrent.webSeeds().size() : 0;
     if (!torrent.trackerTiers().empty()) result.tracker.url = torrent.trackerTiers().front().front();
-    for (const auto& tier : torrent.trackerTiers()) result.tracker.total_trackers += tier.size();
+    size_t group = 0;
+    for (const auto& tier : torrent.trackerTiers()) {
+        ++group;
+        for (const auto& url : tier) {
+            TrackerDetails detail; detail.url = url; detail.tier = group;
+            result.trackers.push_back(std::move(detail));
+        }
+        result.tracker.total_trackers += tier.size();
+    }
     result.tracker.state = result.tracker.url.empty() ? TrackerState::None : TrackerState::Waiting;
     return result;
 }
@@ -43,6 +52,7 @@ bool DownloadTask::begin(DownloadState state) {
     std::lock_guard<std::mutex> lock(mutex_);
     snapshot_.state = state;
     snapshot_.error.clear();
+    tracker_update_requested_ = false;
     snapshot_.download_speed = snapshot_.upload_speed = 0;
     return true;
 }
@@ -159,6 +169,10 @@ bool DownloadTask::start(Config config, std::shared_ptr<utils::BandwidthLimits> 
                                                  : std::chrono::seconds(0);
                 {
                     std::unique_lock<std::mutex> lock(mutex_);
+                    if (tracker_update_requested_) {
+                        network.tracker.retry_pending = manager.requestTrackerUpdate();
+                        tracker_update_requested_ = false;
+                    }
                     if (mapping_enabled != port_mapping_enabled_) {
                         mapping_enabled = port_mapping_enabled_;
                         manager.setPortMappingEnabled(mapping_enabled);
@@ -218,6 +232,15 @@ void DownloadTask::setSeedingOptions(const SeedingOptions& options) {
 void DownloadTask::setPortMappingEnabled(bool enabled) {
     { std::lock_guard<std::mutex> lock(mutex_); port_mapping_enabled_ = enabled; }
     wake_.notify_all();
+}
+
+bool DownloadTask::requestTrackerUpdate() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!busy_ || cancelled_ || tracker_update_requested_ || !canUpdateTrackers(snapshot_)) return false;
+    tracker_update_requested_ = true;
+    snapshot_.network.tracker.retry_pending = true;
+    wake_.notify_all();
+    return true;
 }
 
 bool DownloadTask::setFilePriorities(const std::map<size_t, FilePriority>& priorities) {

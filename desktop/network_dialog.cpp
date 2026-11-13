@@ -2,6 +2,8 @@
 #include "resource.h"
 #include "network_diagnostics.h"
 #include "win32_helpers.h"
+#include "tracker_dialog.h"
+#include "tracker_diagnostics.h"
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <algorithm>
@@ -16,18 +18,11 @@ using torrent::desktop::wide;
 using torrent::desktop::bytes;
 
 namespace {
-const wchar_t* trackerState(TrackerState state) {
-    switch (state) {
-    case TrackerState::Waiting: return L"Ещё не запрашивался";
-    case TrackerState::Announcing: return L"Ожидание ответа";
-    case TrackerState::Working: return L"Ответ получен";
-    case TrackerState::Error: return L"Ошибка";
-    default: return L"Трекер не указан";
-    }
-}
 struct DialogState {
     const std::function<DownloadSnapshot()>& snapshot;
+    const std::function<bool()>& update_trackers;
     bool automatic;
+    bool automatic_update;
     std::string error;
 };
 
@@ -72,7 +67,7 @@ void refresh(HWND dialog, const DialogState& state) {
         L" · DHT: " + (network.dht_enabled ? std::to_wstring(network.dht_nodes) + L" узлов" : L"выключена");
     SetDlgItemTextW(dialog, IDC_NET_SUMMARY, summary.c_str());
     SetDlgItemTextW(dialog, IDC_NET_TRACKER_URL, wide(network.tracker.url).c_str());
-    auto tracker = std::wstring(trackerState(network.tracker.state));
+    auto tracker = wide(trackerStateText(network.tracker.state));
     if (network.tracker.state == TrackerState::Announcing && network.tracker.total_trackers > 1)
         tracker += L" · попытка " + std::to_wstring(network.tracker.attempt) + L" из " + std::to_wstring(network.tracker.total_trackers);
     if (network.tracker.state == TrackerState::Working)
@@ -125,12 +120,18 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
             if (state->automatic && (GetWindowTextLengthW(GetDlgItem(dialog, IDC_NET_PORT)) == 0 ||
                 GetWindowTextLengthW(GetDlgItem(dialog, IDC_NET_ADVICE)) == 0 || networkReport(state->snapshot()).empty()))
                 throw std::runtime_error("Network diagnosis was not displayed");
-            if (state->automatic) PostMessageW(dialog, WM_COMMAND, IDOK, 0);
-            else SetTimer(dialog, 1, 500, nullptr);
+            if (state->automatic) {
+                showTrackerDetails(dialog, state->snapshot, state->update_trackers, true, state->automatic_update);
+                PostMessageW(dialog, WM_COMMAND, IDOK, 0);
+            } else SetTimer(dialog, 1, 500, nullptr);
             return TRUE;
         }
         if (!state) return FALSE;
         if (message == WM_TIMER) { refresh(dialog, *state); return TRUE; }
+        if (message == WM_COMMAND && LOWORD(wparam) == IDC_NET_TRACKERS) {
+            showTrackerDetails(dialog, state->snapshot, state->update_trackers);
+            refresh(dialog, *state); return TRUE;
+        }
         if (message == WM_COMMAND && LOWORD(wparam) == IDC_NET_COPY) {
             try {
                 copyReport(dialog, state->snapshot());
@@ -156,8 +157,9 @@ std::wstring networkHint(const DownloadSnapshot& snapshot) {
     return wide(diagnoseNetwork(snapshot).summary);
 }
 
-void showNetworkDetails(HWND owner, const std::function<DownloadSnapshot()>& snapshot, bool automatic) {
-    DialogState state{snapshot, automatic, {}};
+void showNetworkDetails(HWND owner, const std::function<DownloadSnapshot()>& snapshot,
+                        const std::function<bool()>& update_trackers, bool automatic, bool automatic_update) {
+    DialogState state{snapshot, update_trackers, automatic, automatic_update, {}};
     const auto result = DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_NETWORK), owner,
         procedure, reinterpret_cast<LPARAM>(&state));
     if (result == -1) throw std::runtime_error("Cannot open network details");

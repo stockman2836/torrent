@@ -29,7 +29,8 @@ async function main() {
   const globalUI = process.argv[3] === '--desktop-global-ui';
   const fallbackUI = process.argv[3] === '--desktop-fallback-ui';
   const networkUI = process.argv[3] === '--desktop-network-ui';
-  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI || fallbackUI || networkUI;
+  const trackerUI = process.argv[3] === '--desktop-trackers-ui';
+  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI || fallbackUI || networkUI || trackerUI;
   const work = fs.mkdtempSync(path.join(process.cwd(), 'download-test-'));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; i++) data[i] = (i * 37 + 11) % 256;
@@ -42,6 +43,8 @@ async function main() {
   let requests = 0;
   let protocolError;
   const announces = [];
+  const heldPayload = [];
+  let trackerUpdated = false, updateTimer;
   const peer = net.createServer(socket => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
@@ -77,7 +80,8 @@ async function main() {
           assert.ok(start + size <= Math.min((index + 1) * pieceLength, data.length));
           requests++;
           const response = packet(7, Buffer.concat([message.subarray(1, 9), data.subarray(start, start + size)]));
-          if (networkUI) {
+          if (trackerUI && !trackerUpdated) heldPayload.push({ socket, response });
+          else if (networkUI) {
             const timer = setTimeout(() => { timers.delete(timer); if (!socket.destroyed) socket.write(response); }, 600);
             timers.add(timer);
           } else socket.write(response);
@@ -88,13 +92,20 @@ async function main() {
   const tracker = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost'), event = url.searchParams.get('event');
     announces.push({ path: url.pathname, event });
+    if (trackerUI && announces.filter(item => !['completed', 'stopped'].includes(item.event)).length === 2 && !updateTimer) {
+      updateTimer = setTimeout(() => {
+        trackerUpdated = true;
+        for (const item of heldPayload.splice(0)) if (!item.socket.destroyed) item.socket.write(item.response);
+      }, 800);
+      timers.add(updateTimer);
+    }
     if (fallbackUI && url.pathname === '/failed') { res.writeHead(503); res.end(); return; }
     if (event === 'stopped') {
       for (const socket of sockets) socket.end();
     }
     const compact = Buffer.from([127, 0, 0, 1, 0, 0]);
     compact.writeUInt16BE(peer.address().port, 4);
-    res.end(encode({ interval: 60, peers: compact }));
+    res.end(encode({ interval: 60, peers: compact, ...(trackerUI ? { 'min interval': 1 } : {}) }));
   });
   let child;
   let output = '';
@@ -116,7 +127,7 @@ async function main() {
       fs.writeFileSync(file, JSON.stringify(config));
     }
     const args = desktopUI
-      ? [globalUI ? '--ui-test-global-limits' : networkUI ? '--ui-test-network' : '--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
+      ? [globalUI ? '--ui-test-global-limits' : networkUI ? '--ui-test-network' : trackerUI ? '--ui-test-trackers' : '--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
       : ['test.torrent', '--config', 'config.json'];
     child = spawn(executable, args, { cwd: work, windowsHide: true });
     child.stdout.on('data', chunk => { output += chunk; });
@@ -142,6 +153,7 @@ async function main() {
       assert.equal(config.max_download_speed, 131072);
       assert.equal(config.max_upload_speed, 16384);
     }
+    if (trackerUI) assert.deepEqual(announces.map(item => item.event), ['started', null, 'completed', 'stopped']);
     if (!desktopUI) assert.ok(output.includes('Download complete!'), output);
     console.log(`PASS: ${data.length} bytes downloaded through local tracker and peer; exact contents verified (${requests} block requests).`);
   } finally {

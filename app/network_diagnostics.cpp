@@ -1,5 +1,6 @@
 #include "network_diagnostics.h"
 #include "speed_limits.h"
+#include "tracker_diagnostics.h"
 #include <algorithm>
 #include <sstream>
 
@@ -171,6 +172,15 @@ std::string networkReport(const DownloadSnapshot& snapshot) {
     if (!network.tracker.error.empty()) report << u8"\nОшибка трекера: " << network.tracker.error;
     if (!network.last_peer_error.empty()) report << u8"\nОшибка подключения: " << network.last_peer_error;
     if (!snapshot.error.empty()) report << u8"\nОшибка загрузки: " << snapshot.error;
+    for (const auto& tracker : network.trackers) {
+        report << u8"\nТрекер группы " << tracker.tier << ": " << trackerHost(tracker.url) << " · "
+               << trackerStateText(tracker.state) << u8" · запросов: " << tracker.requests
+               << u8" · адресов: " << tracker.peers_returned << u8" · ошибок подряд: " << tracker.consecutive_failures;
+        for (const auto& event : tracker.history)
+            report << "\n  " << trackerTime(event.time_ms) << " · " << trackerEventText(event)
+                   << " · " << event.duration_ms << u8" мс · адресов: " << event.peers_returned
+                   << (event.error.empty() ? "" : " · " + event.error);
+    }
     report << u8"\nВходящие подключения с других адресов могут приходить из локальной сети. Проверку из интернета нужно выполнять из другой сети.\n";
     return report.str();
 }

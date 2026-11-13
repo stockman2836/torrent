@@ -30,6 +30,7 @@ using PeerInfo = Peer;
 class TrackerResponse {
 public:
     int32_t interval = 1800;
+    int32_t min_interval = 0; // Optional HTTP minimum for manual updates.
     int32_t complete = 0;    // seeders
     int32_t incomplete = 0;  // leechers
     std::vector<Peer> peers;

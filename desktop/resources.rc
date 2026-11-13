@@ -71,7 +71,23 @@ BEGIN
     LTEXT "Текущие подключения", -1, 12, 231, 616, 12
     CONTROL "", IDC_NET_PEERS, "SysListView32", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 12, 245, 616, 73
     EDITTEXT IDC_NET_PEER_ERROR, 12, 322, 616, 18, ES_READONLY | ES_AUTOHSCROLL
-    LTEXT "Статистика относится к текущему сеансу.", -1, 12, 351, 330, 12
+    LTEXT "За текущий сеанс.", -1, 12, 351, 180, 12
+    PUSHBUTTON "Трекеры…", IDC_NET_TRACKERS, 208, 344, 130, 20
     PUSHBUTTON "Скопировать отчёт", IDC_NET_COPY, 350, 344, 174, 20
     DEFPUSHBUTTON "Закрыть", IDOK, 540, 344, 88, 20
+END
+
+IDD_TRACKERS DIALOGEX 0, 0, 680, 360
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Трекеры и история запросов"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "", IDC_TRACKER_SUMMARY, 12, 10, 656, 28
+    CONTROL "", IDC_TRACKERS, "SysListView32", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 12, 42, 656, 103
+    LTEXT "История выбранного трекера · последние 16 событий · новые сверху", -1, 12, 154, 656, 14
+    CONTROL "", IDC_TRACKER_HISTORY, "SysListView32", WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 12, 172, 656, 103
+    EDITTEXT IDC_TRACKER_ERROR, 12, 281, 656, 24, ES_READONLY | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL
+    LTEXT "Резервные трекеры запрашиваются при недоступности основных. Время показано для этого ПК.", -1, 12, 312, 656, 14
+    PUSHBUTTON "Обновить трекеры", IDC_TRACKER_UPDATE, 398, 333, 170, 20
+    DEFPUSHBUTTON "Закрыть", IDOK, 580, 333, 88, 20
 END

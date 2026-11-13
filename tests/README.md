@@ -37,6 +37,7 @@ the portable GUI fixtures after changes to layout/actions/rendering or test hook
 | `test_download_queue` | Scheduling, settings, persistence and file conflicts | Application |
 | `test_speed_limits` | UI rate parsing and exact byte conversion | Application |
 | `test_network_diagnostics` | Connection advice and report evidence | Application |
+| `test_tracker_diagnostics` | Manual-update availability, timestamps and history report redaction | Application |
 | `test_port_mapper` | Disabled defaults and bounded finite-lease options | Network |
 | `test_token_bucket` | Throttling, live changes and cancellation | Core |
 | `test_seeding_options` | Ratio/time limits and policy validation | Application |
@@ -238,8 +239,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 185 CTest suites/scenarios, or 186
-when the OpenSSL executable is available: 176 ordinary checks, an optional local
+Both independent-client options enabled yield 195 CTest suites/scenarios, or 196
+when the OpenSSL executable is available: 186 ordinary checks, an optional local
 TLS certificate check and nine interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -377,6 +378,21 @@ new fields render and checks final payload bytes. It leaves the user's clipboard
 untouched; report content is tested through the shared application function.
 
 ## Tracker fallback
+
+`test_tracker_history_*` exercises copied per-address history and the update
+mailbox through a real background task. Nine scenarios verify independent
+primary/backup results, untried rows, manual request coalescing, peer discovery
+after an update, HTTP/UDP minimum intervals, cancellation during HTTP/UDP I/O,
+the 16-event cap, final lifecycle notifications, restart/reload resets and invalid
+minimum-interval fallback. A long Cyrillic error checks the 1024-byte UTF-8 bound.
+Status reads and rejected manual requests must stay responsive during a pending
+announce. Artifacts remain in `build/tests/tracker-history-*`.
+
+The portable check also runs `test_download.cjs --desktop-trackers-ui`. It opens
+the real tracker dialog, verifies displayed rows/history, invokes the update
+button after its minimum interval and checks the exact wire sequence plus final
+payload bytes. No clipboard is changed. Run history/controller checks with
+`ctest --test-dir build -R "test_tracker_history|test_tracker_diagnostics" --output-on-failure`.
 
 `test_torrent_file` covers tier boundaries, legacy precedence/fallback,
 list-only torrents, duplicate/empty entries and ordered magnet trackers.

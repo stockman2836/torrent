@@ -154,6 +154,23 @@ belong to the current session; stopped jobs retain the last tracker result, and
 restarting resets the session counters. The dialog follows the URL currently
 being queried and shows the attempt number while trying alternatives.
 
+Click **Trackers** (**Трекеры…**) in that dialog for every tracker in its original
+group, including untried backups. Each row shows its own status, request/failure
+counts, the peer count and time of the last successful response. Select a row to
+read its latest 16 events with local timestamps, duration and errors. Completion,
+shutdown and cancellation are recorded too; cancellation is not counted as a
+failure. History remains visible after stopping and resets on a new session or
+metadata reload; it is not saved to disk.
+
+**Update trackers** (**Обновить трекеры**) requests another ordinary search on the
+background worker. It preserves group order and stops at the first successful
+response. The window shows the next automatic search and when manual updates
+become available. Duplicate requests are coalesced. HTTP `min interval` is
+respected; absent a positive minimum, manual updates wait 30 seconds after a
+round. UDP uses its returned announce interval. Required lifecycle notifications
+remain separate from this user-action cooldown. Updates are available during
+downloading/seeding and never start a stopped torrent.
+
 The dialog also checks the local listening socket, shows its actual TCP port and
 IPv4/IPv6 support, and counts successful incoming BitTorrent handshakes. Loopback
 connections are counted separately from connections with other addresses. A
@@ -167,7 +184,8 @@ empty peer lists, missing discovery sources, connection failures and the current
 peer cap. Reports include the effective per-torrent and global speed limits.
 Click **Copy report** (**Скопировать отчёт**) to copy the current diagnosis for
 manual sharing. The report includes the torrent name, counters and error text;
-tracker URLs are reduced to their host, omitting credentials, path and query.
+tracker URLs, including those in per-address history, are reduced to their host,
+omitting credentials, path and query.
 The app never sends the report automatically. A failed bind remains visible in
 the dialog with advice to check the port or choose another starting port.
 

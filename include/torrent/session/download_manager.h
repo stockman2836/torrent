@@ -40,6 +40,7 @@ public:
     void resume();
     void setSpeedLimits(int64_t download_bytes_per_sec, int64_t upload_bytes_per_sec);
     void setPortMappingEnabled(bool enabled);
+    bool requestTrackerUpdate(); // Nonblocking mailbox; respects the current cooldown.
     void setFilePriorities(const std::map<size_t, FilePriority>& priorities);
 
     // Status
@@ -76,6 +77,10 @@ private:
     void configurePeerExtensions(PeerConnection& connection);
     void updateTracker();
     void initializeTrackers(int timeout_seconds);
+    std::chrono::steady_clock::time_point beginTrackerQuery(size_t index);
+    void recordTrackerResult(size_t index, const std::string& event, const TrackerResponse& response,
+                            std::chrono::steady_clock::time_point started, bool cancelled);
+    void scheduleTrackerUpdate(const TrackerResponse& response);
     void stopTrackers();
     TrackerResponse announceTracker(const std::string& event);
     void updateDHT();   // Get peers from DHT
@@ -123,6 +128,8 @@ private:
     std::mutex connect_mutex_;
     std::mutex tracker_mutex_;
     TrackerStatus tracker_status_; // Protected by peers_mutex_, like peer diagnostics.
+    std::vector<TrackerDetails> tracker_details_; // Same mutex; never read protocol objects from the UI.
+    std::atomic<bool> tracker_retry_requested_{false};
     ListenerStatus listener_status_;
     size_t incoming_handshakes_ = 0;
     size_t loopback_handshakes_ = 0;
@@ -171,6 +178,7 @@ private:
         bool completed = false;
         bool completion_attempted = false;
         uint16_t announced_port = 0;
+        size_t status_index = 0;
     };
     std::vector<std::vector<TrackerEntry>> tracker_tiers_; // Serialized by tracker_mutex_.
     int tracker_timeout_ = 30;

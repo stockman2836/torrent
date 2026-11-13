@@ -449,6 +449,7 @@ TrackerResponse UDPTrackerClient::announce(int64_t uploaded,
         }
 
         result.interval = response.interval;
+        result.min_interval = std::max(response.interval, 1);
         result.complete = response.seeders;
         result.incomplete = response.leechers;
         result.peers = response.peers;

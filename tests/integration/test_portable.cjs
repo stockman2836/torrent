@@ -69,6 +69,7 @@ async function main() {
   await fixture('test_download.cjs', executable, '--desktop-global-ui', working, env);
   await fixture('test_download.cjs', executable, '--desktop-fallback-ui', working, env);
   await fixture('test_download.cjs', executable, '--desktop-network-ui', working, env);
+  await fixture('test_download.cjs', executable, '--desktop-trackers-ui', working, env);
   await fixture('test_port_mapping.cjs', executable, 'ui', working, env);
   fs.writeFileSync(path.join(work, 'result.json'), JSON.stringify({ archive, sha256: hash(archive),
     files: packaged, isolatedPath: env.Path, passed: true }, null, 2));

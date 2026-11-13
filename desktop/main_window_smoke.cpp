@@ -12,11 +12,13 @@ namespace fs = std::filesystem;
 SmokeTest parseSmokeTest(int argc, wchar_t* argv[]) {
     SmokeTest result;
     if (argv && argc == 5 && (std::wstring(argv[1]) == L"--ui-test" || std::wstring(argv[1]) == L"--ui-test-priorities" ||
-                             std::wstring(argv[1]) == L"--ui-test-global-limits" || std::wstring(argv[1]) == L"--ui-test-network")) {
+                             std::wstring(argv[1]) == L"--ui-test-global-limits" || std::wstring(argv[1]) == L"--ui-test-network" ||
+                             std::wstring(argv[1]) == L"--ui-test-trackers")) {
         result.enabled = true; result.source = argv[2]; result.folder = argv[3]; result.config = argv[4];
         result.priorities = std::wstring(argv[1]) == L"--ui-test-priorities";
         result.global_limits = std::wstring(argv[1]) == L"--ui-test-global-limits";
         result.network = std::wstring(argv[1]) == L"--ui-test-network";
+        result.trackers = std::wstring(argv[1]) == L"--ui-test-trackers";
     }
     if (argv && argc == 6 && std::wstring(argv[1]) == L"--ui-queue-test") {
         result.enabled = true; result.source = argv[2]; result.second = argv[3];
@@ -83,8 +85,9 @@ void MainWindow::runSmoke(const DownloadSnapshot& state, bool busy) {
     } else if (smoke_.mapping && !smoke_.mapping_checked && busy && state.network.port_mapping.state == MappingState::Active) {
         smoke_.mapping_checked = true;
         networkDetails();
-    } else if (smoke_.network && !smoke_.network_checked && busy &&
-               state.network.listener.state == ListenerState::Listening && state.state == DownloadState::Downloading) {
+    } else if ((smoke_.network || smoke_.trackers) && !smoke_.network_checked && busy &&
+               state.network.listener.state == ListenerState::Listening && state.state == DownloadState::Downloading &&
+               (!smoke_.trackers || state.network.tracker.state == TrackerState::Working)) {
         smoke_.network_checked = true;
         networkDetails();
     } else if (smoke_.global_limits && !smoke_.global_limits_applied && busy &&
@@ -104,7 +107,7 @@ void MainWindow::runSmoke(const DownloadSnapshot& state, bool busy) {
     } else if (!busy && state.state == DownloadState::Complete) {
         if (smoke_.priorities && !smoke_.priorities_applied) exitCode_ = 1;
         if (smoke_.global_limits && !smoke_.global_limits_applied) exitCode_ = 1;
-        if (smoke_.network && !smoke_.network_checked) exitCode_ = 1;
+        if ((smoke_.network || smoke_.trackers) && !smoke_.network_checked) exitCode_ = 1;
         if (smoke_.mapping && !smoke_.mapping_checked) exitCode_ = 1;
         networkDetails(); close();
     }

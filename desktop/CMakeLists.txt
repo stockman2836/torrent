@@ -8,6 +8,7 @@ add_executable(torrent_desktop WIN32
     win32_helpers.cpp
     seeding_dialog.cpp
     network_dialog.cpp
+    tracker_dialog.cpp
     network_settings_dialog.cpp
     global_speed_dialog.cpp
     resources.rc)

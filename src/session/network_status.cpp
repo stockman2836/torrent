@@ -8,6 +8,7 @@ NetworkStatus DownloadManager::networkStatus() const {
     {
         std::lock_guard<std::mutex> lock(peers_mutex_);
         result.tracker = tracker_status_;
+        result.trackers = tracker_details_;
         result.listener = listener_status_;
         result.incoming_handshakes = incoming_handshakes_;
         result.loopback_handshakes = loopback_handshakes_;

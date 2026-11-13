@@ -10,9 +10,17 @@ void DownloadManager::initializeTrackers(int timeout_seconds) {
     if (timeout_seconds < 1) throw std::invalid_argument("Tracker timeout must be positive");
     tracker_timeout_ = timeout_seconds;
     std::mt19937 random(std::random_device{}());
+    size_t group = 0;
     for (const auto& urls : torrent_.trackerTiers()) {
+        ++group;
         std::vector<TrackerEntry> tier;
-        for (const auto& url : urls) tier.push_back({url});
+        for (const auto& url : urls) {
+            TrackerEntry entry{url};
+            entry.status_index = tracker_details_.size();
+            TrackerDetails detail; detail.url = url; detail.tier = group;
+            tracker_details_.push_back(std::move(detail));
+            tier.push_back(std::move(entry));
+        }
         std::shuffle(tier.begin(), tier.end(), random);
         tracker_status_.total_trackers += tier.size();
         tracker_tiers_.push_back(std::move(tier));
@@ -32,9 +40,23 @@ void DownloadManager::trackerLoop() {
         std::chrono::steady_clock::time_point next;
         { std::lock_guard<std::mutex> lock(tracker_mutex_); next = next_tracker_announce_; }
         const auto now = std::chrono::steady_clock::now();
-        if (now >= next || (last_tracker_port_ && last_tracker_port_ != announcePort())) updateTracker();
-        else waitForStop(std::min(std::chrono::milliseconds(1000),
-            std::chrono::duration_cast<std::chrono::milliseconds>(next - now) + std::chrono::milliseconds(1)));
+        bool manual = tracker_retry_requested_.exchange(false);
+        if (manual) {
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            // A regular/completion response may have refreshed the cooldown
+            // after this command was accepted. Coalesce with that fresh round.
+            if (now < tracker_status_.retry_after) {
+                tracker_status_.retry_pending = false;
+                manual = false;
+            }
+        }
+        if (manual || now >= next || (last_tracker_port_ && last_tracker_port_ != announcePort())) updateTracker();
+        else {
+            std::unique_lock<std::mutex> lock(stop_mutex_);
+            stop_cv_.wait_for(lock, std::min(std::chrono::milliseconds(1000),
+                std::chrono::duration_cast<std::chrono::milliseconds>(next - now) + std::chrono::milliseconds(1)),
+                [this] { return !running_ || tracker_retry_requested_.load(); });
+        }
     }
 }
 
@@ -55,7 +77,10 @@ TrackerResponse DownloadManager::announceTracker(const std::string& event) {
             tracker_status_.attempt = attempt;
             tracker_status_.state = TrackerState::Announcing;
             tracker_status_.peers_returned = 0;
+            tracker_status_.retry_pending = false;
+            tracker_status_.next_announce = {};
         }
+        const auto started = beginTrackerQuery(entry.status_index);
         TrackerResponse result;
         if (wire_event == "completed") entry.completion_attempted = true;
         try {
@@ -63,6 +88,7 @@ TrackerResponse DownloadManager::announceTracker(const std::string& event) {
             result = client.announce(total_uploaded_, total_downloaded_, bytesRemaining(),
                 port, wire_event, tracker_timeout_, [this] { return !running_.load(); });
         } catch (const std::exception& error) { result.failure_reason = error.what(); }
+        recordTrackerResult(entry.status_index, wire_event, result, started, !running_);
         // Cancellation is not a new tracker failure and must not trigger fallback.
         if (!running_) return result;
         if (result.isSuccess()) {
@@ -116,14 +142,12 @@ TrackerResponse DownloadManager::announceTracker(const std::string& event) {
                 if (!response.isSuccess()) continue;
                 // BEP 12: promote within this tier, preserving tier precedence.
                 std::rotate(tier.begin(), tier.begin() + index, tier.begin() + index + 1);
-                next_tracker_announce_ = std::chrono::steady_clock::now() +
-                    std::chrono::seconds(std::max(response.interval, 1));
+                scheduleTrackerUpdate(response);
                 return response; // A successful empty peer list is still a success.
             }
         }
     }
-    next_tracker_announce_ = std::chrono::steady_clock::now() +
-        std::chrono::seconds(response.isSuccess() ? std::max(response.interval, 1) : 30);
+    scheduleTrackerUpdate(response);
     return response;
 }
 
@@ -139,19 +163,29 @@ void DownloadManager::stopTrackers() {
         if (std::chrono::steady_clock::now() >= deadline) break;
         try {
             TrackerClient client(entry->url, torrent_.infoHash(), peer_id_);
+            const auto notify = [&](const std::string& event) {
+                const auto started = beginTrackerQuery(entry->status_index);
+                TrackerResponse result;
+                try {
+                    result = client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), entry->announced_port,
+                        event, 2, [deadline] { return std::chrono::steady_clock::now() >= deadline; });
+                } catch (const std::exception& error) { result.failure_reason = error.what(); }
+                recordTrackerResult(entry->status_index, event, result, started, std::chrono::steady_clock::now() >= deadline);
+            };
             // A fast finish can stop the worker before it sends completion.
             // Flush only notifications never attempted, within the same budget.
             if (seeding_mode_ && !complete_at_start_ && !entry->completion_attempted) {
                 entry->completion_attempted = true;
-                client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), entry->announced_port, "completed", 2,
-                    [deadline] { return std::chrono::steady_clock::now() >= deadline; });
+                notify("completed");
             }
-            client.announce(total_uploaded_, total_downloaded_, bytesRemaining(), entry->announced_port, "stopped", 2,
-                [deadline] { return std::chrono::steady_clock::now() >= deadline; });
+            if (std::chrono::steady_clock::now() < deadline) notify("stopped");
         } catch (const std::exception&) {} // Best effort; preserve useful diagnostics.
         entry->started = false;
     }
     std::lock_guard<std::mutex> lock(peers_mutex_);
+    tracker_retry_requested_ = false;
+    tracker_status_.retry_pending = false;
+    tracker_status_.next_announce = tracker_status_.retry_after = {};
     if (tracker_status_.state == TrackerState::Announcing) {
         tracker_status_.state = TrackerState::Waiting;
         tracker_status_.error.clear();

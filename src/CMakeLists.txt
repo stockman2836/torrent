@@ -61,6 +61,7 @@ add_library(torrent_session STATIC
     session/transfer.cpp
     session/scheduling.cpp
     session/tracker.cpp
+    session/tracker_status.cpp
     session/network_status.cpp
     session/file_priorities.cpp
     session/resume.cpp

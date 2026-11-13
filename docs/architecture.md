@@ -150,6 +150,37 @@ the discovery queue so an empty tracker reply does not erase DHT/LSD addresses.
 Shutdown changes the running predicate under the same mutex used by service
 condition-variable waits, preventing a missed notification at the wait boundary.
 
+`tracker_status.cpp` owns per-URL diagnostics and the manual-update mailbox.
+`TrackerEntry::status_index` points to a stable original-order `TrackerDetails`
+row, so tier shuffling/promotion cannot reassign history to another URL. The peer
+mutex protects copied rows, counters and summary deadlines; network I/O continues
+under the separate announce mutex. No status read waits for a tracker response.
+Each completed attempt adds a timestamped result with the event, peer count and
+duration. History retains 16 events per URL and bounds stored error strings to
+1024 bytes without splitting a valid UTF-8 character. Cancellation has a distinct
+result and does not increment failures. Best-effort final notifications update
+per-URL history while retaining the existing overall last-result semantics.
+
+UI updates flow through `DownloadQueue::requestTrackerUpdate` and the task mailbox
+to the session. A coalesced atomic flag wakes the tracker worker using its stop
+condition variable and predicate lock. The worker rechecks a cooldown refreshed
+by intervening ordinary/completion responses before acting on a queued command.
+Manual searches use the same BEP 12 tier traversal, events and peer merging as
+automatic searches. HTTP parses an optional bounded nonnegative `min interval`;
+automatic cadence uses the greater of interval/minimum. Manual updates honor all
+known positive minima, with a 30-second default when the successful response has
+none. UDP uses the announce interval as its minimum. Lifecycle notifications and
+external-port re-registration are not delayed by manual-action cooldowns. See the
+reference behavior for [minimum intervals](https://www.libtorrent.org/reference-Torrent_Handle.html).
+
+`app/tracker_diagnostics` formats times/events and shares update availability
+between the task and UI. `desktop/tracker_dialog.cpp` renders copied rows and
+history in a separate modal dialog reached from network details. It never owns a
+session pointer. Snapshots expose the next ordinary search and manual cooldown;
+stopping clears active deadlines/commands and retains history. Starting/reloading
+creates fresh rows. Reports include all histories with tracker URLs reduced to
+hosts. No history is persisted or transmitted automatically.
+
 `network/port_mapping` contains a concrete `GatewayClient` for routing, bounded
 NAT-PMP UDP requests, SSDP discovery and UPnP SOAP, plus `PortMapper`, which owns
 one session's finite leases and worker. TinyXML2 parses device/fault responses;
