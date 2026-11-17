@@ -19,12 +19,12 @@ NetworkStatus DownloadManager::networkStatus() const {
         result.failed_connections = failed_connections_;
         result.last_peer_error = last_peer_error_;
         result.peers = connecting_peers_;
+        for (auto& peer : result.peers) peer.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - connecting_since_).count();
+        result.peer_history = peer_history_;
         for (const auto& peer : active_peers_) {
             if (peer->finished) continue;
-            result.peers.push_back({peer->peer_data.ip, peer->peer_data.port,
-                peer->handshaking ? PeerState::Handshaking : PeerState::Connected,
-                peer->incoming, peer->is_choking, peer->pending_blocks.size(),
-                peer->bytes_downloaded, peer->bytes_uploaded});
+            result.peers.push_back(peerStatus(*peer));
         }
     }
     result.max_peers = max_peers_;

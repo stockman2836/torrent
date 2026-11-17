@@ -1,8 +1,5 @@
 #include "tracker_diagnostics.h"
 #include "download_task.h"
-#include <ctime>
-#include <iomanip>
-#include <sstream>
 
 namespace torrent::app {
 
@@ -29,20 +26,6 @@ std::string trackerEventText(const TrackerEvent& event) {
         event.event == "stopped" ? u8"Остановка" : u8"Обновление";
     return name + u8" · " + (event.result == TrackerEventResult::Cancelled ? u8"отменено" :
         event.result == TrackerEventResult::Success ? u8"ответ получен" : u8"ошибка");
-}
-
-std::string trackerTime(int64_t milliseconds) {
-    if (milliseconds <= 0) return u8"—";
-    const auto seconds = static_cast<std::time_t>(milliseconds / 1000);
-    std::tm local{};
-#ifdef _WIN32
-    if (localtime_s(&local, &seconds)) return u8"—";
-#else
-    if (!localtime_r(&seconds, &local)) return u8"—";
-#endif
-    std::ostringstream output;
-    output << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
-    return output.str();
 }
 
 int64_t trackerWaitSeconds(std::chrono::steady_clock::time_point deadline) {

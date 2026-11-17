@@ -6,11 +6,13 @@
 #include <vector>
 #include <chrono>
 #include "torrent/network/peer/listener_status.h"
+#include "torrent/network/peer/connection_status.h"
 #include "torrent/network/port_mapping/port_mapper.h"
 
 namespace torrent {
 
-enum class PeerState { Connecting, Handshaking, Connected };
+enum class PeerState { Connecting, Handshaking, Connected, Disconnected };
+constexpr size_t PEER_HISTORY_LIMIT = 64;
 enum class TrackerState { None, Waiting, Announcing, Working, Error };
 enum class TrackerEventResult { Success, Failure, Cancelled };
 constexpr size_t TRACKER_HISTORY_LIMIT = 16;
@@ -46,6 +48,14 @@ struct PeerStatus {
     size_t pending_requests = 0;
     int64_t downloaded_bytes = 0;
     int64_t uploaded_bytes = 0;
+    uint64_t id = 0; // Distinguishes repeated connections to the same endpoint.
+    std::string client; // Bounded self-reported BEP 10 version, not an authenticated identity.
+    int64_t download_speed = 0;
+    int64_t upload_speed = 0;
+    int64_t duration_ms = 0;
+    int64_t finished_at_ms = 0;
+    PeerEndReason end_reason = PeerEndReason::None;
+    int error_code = 0;
 };
 
 struct TrackerStatus {
@@ -86,6 +96,7 @@ struct NetworkStatus {
     size_t dht_nodes = 0;
     TrackerStatus tracker;
     std::vector<TrackerDetails> trackers;
+    std::vector<PeerStatus> peer_history; // Oldest first; bounded and reset with the session.
 };
 
 } // namespace torrent

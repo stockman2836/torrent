@@ -154,6 +154,23 @@ belong to the current session; stopped jobs retain the last tracker result, and
 restarting resets the session counters. The dialog follows the URL currently
 being queried and shows the attempt number while trying alternatives.
 
+Click **Peers** (**Пиры…**) in that dialog for per-connection download/upload
+rates, payload totals, duration and pending requests. Rates use recent samples
+from up to five seconds and return to zero after idle traffic expires. Metadata
+and protocol overhead do not contribute to these payload counters/rates.
+The client/version column uses the peer's optional [BEP 10](https://www.bittorrent.org/beps/bep_0010.html)
+`v` field. Names are self-reported, bounded to readable UTF-8 and never guessed
+from peer IDs; missing names are displayed as unknown.
+
+The same window retains the last 64 ended connections with their endpoint,
+direction, client, payload totals, duration, local time and observed reason.
+Reasons distinguish remote closure, failed TCP connection, handshake deadline,
+wrong torrent, invalid protocol message, peer-cap rejection and local stop.
+Available socket error codes are shown without guessing a firewall/NAT cause.
+Ended connections have zero current rates and do not occupy active peer slots.
+History survives stop, resets on restart/metadata reload and is not saved to disk.
+Copied network reports include the active statistics and ended-connection history.
+
 Click **Trackers** (**Трекеры…**) in that dialog for every tracker in its original
 group, including untried backups. Each row shows its own status, request/failure
 counts, the peer count and time of the last successful response. Select a row to

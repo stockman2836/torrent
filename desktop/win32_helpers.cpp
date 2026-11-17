@@ -3,6 +3,8 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <commctrl.h>
+#include <uxtheme.h>
 
 namespace torrent::desktop {
 namespace fs = std::filesystem;
@@ -64,6 +66,25 @@ std::string asciiField(HWND dialog, int id) {
     if (std::any_of(value.begin(), value.end(), [](wchar_t c) { return c > 127; }))
         throw std::invalid_argument("Use decimal digits");
     return {value.begin(), value.end()};
+}
+
+void configureList(HWND list, const std::vector<std::pair<const wchar_t*, int>>& columns) {
+    ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    SetWindowTheme(list, L"Explorer", nullptr);
+    for (size_t i = 0; i < columns.size(); ++i) {
+        LVCOLUMNW column{}; column.mask = LVCF_TEXT | LVCF_WIDTH;
+        column.pszText = const_cast<PWSTR>(columns[i].first); column.cx = columns[i].second;
+        ListView_InsertColumn(list, i, &column);
+    }
+}
+
+void setListRow(HWND list, int index, const std::vector<std::wstring>& values) {
+    if (index >= ListView_GetItemCount(list)) {
+        LVITEMW item{}; item.mask = LVIF_TEXT; item.iItem = index; item.pszText = const_cast<PWSTR>(values.front().c_str());
+        ListView_InsertItem(list, &item);
+    }
+    for (size_t column = 0; column < values.size(); ++column)
+        ListView_SetItemText(list, index, column, const_cast<PWSTR>(values[column].c_str()));
 }
 
 } // namespace torrent::desktop

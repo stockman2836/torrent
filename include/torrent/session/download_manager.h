@@ -102,6 +102,8 @@ private:
     bool receiveBlock(uint32_t index, uint32_t offset, const std::vector<uint8_t>& data);
     int64_t bytesRemaining() const;
     void cleanupStalePeers();
+    PeerStatus peerStatus(const ActivePeerInfo& peer) const; // Caller holds peers_mutex_.
+    void finishPeer(ActivePeerInfo& peer, PeerEndReason reason = PeerEndReason::None); // Same lock.
     int32_t selectNextPiece(ActivePeerInfo* peer);
     bool isEndgameMode() const;
 
@@ -137,6 +139,9 @@ private:
     size_t rejected_incoming_ = 0;
     size_t failed_incoming_handshakes_ = 0;
     std::vector<PeerStatus> connecting_peers_;
+    std::vector<PeerStatus> peer_history_;
+    uint64_t next_peer_id_ = 1;
+    std::chrono::steady_clock::time_point connecting_since_{};
     size_t failed_connections_ = 0;
     std::string last_peer_error_;
 

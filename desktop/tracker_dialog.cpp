@@ -1,3 +1,4 @@
+#include "diagnostic_format.h"
 #include "tracker_dialog.h"
 #include "tracker_diagnostics.h"
 #include "win32_helpers.h"
@@ -25,25 +26,6 @@ struct DialogState {
     std::string error;
 };
 
-void columns(HWND list, const std::vector<std::pair<const wchar_t*, int>>& definitions) {
-    ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-    SetWindowTheme(list, L"Explorer", nullptr);
-    for (size_t i = 0; i < definitions.size(); ++i) {
-        LVCOLUMNW column{}; column.mask = LVCF_TEXT | LVCF_WIDTH;
-        column.pszText = const_cast<PWSTR>(definitions[i].first); column.cx = definitions[i].second;
-        ListView_InsertColumn(list, i, &column);
-    }
-}
-
-void row(HWND list, int index, const std::vector<std::wstring>& values) {
-    if (index >= ListView_GetItemCount(list)) {
-        LVITEMW item{}; item.mask = LVIF_TEXT; item.iItem = index; item.pszText = const_cast<PWSTR>(values.front().c_str());
-        ListView_InsertItem(list, &item);
-    }
-    for (size_t column = 0; column < values.size(); ++column)
-        ListView_SetItemText(list, index, column, const_cast<PWSTR>(values[column].c_str()));
-}
-
 void refresh(HWND dialog, DialogState& state) {
     const auto snapshot = state.snapshot();
     const auto& network = snapshot.network;
@@ -52,8 +34,8 @@ void refresh(HWND dialog, DialogState& state) {
     if (ListView_GetItemCount(list) != static_cast<int>(network.trackers.size())) ListView_DeleteAllItems(list);
     for (size_t i = 0; i < network.trackers.size(); ++i) {
         const auto& tracker = network.trackers[i];
-        row(list, static_cast<int>(i), {std::to_wstring(tracker.tier), wide(tracker.url), wide(trackerStateText(tracker.state)),
-            std::to_wstring(tracker.peers_returned), wide(trackerTime(tracker.last_response_ms)),
+        torrent::desktop::setListRow(list, static_cast<int>(i), {std::to_wstring(tracker.tier), wide(tracker.url), wide(trackerStateText(tracker.state)),
+            std::to_wstring(tracker.peers_returned), wide(formatDiagnosticTime(tracker.last_response_ms)),
             std::to_wstring(tracker.requests), std::to_wstring(tracker.consecutive_failures)});
     }
     if (state.selected >= static_cast<int>(network.trackers.size())) state.selected = 0;
@@ -65,7 +47,7 @@ void refresh(HWND dialog, DialogState& state) {
         ListView_SetItemState(list, state.selected, LVIS_SELECTED, LVIS_SELECTED);
         for (size_t i = 0; i < count; ++i) {
             const auto& event = selected->history[count - i - 1];
-            row(history, static_cast<int>(i), {wide(trackerTime(event.time_ms)), wide(trackerEventText(event)),
+            torrent::desktop::setListRow(history, static_cast<int>(i), {wide(formatDiagnosticTime(event.time_ms)), wide(trackerEventText(event)),
                 std::to_wstring(event.peers_returned), std::to_wstring(event.duration_ms), wide(event.error)});
         }
     }
@@ -102,9 +84,9 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
     try {
         if (message == WM_INITDIALOG) {
             state = reinterpret_cast<DialogState*>(lparam); SetWindowLongPtrW(dialog, DWLP_USER, lparam);
-            columns(GetDlgItem(dialog, IDC_TRACKERS), {{L"Группа", 55}, {L"Адрес", 320}, {L"Состояние", 165},
+            torrent::desktop::configureList(GetDlgItem(dialog, IDC_TRACKERS), {{L"Группа", 55}, {L"Адрес", 320}, {L"Состояние", 165},
                 {L"Пиров", 60}, {L"Последний ответ", 160}, {L"Запросов", 70}, {L"Ошибок подряд", 110}});
-            columns(GetDlgItem(dialog, IDC_TRACKER_HISTORY), {{L"Время", 160}, {L"Событие", 220},
+            torrent::desktop::configureList(GetDlgItem(dialog, IDC_TRACKER_HISTORY), {{L"Время", 160}, {L"Событие", 220},
                 {L"Пиров", 60}, {L"мс", 60}, {L"Ошибка", 440}});
             for (const auto& tracker : state->snapshot().network.trackers) state->requests_before += tracker.requests;
             state->deadline = GetTickCount64() + 12000;

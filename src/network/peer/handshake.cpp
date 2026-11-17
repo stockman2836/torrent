@@ -19,12 +19,17 @@ bool PeerConnection::sendHandshake() {
 
 bool PeerConnection::receiveHandshake() {
     std::array<uint8_t, 68> bytes{};
-    if (!receiveData(bytes.data(), 1) || bytes[0] != 19 ||
-        !receiveData(bytes.data() + 1, bytes.size() - 1)) return false;
-    if (std::string(bytes.begin() + 1, bytes.begin() + 20) != "BitTorrent protocol" || info_hash_.size() != 20 ||
-        !std::equal(info_hash_.begin(), info_hash_.end(), bytes.begin() + 28)) return false;
+    if (!receiveData(bytes.data(), 1)) return false;
+    if (bytes[0] != 19) { setEndReason(PeerEndReason::InvalidHandshake); return false; }
+    if (!receiveData(bytes.data() + 1, bytes.size() - 1)) return false;
+    if (std::string(bytes.begin() + 1, bytes.begin() + 20) != "BitTorrent protocol" || info_hash_.size() != 20) {
+        setEndReason(PeerEndReason::InvalidHandshake); return false;
+    }
+    if (!std::equal(info_hash_.begin(), info_hash_.end(), bytes.begin() + 28)) {
+        setEndReason(PeerEndReason::WrongTorrent); return false;
+    }
     remote_peer_id_.assign(bytes.begin() + 48, bytes.end());
-    if (remote_peer_id_ == peer_id_) return false;
+    if (remote_peer_id_ == peer_id_) { setEndReason(PeerEndReason::SelfConnection); return false; }
     peer_supports_fast_extension_ = (bytes[27] & 0x04) != 0;
     peer_supports_extensions_ = (bytes[25] & 0x10) != 0;
     return true;
@@ -47,7 +52,10 @@ bool PeerConnection::sendAvailability(const std::vector<bool>& bitfield) {
 bool PeerConnection::performHandshake(const std::vector<bool>& bitfield) {
     if (!connected_) return false;
     if (handshake_completed_) return true;
-    if (!sendHandshake() || !receiveHandshake() || !sendAvailability(bitfield) || !sendUnchoke()) {
+    read_deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const bool valid = sendHandshake() && receiveHandshake();
+    read_deadline_ = std::chrono::steady_clock::time_point::max();
+    if (!valid || !sendAvailability(bitfield) || !sendUnchoke()) {
         disconnect(); return false;
     }
     handshake_completed_ = true;

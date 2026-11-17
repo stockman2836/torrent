@@ -4,6 +4,7 @@
 #include "win32_helpers.h"
 #include "tracker_dialog.h"
 #include "tracker_diagnostics.h"
+#include "peer_dialog.h"
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <algorithm>
@@ -23,6 +24,7 @@ struct DialogState {
     const std::function<bool()>& update_trackers;
     bool automatic;
     bool automatic_update;
+    bool peer_statistics;
     std::string error;
 };
 
@@ -122,12 +124,16 @@ INT_PTR CALLBACK procedure(HWND dialog, UINT message, WPARAM wparam, LPARAM lpar
                 throw std::runtime_error("Network diagnosis was not displayed");
             if (state->automatic) {
                 showTrackerDetails(dialog, state->snapshot, state->update_trackers, true, state->automatic_update);
+                showPeerDetails(dialog, state->snapshot, state->peer_statistics ? PeerDialogTest::Statistics : PeerDialogTest::Render);
                 PostMessageW(dialog, WM_COMMAND, IDOK, 0);
             } else SetTimer(dialog, 1, 500, nullptr);
             return TRUE;
         }
         if (!state) return FALSE;
         if (message == WM_TIMER) { refresh(dialog, *state); return TRUE; }
+        if (message == WM_COMMAND && LOWORD(wparam) == IDC_NET_PEER_DETAILS) {
+            showPeerDetails(dialog, state->snapshot); refresh(dialog, *state); return TRUE;
+        }
         if (message == WM_COMMAND && LOWORD(wparam) == IDC_NET_TRACKERS) {
             showTrackerDetails(dialog, state->snapshot, state->update_trackers);
             refresh(dialog, *state); return TRUE;
@@ -158,8 +164,8 @@ std::wstring networkHint(const DownloadSnapshot& snapshot) {
 }
 
 void showNetworkDetails(HWND owner, const std::function<DownloadSnapshot()>& snapshot,
-                        const std::function<bool()>& update_trackers, bool automatic, bool automatic_update) {
-    DialogState state{snapshot, update_trackers, automatic, automatic_update, {}};
+                        const std::function<bool()>& update_trackers, NetworkDialogTest test) {
+    DialogState state{snapshot, update_trackers, test.automatic, test.update_trackers, test.peer_statistics, {}};
     const auto result = DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_NETWORK), owner,
         procedure, reinterpret_cast<LPARAM>(&state));
     if (result == -1) throw std::runtime_error("Cannot open network details");

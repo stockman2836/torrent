@@ -1,5 +1,6 @@
 #include "torrent/network/peer/extension_protocol.h"
 #include "torrent/core/logger.h"
+#include "torrent/core/utils.h"
 #include <cstring>
 
 namespace torrent {
@@ -84,7 +85,7 @@ void ExtensionProtocol::parseExtendedHandshake(const std::vector<uint8_t>& paylo
 
         // Parse client version
         if (dict.find("v") != dict.end() && dict.at("v").isString()) {
-            peer_client_name_ = dict.at("v").getString();
+            peer_client_name_ = utils::displayText(dict.at("v").getString());
             LOG_DEBUG("Peer client: {}", peer_client_name_);
         }
 

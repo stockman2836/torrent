@@ -11,6 +11,7 @@
 #include <set>
 #include <mutex>
 #include "torrent/network/transport/utp_socket.h"
+#include "torrent/network/peer/connection_status.h"
 
 namespace torrent {
 
@@ -138,6 +139,11 @@ public:
     bool waitForData(int timeout_ms);
     const std::string& remoteAddress() const { return ip_; }
     uint16_t remotePort() const { return port_; }
+    PeerEndReason endReason() const { return end_reason_; }
+    int errorCode() const { return error_code_; }
+    void setEndReason(PeerEndReason reason, int code = 0) {
+        if (end_reason_ == PeerEndReason::None) { end_reason_ = reason; error_code_ = code; }
+    }
     // Assigned before starting the owning worker; checked while waiting for TCP data.
     void setCancellationCallback(std::function<bool()> cancelled) { cancelled_ = std::move(cancelled); }
 
@@ -291,6 +297,8 @@ private:
     std::shared_ptr<utp::UtpSocket> utp_socket_;      // uTP socket
     bool connected_;
     bool incoming_ = false;
+    PeerEndReason end_reason_ = PeerEndReason::None;
+    int error_code_ = 0;
     bool handshake_completed_;
     bool is_ipv6_;  // True if this connection uses IPv6
 

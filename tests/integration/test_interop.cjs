@@ -196,6 +196,9 @@ PortForwardingEnabled=false
       await until(async () => (await torrentState())?.progress === 1, 'qBittorrent download');
       await api('torrents/pause', { hashes: hash });
       verifyPayload(qbtFiles);
+      engine.stdin.write('clients\n');
+      await until(() => engine.output.includes('INCOMING_CLIENTS_DONE'), 'published peer client');
+      assert.match(engine.output, /INCOMING_CLIENT .*qBittorrent/i, 'The reference BEP 10 client must be published');
       engine.stdin.end('stop\n'); await exited(engine, 'seeding shutdown');
     } else if (mode === 'resume') {
       startEngine(driver, ['fixture.torrent', 'config.json']);

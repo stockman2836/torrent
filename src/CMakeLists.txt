@@ -1,4 +1,4 @@
-add_library(torrent_core STATIC core/utils.cpp core/crypto.cpp core/logger.cpp core/config.cpp)
+add_library(torrent_core STATIC core/utils.cpp core/crypto.cpp core/logger.cpp core/config.cpp core/display_text.cpp)
 torrent_target(torrent_core Core)
 target_link_libraries(torrent_core PUBLIC Threads::Threads spdlog::spdlog
     PRIVATE OpenSSL::Crypto nlohmann_json::nlohmann_json)
@@ -57,6 +57,7 @@ add_library(torrent_session STATIC
     session/download_manager.cpp
     session/peers.cpp
     session/peer_extensions.cpp
+    session/peer_status.cpp
     session/incoming.cpp
     session/transfer.cpp
     session/scheduling.cpp

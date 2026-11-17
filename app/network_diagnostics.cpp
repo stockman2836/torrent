@@ -1,3 +1,5 @@
+#include "diagnostic_format.h"
+#include "peer_diagnostics.h"
 #include "network_diagnostics.h"
 #include "speed_limits.h"
 #include "tracker_diagnostics.h"
@@ -177,10 +179,22 @@ std::string networkReport(const DownloadSnapshot& snapshot) {
                << trackerStateText(tracker.state) << u8" · запросов: " << tracker.requests
                << u8" · адресов: " << tracker.peers_returned << u8" · ошибок подряд: " << tracker.consecutive_failures;
         for (const auto& event : tracker.history)
-            report << "\n  " << trackerTime(event.time_ms) << " · " << trackerEventText(event)
+            report << "\n  " << formatDiagnosticTime(event.time_ms) << " · " << trackerEventText(event)
                    << " · " << event.duration_ms << u8" мс · адресов: " << event.peers_returned
                    << (event.error.empty() ? "" : " · " + event.error);
     }
+    const auto peerLine = [&](const PeerStatus& peer, bool finished) {
+        report << "\n" << (finished ? u8"Завершённый пир #" : u8"Пир #") << peer.id << ' ' << peerAddress(peer)
+               << (peer.incoming ? u8" · входящий" : u8" · исходящий")
+               << u8" · клиент (сообщён пиром): " << (peer.client.empty() ? u8"не указан" : peer.client)
+               << u8" · получено: " << peer.downloaded_bytes << u8" Б · отдано: " << peer.uploaded_bytes
+               << u8" Б · ↓ " << peer.download_speed << u8" Б/с · ↑ " << peer.upload_speed
+               << u8" Б/с · длительность: " << peer.duration_ms << u8" мс";
+        if (finished) report << " · " << formatDiagnosticTime(peer.finished_at_ms) << " · " << peerResultText(peer);
+        else report << " · " << peerStateText(peer, snapshot.state == DownloadState::Seeding);
+    };
+    for (const auto& peer : network.peers) peerLine(peer, false);
+    for (const auto& peer : network.peer_history) peerLine(peer, true);
     report << u8"\nВходящие подключения с других адресов могут приходить из локальной сети. Проверку из интернета нужно выполнять из другой сети.\n";
     return report.str();
 }

@@ -105,6 +105,37 @@ serialized, and shutdown joins announce workers before sending `stopped`.
 The final snapshot clears active peers while retaining the last useful tracker
 response/error. Starting or loading a job resets its session diagnostics.
 
+`peer_status.cpp` builds copied per-connection statistics and archives ended
+connections. A session assigns increasing connection IDs under `peers_mutex_`,
+including failed outgoing attempts and incoming cap rejections. `ActivePeerInfo`
+owns separate five-second `utils::SpeedTracker` instances for accepted file
+blocks and successful payload uploads. Workers update counters/rates under the
+peer mutex and publish the peer's client string after processing extension
+messages. Snapshot reads never access the mutable `PeerConnection` protocol
+object. Metadata replies and ignored/unsolicited blocks do not add payload stats.
+Ended records retain totals/client/duration and clear live rates/pending requests.
+The session keeps at most 64 records, independently of the active peer cap.
+
+`PeerConnection` preserves the first observed `PeerEndReason` and socket error
+code through cleanup. Both handshake directions have a five-second receive
+deadline. TCP connect polls for cancellation up to ten seconds and checks both
+write/exception sets for Winsock connection failures. Receive waits distinguish
+EOF, transport errors and deadlines; protocol checks identify wrong info hashes,
+self connections and invalid messages. Local stop/pause takes precedence when
+the session archives a connection. `finishPeer` runs on the connection owner with
+the peer mutex held, records once before cleanup removes the worker and does no
+network I/O. Reasons reflect local evidence, with an explicit unknown fallback.
+
+The optional BEP 10 client `v` value is passed through `utils::displayText`:
+output is bounded to 256 bytes, invalid UTF-8 is replaced, ASCII controls become spaces
+and valid code points are never split. It is a self-reported display value, not
+an authenticated identity or a peer-ID heuristic. Formatting/reason labels live
+in `app/peer_diagnostics`; peer/tracker timestamps share `diagnostic_format`.
+`desktop/peer_dialog.cpp` renders copied active/history rows and preserves the
+selected historical connection by ID. Shared Win32 list helpers also serve the
+tracker dialog. The network details entry point groups automatic test options
+in one value; ordinary dialogs only render snapshots. See [BEP 10](https://www.bittorrent.org/beps/bep_0010.html).
+
 `PeerListener::status()` checks the owned socket's `SO_ACCEPTCONN` flag and reports
 the actual IPv4/dual-stack mode. The listener worker publishes this copied value
 under the peer mutex, including before the first accept. Stop joins that worker

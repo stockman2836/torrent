@@ -18,13 +18,16 @@ void DownloadManager::incomingLoop() {
             connection->setCancellationCallback([this] { return !running_.load(); });
             connection->initializePeerBitfield(torrent_.numPieces());
             Peer remote(connection->remoteAddress(), connection->remotePort());
-            cleanupStalePeers();
-            std::lock_guard<std::mutex> lock(peers_mutex_);
-            if (!running_) continue;
-            if (active_peers_.size() >= max_peers_) { ++rejected_incoming_; continue; }
             auto peer = std::make_shared<ActivePeerInfo>(std::move(connection), remote);
             peer->handshaking = true;
             peer->incoming = true;
+            cleanupStalePeers();
+            std::lock_guard<std::mutex> lock(peers_mutex_);
+            peer->id = next_peer_id_++;
+            if (!running_) { finishPeer(*peer); continue; }
+            if (active_peers_.size() >= max_peers_) {
+                ++rejected_incoming_; finishPeer(*peer, PeerEndReason::PeerLimit); continue;
+            }
             active_peers_.push_back(peer);
             peer_threads_.push_back({peer, std::thread([this, peer] {
                 try {
@@ -43,7 +46,7 @@ void DownloadManager::incomingLoop() {
                 releasePeerPiece(*peer);
                 peer->connection->disconnect();
                 std::lock_guard<std::mutex> lock(peers_mutex_);
-                peer->finished = true;
+                finishPeer(*peer);
                 if (running_) {
                     ++failed_connections_;
                     ++failed_incoming_handshakes_;

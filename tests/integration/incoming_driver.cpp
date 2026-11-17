@@ -74,6 +74,14 @@ int main(int argc, char* argv[]) {
             } else if (command == "complete") {
                 until(queue, [&] { for (const auto& entry : queue.snapshots()) if (!entry.download.can_seed) return false; return true; });
                 std::cout << "INCOMING_COMPLETE\n" << std::flush;
+            } else if (command == "clients") {
+                for (const auto& entry : queue.snapshots()) {
+                    for (const auto& peer : entry.download.network.peers)
+                        if (!peer.client.empty()) std::cout << "INCOMING_CLIENT " << peer.client << '\n';
+                    for (const auto& peer : entry.download.network.peer_history)
+                        if (!peer.client.empty()) std::cout << "INCOMING_CLIENT " << peer.client << '\n';
+                }
+                std::cout << "INCOMING_CLIENTS_DONE\n" << std::flush;
             } else {
                 std::istringstream input(command);
                 std::string key; int64_t down, up;

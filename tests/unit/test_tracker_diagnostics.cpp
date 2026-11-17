@@ -1,3 +1,4 @@
+#include "diagnostic_format.h"
 #include "tracker_diagnostics.h"
 #include "download_task.h"
 #include "network_diagnostics.h"
@@ -34,8 +35,8 @@ TEST(TrackerDiagnostics, UpdatesRequireAnActiveSessionWithACompletedRoundAndNoPe
 TEST(TrackerDiagnostics, DisplaysMissingTimesAndRoundsUpRemainingSeconds) {
     EXPECT_EQ(trackerWaitSeconds({}), 0);
     EXPECT_EQ(trackerWaitSeconds(std::chrono::steady_clock::now() + std::chrono::milliseconds(500)), 1);
-    EXPECT_EQ(trackerTime(0), u8"—");
-    EXPECT_NE(trackerTime(1700000000000), u8"—");
+    EXPECT_EQ(formatDiagnosticTime(0), u8"—");
+    EXPECT_NE(formatDiagnosticTime(1700000000000), u8"—");
     TrackerEvent event; event.event = "update"; event.result = TrackerEventResult::Cancelled;
     EXPECT_NE(trackerEventText(event).find(u8"отменено"), std::string::npos);
 }

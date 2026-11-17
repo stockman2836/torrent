@@ -40,6 +40,8 @@ the portable GUI fixtures after changes to layout/actions/rendering or test hook
 | `test_tracker_diagnostics` | Manual-update availability, timestamps and history report redaction | Application |
 | `test_port_mapper` | Disabled defaults and bounded finite-lease options | Network |
 | `test_token_bucket` | Throttling, live changes and cancellation | Core |
+| `test_display_text` | UTF-8 bounds, invalid byte replacement and ASCII controls | Core |
+| `test_peer_diagnostics` | Peer state/reason text, addresses and history reports | Application |
 | `test_seeding_options` | Ratio/time limits and policy validation | Application |
 | `test_peer_listener` | Port ownership and bitfield validation | Network |
 | `test_dht` | UDP lifecycle, KRPC validation, unique transactions and bootstrap configuration | Network |
@@ -239,8 +241,8 @@ It rejects any tracker announce by our client; qBittorrent retains its local
 fixture tracker and has its own DHT/PEX/LSD disabled.
 
 This uses the reference library's public [DHT API](https://github.com/webtorrent/bittorrent-dht#api).
-Both independent-client options enabled yield 195 CTest suites/scenarios, or 196
-when the OpenSSL executable is available: 186 ordinary checks, an optional local
+Both independent-client options enabled yield 207 CTest suites/scenarios, or 208
+when the OpenSSL executable is available: 198 ordinary checks, an optional local
 TLS certificate check and nine interoperability checks. Test artifacts stay
 under `build/verify/tests/dht-*`, `magnet-*` or `build/tests/interop-*`, depending
 on the build directory. No public tracker or DHT router participates in these tests.
@@ -376,6 +378,24 @@ Portable verification runs `test_download.cjs --desktop-network-ui`, opens the
 real diagnosis during an active download and again after completion, verifies the
 new fields render and checks final payload bytes. It leaves the user's clipboard
 untouched; report content is tested through the shared application function.
+
+## Peer statistics
+
+`test_peer_statistics_*` runs ten isolated loopback scenarios through the task
+controller: independent download rates/totals for two peers, incoming uploads,
+idle-rate expiry, metadata exclusion from payload rates, unknown client identity,
+refused TCP, wrong-hash/invalid/self handshakes, deadlines, malformed frames,
+UTF-8/control/size bounds, cancellation, cap rejection, history trimming and reset.
+It verifies both TCP directions and checks that closure reasons and final counters
+survive stop while active rows disappear. Logs/results stay under
+`build/tests/peer-statistics-*`. Unit suites cover readable display text, labels,
+address formatting and reports. Run with
+`ctest --test-dir build -R "test_peer_statistics|test_peer_diagnostics|test_display_text" --output-on-failure`.
+
+The portable suite runs `test_download.cjs --desktop-peers-ui`, opening the real
+peer window during transfer and after stop to verify client/rate/history rows.
+The existing qBittorrent upload/metadata scenarios now also require its actual
+self-reported BEP 10 client name in published snapshots. No public peer is used.
 
 ## Tracker fallback
 

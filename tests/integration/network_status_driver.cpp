@@ -1,6 +1,7 @@
 #include "download_task.h"
 #include "network_diagnostics.h"
 #include "tracker_diagnostics.h"
+#include "peer_diagnostics.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <fstream>
@@ -29,6 +30,7 @@ const char* peerState(torrent::PeerState state) {
     switch (state) {
     case torrent::PeerState::Connecting: return "connecting";
     case torrent::PeerState::Handshaking: return "handshaking";
+    case torrent::PeerState::Disconnected: return "disconnected";
     default: return "connected";
     }
 }
@@ -39,6 +41,29 @@ const char* trackerState(torrent::TrackerState state) {
     case torrent::TrackerState::Working: return "working";
     case torrent::TrackerState::Error: return "error";
     default: return "none";
+    }
+}
+const char* reasonName(torrent::PeerEndReason reason) {
+    using Reason = torrent::PeerEndReason;
+    switch (reason) {
+    case Reason::None: return "none";
+    case Reason::Stopped: return "stopped";
+    case Reason::Paused: return "paused";
+    case Reason::RemoteClosed: return "remote-closed";
+    case Reason::ConnectFailed: return "connect-failed";
+    case Reason::ConnectTimeout: return "connect-timeout";
+    case Reason::HandshakeTimeout: return "handshake-timeout";
+    case Reason::InvalidHandshake: return "invalid-handshake";
+    case Reason::WrongTorrent: return "wrong-torrent";
+    case Reason::SelfConnection: return "self-connection";
+    case Reason::ReceiveTimeout: return "receive-timeout";
+    case Reason::ReceiveFailed: return "receive-failed";
+    case Reason::SendTimeout: return "send-timeout";
+    case Reason::SendFailed: return "send-failed";
+    case Reason::InvalidMessage: return "invalid-message";
+    case Reason::IdleTimeout: return "idle-timeout";
+    case Reason::PeerLimit: return "peer-limit";
+    default: return "unknown";
     }
 }
 }
@@ -76,6 +101,16 @@ int main(int argc, char* argv[]) {
                 default: break;
                 }
                 auto peers = nlohmann::json::array();
+                auto peer_history = nlohmann::json::array();
+                const auto peerJson = [](const torrent::PeerStatus& peer) {
+                    return nlohmann::json{{"ip", peer.ip}, {"port", peer.port}, {"state", peerState(peer.state)},
+                        {"incoming", peer.incoming}, {"choked", peer.choked}, {"pending", peer.pending_requests},
+                        {"downloaded", peer.downloaded_bytes}, {"uploaded", peer.uploaded_bytes},
+                        {"id", peer.id}, {"client", peer.client}, {"download_speed", peer.download_speed},
+                        {"upload_speed", peer.upload_speed}, {"duration", peer.duration_ms}, {"finished", peer.finished_at_ms},
+                        {"reason", reasonName(peer.end_reason)}, {"reason_text", torrent::app::peerResultText(peer)},
+                        {"system_error", peer.error_code}};
+                };
                 auto trackers = nlohmann::json::array();
                 for (const auto& tracker : network.trackers) {
                     auto history = nlohmann::json::array();
@@ -87,9 +122,8 @@ int main(int argc, char* argv[]) {
                         {"requests", tracker.requests}, {"peers", tracker.peers_returned}, {"failures", tracker.consecutive_failures},
                         {"last_response", tracker.last_response_ms}, {"error", tracker.error}, {"history", history}});
                 }
-                for (const auto& peer : network.peers) peers.push_back({{"ip", peer.ip}, {"port", peer.port},
-                    {"state", peerState(peer.state)}, {"incoming", peer.incoming}, {"choked", peer.choked},
-                    {"pending", peer.pending_requests}, {"downloaded", peer.downloaded_bytes}, {"uploaded", peer.uploaded_bytes}});
+                for (const auto& peer : network.peers) peers.push_back(peerJson(peer));
+                for (const auto& peer : network.peer_history) peer_history.push_back(peerJson(peer));
                 output << "STATUS " << nlohmann::json{{"busy", task.busy()}, {"progress", state.progress},
                     {"state", static_cast<int>(state.state)},
                     {"listener", {{"state", listener}, {"port", network.listener.port}, {"ipv6", network.listener.ipv6}, {"error", network.listener.error}}},
@@ -99,6 +133,7 @@ int main(int argc, char* argv[]) {
                     {"hint", torrent::app::diagnoseNetwork(state).summary}, {"report", torrent::app::networkReport(state)},
                     {"error", state.error}, {"uploaded", state.uploaded_bytes}, {"port", state.listen_port},
                     {"peers", peers}, {"queued", network.queued_peers}, {"failed", network.failed_connections},
+                    {"peer_history", peer_history},
                     {"peer_error", network.last_peer_error}, {"dht", network.dht_enabled}, {"nodes", network.dht_nodes},
                     {"trackers", trackers}, {"can_update", torrent::app::canUpdateTrackers(state)},
                     {"tracker", {{"url", network.tracker.url}, {"state", trackerState(network.tracker.state)},

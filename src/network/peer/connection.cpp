@@ -41,6 +41,22 @@ static void initWinsock() {
 
 
 namespace torrent {
+namespace {
+int socketError() {
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+bool retryable(int code) {
+#ifdef _WIN32
+    return code == WSAEWOULDBLOCK || code == WSAEINTR;
+#else
+    return code == EAGAIN || code == EWOULDBLOCK || code == EINTR;
+#endif
+}
+} // namespace
 
 PeerConnection::PeerConnection(const std::string& ip,
                               uint16_t port,
@@ -73,116 +89,64 @@ bool PeerConnection::connect() {
 #ifdef _WIN32
     initWinsock();
 #endif
-
-    if (connected_) {
-        LOG_DEBUG("Already connected to peer {}:{}", ip_, port_);
-        return true;
-    }
-
-    LOG_INFO("Connecting to peer {}:{} ({})", ip_, port_, is_ipv6_ ? "IPv6" : "IPv4");
-
-    // Create socket with appropriate address family
-    int address_family = is_ipv6_ ? AF_INET6 : AF_INET;
-    socket_fd_ = socket(address_family, SOCK_STREAM, IPPROTO_TCP);
-    if (socket_fd_ == INVALID_SOCKET) {
-        LOG_ERROR("Failed to create socket for {}:{}", ip_, port_);
+    if (connected_) return true;
+    end_reason_ = PeerEndReason::None;
+    error_code_ = 0;
+    if (cancelled_ && cancelled_()) { setEndReason(PeerEndReason::Stopped); return false; }
+    const auto fail = [this](PeerEndReason reason, int code = 0) {
+        setEndReason(reason, code);
+        if (socket_fd_ != INVALID_SOCKET) closesocket(socket_fd_);
+        socket_fd_ = INVALID_SOCKET;
         return false;
-    }
-
-    // Prepare address structure
-    struct sockaddr_storage server_addr_storage;
-    memset(&server_addr_storage, 0, sizeof(server_addr_storage));
-
-    struct sockaddr* server_addr_ptr;
-    socklen_t server_addr_len;
-
+    };
+    socket_fd_ = socket(is_ipv6_ ? AF_INET6 : AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (socket_fd_ == INVALID_SOCKET) return fail(PeerEndReason::ConnectFailed, socketError());
+    sockaddr_storage storage{};
+    sockaddr* address = reinterpret_cast<sockaddr*>(&storage);
+    socklen_t length;
     if (is_ipv6_) {
-        // IPv6 address
-        struct sockaddr_in6* addr6 = (struct sockaddr_in6*)&server_addr_storage;
-        addr6->sin6_family = AF_INET6;
-        addr6->sin6_port = htons(port_);
-
-        // Convert IPv6 address
-        if (inet_pton(AF_INET6, ip_.c_str(), &addr6->sin6_addr) <= 0) {
-            LOG_ERROR("Invalid IPv6 address: {}", ip_);
-            closesocket(socket_fd_);
-            socket_fd_ = INVALID_SOCKET;
-            return false;
-        }
-
-        server_addr_ptr = (struct sockaddr*)addr6;
-        server_addr_len = sizeof(struct sockaddr_in6);
+        auto* value = reinterpret_cast<sockaddr_in6*>(&storage);
+        value->sin6_family = AF_INET6; value->sin6_port = htons(port_);
+        if (inet_pton(AF_INET6, ip_.c_str(), &value->sin6_addr) != 1) return fail(PeerEndReason::ConnectFailed);
+        length = sizeof(*value);
     } else {
-        // IPv4 address
-        struct sockaddr_in* addr4 = (struct sockaddr_in*)&server_addr_storage;
-        addr4->sin_family = AF_INET;
-        addr4->sin_port = htons(port_);
-
-        // Convert IPv4 address
-        if (inet_pton(AF_INET, ip_.c_str(), &addr4->sin_addr) <= 0) {
-            LOG_ERROR("Invalid IPv4 address: {}", ip_);
-            closesocket(socket_fd_);
-            socket_fd_ = INVALID_SOCKET;
-            return false;
-        }
-
-        server_addr_ptr = (struct sockaddr*)addr4;
-        server_addr_len = sizeof(struct sockaddr_in);
+        auto* value = reinterpret_cast<sockaddr_in*>(&storage);
+        value->sin_family = AF_INET; value->sin_port = htons(port_);
+        if (inet_pton(AF_INET, ip_.c_str(), &value->sin_addr) != 1) return fail(PeerEndReason::ConnectFailed);
+        length = sizeof(*value);
     }
-
-    // Set socket to non-blocking for timeout control
-    setNonBlocking(true);
-
-    // Attempt connection
-    int result = ::connect(socket_fd_, server_addr_ptr, server_addr_len);
-
+    if (!setNonBlocking(true)) return fail(PeerEndReason::ConnectFailed, socketError());
+    const auto connected = ::connect(socket_fd_, address, length);
+    if (connected == SOCKET_ERROR) {
+        const auto code = socketError();
 #ifdef _WIN32
-    if (result == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK) {
+        if (code != WSAEWOULDBLOCK) return fail(PeerEndReason::ConnectFailed, code);
 #else
-    if (result == SOCKET_ERROR && errno != EINPROGRESS) {
+        if (code != EINPROGRESS) return fail(PeerEndReason::ConnectFailed, code);
 #endif
-        LOG_ERROR("Connection to {}:{} failed immediately", ip_, port_);
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
-        return false;
     }
-
-    // Wait for connection with timeout (10 seconds)
-    fd_set write_fds;
-    FD_ZERO(&write_fds);
-    FD_SET(socket_fd_, &write_fds);
-
-    struct timeval timeout;
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 0;
-
-    result = select(socket_fd_ + 1, nullptr, &write_fds, nullptr, &timeout);
-
-    if (result <= 0) {
-        LOG_WARN("Connection to {}:{} timeout or error", ip_, port_);
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
-        return false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    for (;;) {
+        if (cancelled_ && cancelled_()) return fail(PeerEndReason::Stopped);
+        if (std::chrono::steady_clock::now() >= deadline) return fail(PeerEndReason::ConnectTimeout);
+        fd_set output; FD_ZERO(&output); FD_SET(socket_fd_, &output);
+        fd_set errors = output; // Winsock reports refused nonblocking connects here.
+        timeval timeout{0, 100000};
+        const int ready = select(static_cast<int>(socket_fd_ + 1), nullptr, &output, &errors, &timeout);
+        if (ready < 0) {
+            const auto code = socketError();
+            if (retryable(code)) continue;
+            return fail(PeerEndReason::ConnectFailed, code);
+        }
+        if (!ready) continue;
+        int error = 0; socklen_t size = sizeof(error);
+        if (getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &size) < 0)
+            return fail(PeerEndReason::ConnectFailed, socketError());
+        if (error) return fail(PeerEndReason::ConnectFailed, error);
+        break;
     }
-
-    // Check if connection succeeded
-    int error = 0;
-    socklen_t len = sizeof(error);
-    if (getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, (char*)&error, &len) < 0 || error != 0) {
-        LOG_ERROR("Connection to {}:{} failed with error code {}", ip_, port_, error);
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
-        return false;
-    }
-
-    // Set back to blocking mode
-    setNonBlocking(false);
-
-    // Set socket timeouts
-    setSocketTimeout(30000); // 30 seconds
-
+    if (!setNonBlocking(false) || !setSocketTimeout(30000)) return fail(PeerEndReason::ConnectFailed, socketError());
     connected_ = true;
-    LOG_INFO("Successfully connected to peer {}:{}", ip_, port_);
     return true;
 }
 
@@ -327,7 +291,10 @@ bool PeerConnection::sendData(const void* data, size_t length, bool cleanup) {
     const uint8_t* ptr = static_cast<const uint8_t*>(data);
 
     while (total_sent < length) {
-        if ((!cleanup && cancelled_ && cancelled_()) || std::chrono::steady_clock::now() >= deadline) return false;
+        if (!cleanup && cancelled_ && cancelled_()) { setEndReason(PeerEndReason::Stopped); return false; }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            setEndReason(PeerEndReason::SendTimeout); disconnect(); return false;
+        }
         int sent = send(socket_fd_, (const char*)(ptr + total_sent), length - total_sent, 0);
 
         if (sent == SOCKET_ERROR) {
@@ -343,12 +310,14 @@ bool PeerConnection::sendData(const void* data, size_t length, bool cleanup) {
                 continue;
             }
 
+            setEndReason(PeerEndReason::SendFailed, socketError());
             std::cerr << "Send failed\n";
             disconnect();
             return false;
         }
 
         if (sent == 0) {
+            setEndReason(PeerEndReason::RemoteClosed);
             std::cerr << "Connection closed by peer\n";
             disconnect();
             return false;
@@ -361,71 +330,37 @@ bool PeerConnection::sendData(const void* data, size_t length, bool cleanup) {
 }
 
 bool PeerConnection::receiveData(void* buffer, size_t length) {
-    if (!connected_) {
-        std::cerr << "Cannot receive: not connected\n";
-        return false;
-    }
-
-    // Handle uTP transport
-    // Note: uTP uses callbacks for receiving data. For now, synchronous receive
-    // is not supported with uTP. Applications should use TCP for connections
-    // that require synchronous I/O, or implement buffering in UtpSocket.
-    if (transport_type_ == TransportType::UTP) {
-        std::cerr << "Synchronous receive not supported with uTP (use callbacks)\n";
-        return false;
-    }
-
-    // Handle TCP transport
-    if (socket_fd_ == INVALID_SOCKET) {
-        std::cerr << "Cannot receive: TCP socket invalid\n";
-        return false;
-    }
-
-    size_t total_received = 0;
-    uint8_t* ptr = static_cast<uint8_t*>(buffer);
-
+    const auto fail = [this](PeerEndReason reason, int code = 0) {
+        setEndReason(reason, code); disconnect(); return false;
+    };
+    if (!connected_ || socket_fd_ == INVALID_SOCKET || transport_type_ != TransportType::TCP)
+        return fail(PeerEndReason::ReceiveFailed);
+    size_t received_total = 0;
+    auto* output = static_cast<uint8_t*>(buffer);
     const auto deadline = std::min(read_deadline_, std::chrono::steady_clock::now() + std::chrono::seconds(30));
-    while (total_received < length) {
-        if (cancelled_ || read_deadline_ != std::chrono::steady_clock::time_point::max()) {
-            int ready = 0;
-            while (ready == 0) {
-                if ((cancelled_ && cancelled_()) || std::chrono::steady_clock::now() >= deadline) return false;
-                fd_set readable;
-                FD_ZERO(&readable);
-                FD_SET(socket_fd_, &readable);
-                timeval timeout{0, 100000};
-                ready = select(socket_fd_ + 1, &readable, nullptr, nullptr, &timeout);
-                if (ready < 0) return false;
-            }
+    while (received_total < length) {
+        if (cancelled_ && cancelled_()) return fail(PeerEndReason::Stopped);
+        if (std::chrono::steady_clock::now() >= deadline)
+            return fail(read_deadline_ == std::chrono::steady_clock::time_point::max() ?
+                PeerEndReason::ReceiveTimeout : PeerEndReason::HandshakeTimeout);
+        fd_set input; FD_ZERO(&input); FD_SET(socket_fd_, &input);
+        timeval timeout{0, 100000};
+        const int ready = select(static_cast<int>(socket_fd_ + 1), &input, nullptr, nullptr, &timeout);
+        if (ready < 0) {
+            const auto code = socketError();
+            if (retryable(code)) continue;
+            return fail(PeerEndReason::ReceiveFailed, code);
         }
-        int received = recv(socket_fd_, (char*)(ptr + total_received), length - total_received, 0);
-
+        if (!ready) continue;
+        const int received = recv(socket_fd_, reinterpret_cast<char*>(output + received_total), length - received_total, 0);
         if (received == SOCKET_ERROR) {
-#ifdef _WIN32
-            int error = WSAGetLastError();
-            if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
-#else
-            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-#endif
-                // Retry
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
-            }
-
-            std::cerr << "Receive failed\n";
-            disconnect();
-            return false;
+            const auto code = socketError();
+            if (retryable(code)) continue;
+            return fail(PeerEndReason::ReceiveFailed, code);
         }
-
-        if (received == 0) {
-            std::cerr << "Connection closed by peer\n";
-            disconnect();
-            return false;
-        }
-
-        total_received += received;
+        if (!received) return fail(PeerEndReason::RemoteClosed);
+        received_total += received;
     }
-
     return true;
 }
 
@@ -445,7 +380,9 @@ bool PeerConnection::waitForData(int timeout_ms) {
 
     int result = select(socket_fd_ + 1, &read_fds, nullptr, nullptr, &timeout);
 
-    if (result < 0) disconnect();
+    if (result < 0 && !retryable(socketError())) {
+        setEndReason(PeerEndReason::ReceiveFailed, socketError()); disconnect();
+    }
     return result > 0;
 }
 

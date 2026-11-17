@@ -88,6 +88,7 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
     // Sanity check on message length (max 256KB for piece messages + overhead)
     if (message_length > 262144 + 9) {
         std::cerr << "ERROR: Invalid message length: " << message_length << " (max 262153)\n";
+        setEndReason(PeerEndReason::InvalidMessage);
         disconnect();
         return nullptr;
     }
@@ -143,6 +144,7 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
                 if (have_msg.piece_index < peer_bitfield_.size()) {
                     peer_bitfield_[have_msg.piece_index] = true;
                 } else if (known_piece_count_ > 0) {
+                    setEndReason(PeerEndReason::InvalidMessage);
                     disconnect();
                     return nullptr;
                 }
@@ -168,6 +170,7 @@ std::unique_ptr<PeerMessage> PeerConnection::receiveMessage() {
                 }
                 std::cout << "\n";
             } else if (known_piece_count_ > 0) {
+                setEndReason(PeerEndReason::InvalidMessage);
                 disconnect();
                 return nullptr;
             }

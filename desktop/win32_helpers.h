@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
+#include <utility>
 
 namespace torrent::desktop {
 
@@ -16,5 +18,7 @@ std::filesystem::path knownFolder(REFKNOWNFOLDERID id);
 std::wstring bytes(int64_t value);
 const wchar_t* priorityName(FilePriority value);
 std::string asciiField(HWND dialog, int id);
+void configureList(HWND list, const std::vector<std::pair<const wchar_t*, int>>& columns);
+void setListRow(HWND list, int index, const std::vector<std::wstring>& values);
 
 } // namespace torrent::desktop

@@ -14,6 +14,9 @@
 namespace torrent {
 namespace utils {
 
+// Bounded UTF-8 display text. Replaces invalid bytes and ASCII controls.
+std::string displayText(const std::string& value, size_t maximum_bytes = 256);
+
 // SHA1 hash
 std::vector<uint8_t> sha1(const std::string& data);
 std::vector<uint8_t> sha1(const std::vector<uint8_t>& data);

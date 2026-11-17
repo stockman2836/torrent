@@ -156,8 +156,8 @@ void MainWindow::networkDetails() {
         showNetworkDetails(handle_, [this, id] {
             for (const auto& entry : entries_) if (entry.id == id) return entry.download;
             return DownloadSnapshot{};
-        }, [this, id] { return queue_.requestTrackerUpdate(id); }, smoke_.enabled,
-            smoke_.trackers && current() && current()->download.state == DownloadState::Downloading);
+        }, [this, id] { return queue_.requestTrackerUpdate(id); }, {smoke_.enabled,
+            smoke_.trackers && current() && current()->download.state == DownloadState::Downloading, smoke_.peers});
     } catch (...) { dialogOpen_ = false; throw; }
     dialogOpen_ = false;
 }

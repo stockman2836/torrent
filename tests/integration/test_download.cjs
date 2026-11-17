@@ -30,7 +30,8 @@ async function main() {
   const fallbackUI = process.argv[3] === '--desktop-fallback-ui';
   const networkUI = process.argv[3] === '--desktop-network-ui';
   const trackerUI = process.argv[3] === '--desktop-trackers-ui';
-  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI || fallbackUI || networkUI || trackerUI;
+  const peerUI = process.argv[3] === '--desktop-peers-ui';
+  const desktopUI = process.argv[3] === '--desktop-ui' || globalUI || fallbackUI || networkUI || trackerUI || peerUI;
   const work = fs.mkdtempSync(path.join(process.cwd(), 'download-test-'));
   const data = Buffer.alloc(50003);
   for (let i = 0; i < data.length; i++) data[i] = (i * 37 + 11) % 256;
@@ -60,10 +61,12 @@ async function main() {
           assert.deepEqual(pending.subarray(28, 48), infoHash);
           pending = pending.subarray(68);
           handshaken = true;
+          const reserved = Buffer.alloc(8); if (peerUI) reserved[5] = 0x10;
           socket.write(Buffer.concat([Buffer.from([19]), Buffer.from('BitTorrent protocol'),
-            Buffer.alloc(8), infoHash, Buffer.from('-TEST00-123456789012')]));
+            reserved, infoHash, Buffer.from('-TEST00-123456789012')]));
           socket.write(packet(5, Buffer.from([0xc0])));
           socket.write(packet(1));
+          if (peerUI) socket.write(packet(20, Buffer.concat([Buffer.from([0]), encode({ m: {}, v: 'FixturePeer/1.0' })])));
         }
         while (pending.length >= 4) {
           const length = pending.readUInt32BE();
@@ -81,7 +84,7 @@ async function main() {
           requests++;
           const response = packet(7, Buffer.concat([message.subarray(1, 9), data.subarray(start, start + size)]));
           if (trackerUI && !trackerUpdated) heldPayload.push({ socket, response });
-          else if (networkUI) {
+          else if (networkUI || peerUI) {
             const timer = setTimeout(() => { timers.delete(timer); if (!socket.destroyed) socket.write(response); }, 600);
             timers.add(timer);
           } else socket.write(response);
@@ -127,7 +130,7 @@ async function main() {
       fs.writeFileSync(file, JSON.stringify(config));
     }
     const args = desktopUI
-      ? [globalUI ? '--ui-test-global-limits' : networkUI ? '--ui-test-network' : trackerUI ? '--ui-test-trackers' : '--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
+      ? [globalUI ? '--ui-test-global-limits' : networkUI ? '--ui-test-network' : trackerUI ? '--ui-test-trackers' : peerUI ? '--ui-test-peers' : '--ui-test', path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')]
       : ['test.torrent', '--config', 'config.json'];
     child = spawn(executable, args, { cwd: work, windowsHide: true });
     child.stdout.on('data', chunk => { output += chunk; });

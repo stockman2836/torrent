@@ -53,3 +53,16 @@ TEST(ExtensionProtocol, ZeroDisablesExtensionAndInvalidIdsAreIgnored) {
         EXPECT_FALSE(protocol.peerSupportsExtension(EXT_NAME_METADATA));
     }
 }
+
+TEST(ExtensionProtocol, PublishesOnlyBoundedReadableSelfReportedClientText) {
+    ExtensionProtocol protocol;
+    std::string name = "Fixture\n"; name.push_back('\0'); name.push_back(static_cast<char>(255));
+    name += std::string(1000, 'a');
+    const auto encoded = BencodeParser::encode(BencodeValue::Dictionary{{"v", name}});
+    protocol.parseExtendedHandshake({encoded.begin(), encoded.end()});
+    const auto displayed = protocol.getPeerClientName();
+    EXPECT_LE(displayed.size(), 256);
+    EXPECT_EQ(displayed.find('\n'), std::string::npos);
+    EXPECT_EQ(displayed.find('\0'), std::string::npos);
+    EXPECT_NE(displayed.find('?'), std::string::npos);
+}

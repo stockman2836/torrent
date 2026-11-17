@@ -3,6 +3,7 @@
 #include "torrent/core/logger.h"
 #include "torrent/core/utils.h"
 #include "torrent/network/discovery/pex_manager.h"
+#include "torrent/network/peer/extension_protocol.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -40,6 +41,7 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
         // Check for connection timeout (5 minutes no activity)
         auto since_activity = std::chrono::duration_cast<std::chrono::seconds>(now - last_activity).count();
         if (since_activity >= 300) {
+            conn_ptr->setEndReason(PeerEndReason::IdleTimeout);
             std::cerr << "Connection timeout: no activity for " << since_activity << " seconds from "
                       << peer.ip << ":" << peer.port << "\n";
             break;
@@ -90,6 +92,7 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
             peer_info->last_activity = last_activity;
             peer_info->available_pieces = conn_ptr->peerBitfield();
             peer_info->is_choking = conn_ptr->peerChoking();
+            if (conn_ptr->extensionProtocol()) peer_info->client = conn_ptr->extensionProtocol()->getPeerClientName();
         }
 
         // Check if we're interested in this peer
@@ -121,10 +124,11 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                 }
                 // Late responses to cancelled requests must not alter assembly or statistics.
                 if (!requested) continue;
-                if (!valid_size) break;
+                if (!valid_size) { conn_ptr->setEndReason(PeerEndReason::InvalidMessage); break; }
                 if (receiveBlock(block.piece_index, block.offset, block.data)) {
                     std::lock_guard<std::mutex> lock(peers_mutex_);
                     peer_info->bytes_downloaded += block.data.size();
+                    peer_info->download_rate.addBytes(block.data.size());
                 }
             }
         }
@@ -199,6 +203,7 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
                             {
                                 std::lock_guard<std::mutex> lock(peers_mutex_);
                                 peer_info->bytes_uploaded += block_data.size();
+                                peer_info->upload_rate.addBytes(block_data.size());
                             }
 
                             // Remove from pending uploads
@@ -254,7 +259,7 @@ void DownloadManager::peerLoop(std::shared_ptr<ActivePeerInfo> peer_info) {
     conn_ptr->disconnect();
     {
         std::lock_guard<std::mutex> lock(peers_mutex_);
-        peer_info->finished = true;
+        finishPeer(*peer_info);
     }
 
     std::cout << "Peer loop ended for " << peer.ip << ":" << peer.port << "\n";
@@ -277,18 +282,22 @@ void DownloadManager::connectToPeers() {
         std::cout << "Connecting to: " << peer.ip << ":" << peer.port << "\n";
 
         // Create connection
-        auto connection = std::make_unique<PeerConnection>(
-            peer.ip, peer.port, torrent_.infoHash(), peer_id_
-        );
+        auto peer_info = std::make_shared<ActivePeerInfo>(std::make_unique<PeerConnection>(
+            peer.ip, peer.port, torrent_.infoHash(), peer_id_), peer);
+        auto& connection = peer_info->connection;
 
         connection->setCancellationCallback([this] { return !running_; });
         {
             std::lock_guard<std::mutex> lock(peers_mutex_);
             connecting_peers_ = {{peer.ip, peer.port, PeerState::Connecting}};
+            peer_info->id = next_peer_id_++;
+            connecting_since_ = peer_info->connect_time;
+            connecting_peers_.front().id = peer_info->id;
         }
         const auto failed = [&](const char* reason) {
             std::lock_guard<std::mutex> lock(peers_mutex_);
             connecting_peers_.clear();
+            finishPeer(*peer_info);
             if (running_) {
                 ++failed_connections_;
                 last_peer_error_ = peer.ip + ":" + std::to_string(peer.port) + " — " + reason;
@@ -324,8 +333,9 @@ void DownloadManager::connectToPeers() {
         // Add to active peers
         std::lock_guard<std::mutex> lock(peers_mutex_);
         connecting_peers_.clear();
-        if (!running_ || active_peers_.size() >= max_peers_) continue;
-        auto peer_info = std::make_shared<ActivePeerInfo>(std::move(connection), peer);
+        if (!running_ || active_peers_.size() >= max_peers_) {
+            finishPeer(*peer_info, PeerEndReason::PeerLimit); continue;
+        }
         active_peers_.push_back(peer_info);
         ++outgoing_handshakes_;
 
