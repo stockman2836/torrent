@@ -90,9 +90,10 @@ only to their owning targets.
 
 ## Usage
 
-Windows ZIP builds need no installation: extract the complete archive and open
-`TorrentClient.exe`. The build's DLLs must stay beside it. See
-[building and checking the portable archive](docs/DISTRIBUTION.md).
+For Windows x64, run the **setup.exe** from the release and open **TorrentClient**
+from the Start menu. It installs for your account. For the portable version,
+extract the whole ZIP and open `TorrentClient.exe`.
+See [Windows packages and verification](docs/DISTRIBUTION.md).
 
 On Windows, open `build/desktop/TorrentClient.exe` (or
 `build/desktop/Release/TorrentClient.exe` with Visual Studio). Select a `.torrent`
@@ -355,9 +356,11 @@ See [selective downloads](docs/SELECTIVE_DOWNLOADS.md).
 
 ## Verification
 
-On each push and pull request, Windows CI builds the x64 Release application,
-runs CTest and checks the packaged GUI. Download the verified ZIP and its SHA256
-from the **TorrentClient-windows-x64** artifact on the workflow run's summary page.
+On each push and pull request, Windows CI builds the x64 Release application and
+runs CTest. A second Windows runner checks the portable GUI and the installer,
+including interrupted transfers and uninstall. The **TorrentClient-windows-x64**
+artifact of a successful run contains both packages and their SHA256 files.
+Pushing a matching version tag publishes those files to GitHub Releases after verification.
 
 ```sh
 ctest --test-dir build --output-on-failure

@@ -11,6 +11,11 @@ namespace fs = std::filesystem;
 
 SmokeTest parseSmokeTest(int argc, wchar_t* argv[]) {
     SmokeTest result;
+    if (argv && argc == 5 && (std::wstring(argv[1]) == L"--ui-test-interrupt" || std::wstring(argv[1]) == L"--ui-test-restore")) {
+        result.enabled = true; result.source = argv[2]; result.folder = argv[3]; result.config = argv[4];
+        result.restart = std::wstring(argv[1]) == L"--ui-test-interrupt" ? RestartPhase::Interrupt : RestartPhase::Restore;
+        return result;
+    }
     if (argv && argc == 5 && (std::wstring(argv[1]) == L"--ui-test" || std::wstring(argv[1]) == L"--ui-test-priorities" ||
                              std::wstring(argv[1]) == L"--ui-test-global-limits" || std::wstring(argv[1]) == L"--ui-test-network" ||
                              std::wstring(argv[1]) == L"--ui-test-trackers" || std::wstring(argv[1]) == L"--ui-test-peers")) {
@@ -41,7 +46,7 @@ SmokeTest parseSmokeTest(int argc, wchar_t* argv[]) {
 void MainWindow::configureSmoke() {
     if (smoke_.enabled) {
         config_.enable_port_mapping = false; // Smoke fixtures never inherit live router opt-in from user preferences.
-        config_.loadFromFile(utf8(smoke_.config));
+        if (!config_.loadFromFile(utf8(smoke_.config))) throw std::runtime_error("Cannot load UI fixture settings");
         if (smoke_.mapping) {
             config_.port_mapping_options.gateway = "127.0.0.1";
             config_.port_mapping_options.discovery_address = "127.0.0.1";
@@ -54,7 +59,8 @@ void MainWindow::configureSmoke() {
         }
         settings_.clear();
         if (smoke_.global_limits || smoke_.mapping) settings_ = fs::path(smoke_.config);
-        listPath_.clear();
+        if (smoke_.restart == RestartPhase::None) listPath_.clear();
+        else settings_ = fs::path(smoke_.config);
         config_.download_dir = utf8(smoke_.folder);
         SetWindowTextW(source_, smoke_.source.c_str());
     }
@@ -63,6 +69,12 @@ void MainWindow::configureSmoke() {
 void MainWindow::startSmoke() {
     if (smoke_.enabled) {
         smoke_.deadline = GetTickCount64() + 45000;
+        if (smoke_.restart == RestartPhase::Restore) {
+            const auto jobs = queue_.snapshots();
+            if (jobs.size() != 1 || fs::u8path(jobs.front().source) != fs::path(smoke_.source))
+                throw std::runtime_error("Expected the saved torrent after restart");
+            return;
+        }
         if (smoke_.second.empty()) load();
         else {
             selected_ = queue_.add(utf8(smoke_.source), config_);
@@ -80,9 +92,11 @@ void MainWindow::runSmoke(const DownloadSnapshot& state, bool busy) {
         else {
             smoke_.started = true;
             smoke_.started_at = GetTickCount64();
-            networkSettings();
+            if (smoke_.restart == RestartPhase::None) networkSettings();
             SendMessageW(handle_, WM_COMMAND, Start, 0);
         }
+    } else if (smoke_.restart == RestartPhase::Interrupt && busy && state.progress > 0 && state.progress < 100) {
+        SendMessageW(handle_, WM_CLOSE, 0, 0);
     } else if (smoke_.mapping && !smoke_.mapping_checked && busy && state.network.port_mapping.state == MappingState::Active) {
         smoke_.mapping_checked = true;
         networkDetails();
@@ -113,7 +127,9 @@ void MainWindow::runSmoke(const DownloadSnapshot& state, bool busy) {
         if (smoke_.global_limits && !smoke_.global_limits_applied) exitCode_ = 1;
         if ((smoke_.network || smoke_.trackers || smoke_.peers) && !smoke_.network_checked) exitCode_ = 1;
         if (smoke_.mapping && !smoke_.mapping_checked) exitCode_ = 1;
-        networkDetails(); close();
+        if (smoke_.restart == RestartPhase::Interrupt) exitCode_ = 1;
+        if (smoke_.restart == RestartPhase::None) networkDetails();
+        close();
     }
     else if (state.state == DownloadState::Failed || GetTickCount64() > smoke_.deadline) { exitCode_ = 1; close(); }
 }

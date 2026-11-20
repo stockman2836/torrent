@@ -1,4 +1,10 @@
-# Windows portable archive
+# Windows distribution
+
+The Windows x64 installer places the application in
+`%LOCALAPPDATA%\Programs\TorrentClient` by default and adds a **TorrentClient**
+Start menu shortcut. It runs under the current account. Remove it through
+**Settings → Apps → Installed apps**. Settings, the saved queue and downloaded
+files are kept on uninstall.
 
 The ZIP contains the Release desktop application and its recursively discovered
 runtime DLLs. It requires no installation, compiler, CMake or Node.js on the
@@ -63,14 +69,25 @@ The normal `cmake --install` layout under `bin/` remains available; ZIP staging
 uses the explicit `Portable` component. Packaging does not publish a release or
 install anything into the user's system.
 
+## Build the installer
+
+Build the x64 ZIP first. With Inno Setup 6.7 installed, run the following from the
+repository root. Use `-Compiler <path-to-ISCC.exe>` for a non-default installation.
+
+```powershell
+./packaging/build-installer.ps1 -Archive build/release/dist/TorrentClient-1.0.0-windows-x64.zip
+```
+
+The script verifies the ZIP checksum and Release metadata, then compiles the
+installer from its extracted contents, including DLLs and notices. The resulting
+`-setup.exe` and its SHA256 file appear beside the ZIP.
+
 ## Verify the archive
 
 For a CI build, open **Actions → Windows CI**, select the successful run for the
 commit you want to test and download **TorrentClient-windows-x64** under
-**Artifacts**. Extract the artifact to get the portable ZIP and its SHA256 file.
-To check it on another Windows PC, extract the inner ZIP, launch
-`TorrentClient.exe`, download a small torrent and reopen the application to
-confirm that its saved entry is still present.
+**Artifacts**. Extract the artifact to get the installer, portable ZIP and
+their SHA256 files.
 
 With Node.js available on the build machine:
 
@@ -85,8 +102,29 @@ Cyrillic characters and starts the real window from a separate working directory
 Child processes receive a PATH containing only Windows and System32, excluding
 the toolchain and dependency directories.
 
-Local tracker/peer fixtures verify an ordinary file download and two queued
-torrents, including uploads. The extracted application and results remain in
-`build/tests/portable-*` for inspection. This checks relocation on the build
-machine; validation on a fresh Windows installation is still a separate release
-check.
+Local trackers and peers exercise downloads, queueing and uploads. The extracted
+application and results remain in `build/tests/portable-*` for inspection.
+
+## Verify installation and restart
+
+CI downloads the packages on a fresh Windows runner in a separate job. To run
+the installer check locally, use a Windows account without an existing TorrentClient
+installation or Start menu shortcut.
+
+```powershell
+./tests/integration/test_installer.ps1 -Archive build/release/dist/TorrentClient-1.0.0-windows-x64.zip
+```
+
+The check installs into a test folder, verifies the uninstall entry, shortcut
+target and installed file hashes, and runs the installed GUI with a system-only
+PATH. A local peer serves one piece before the window closes. A second process
+restores the saved queue and requests only the remaining pieces. The test checks
+the completed payload byte for byte, uninstalls the client and verifies that
+the queue, configuration and download survived. Logs are under `build/tests/installer-*`.
+
+## Publish a release
+
+When a release is ready, push a tag matching the CMake project version, such
+as `v1.0.0`. The tag triggers the same build and checks as a branch push.
+After the verification job succeeds, the release job checks both SHA256 files
+and creates a GitHub Release for that tag with the installer, ZIP and checksums.

@@ -91,8 +91,9 @@ encrypted/uTP transfers and other network environments still need validation.
 - [x] Verify startup, download and upload in a clean destination folder with only system directories on PATH.
 - [x] Check package integrity and reject untrusted HTTPS tracker certificates.
 - [x] Configure Windows CI to build Release, run the offline suite and verify the portable ZIP before upload.
-- [ ] Verify the archive on a fresh Windows installation.
-- [ ] Add a Windows installer and release automation when portable builds are reliable.
+- [x] Build a per-user x64 installer from the portable ZIP and exercise install, restart, resume and uninstall locally.
+- [x] Configure a separate Windows verification runner and publish verified packages on matching version tags.
+- [ ] Confirm the first hosted installer check and publish the first tagged Windows release.
 
 ## Later improvements
 

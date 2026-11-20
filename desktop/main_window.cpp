@@ -36,13 +36,14 @@ void MainWindow::create() {
 }
 
 void MainWindow::initializeDownloads() {
-    auto home = knownFolder(FOLDERID_LocalAppData) / L"TorrentClient";
+    auto home = smoke_.enabled ? fs::absolute(smoke_.config).parent_path()
+                               : knownFolder(FOLDERID_LocalAppData) / L"TorrentClient";
     fs::create_directories(home);
     settings_ = home / L"config.json";
     listPath_ = home / L"downloads.json";
     config_.download_dir = (knownFolder(FOLDERID_Downloads) / L"TorrentClient").u8string();
     config_.resume_dir = (home / L"resume").u8string();
-    if (fs::exists(settings_)) config_.loadFromFile(settings_.u8string());
+    if (!smoke_.enabled && fs::exists(settings_)) config_.loadFromFile(settings_.u8string());
     config_.seed_after_download = false; // New jobs opt in; older desktop versions ignored this JSON field.
     configureSmoke();
     // File logging is optional; a logging failure must not prevent opening the app.
@@ -55,6 +56,7 @@ void MainWindow::initializeDownloads() {
         catch (const std::exception& error) {
             // Preserve the original file if it could not be fully restored.
             listPath_.clear();
+            if (smoke_.enabled) throw;
             MessageBoxW(handle_, wide(error.what()).c_str(), L"Не удалось восстановить список загрузок", MB_OK | MB_ICONERROR);
         }
     }

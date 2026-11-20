@@ -5,10 +5,13 @@
 
 namespace torrent::desktop {
 
+enum class RestartPhase { None, Interrupt, Restore };
+
 // State for the explicit --ui-test modes. Disabled for an ordinary launch.
 struct SmokeTest {
     bool enabled = false, priorities = false, global_limits = false, network = false, mapping = false, trackers = false, peers = false;
     uint16_t nat_port = 0, ssdp_port = 0;
+    RestartPhase restart = RestartPhase::None;
     std::wstring source, second, folder, config;
     bool started = false, priorities_applied = false, global_limits_applied = false;
     bool network_checked = false, mapping_checked = false;

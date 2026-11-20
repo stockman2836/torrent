@@ -56,17 +56,65 @@ jobs:
       - name: Package the tested build
         run: cpack --config build/ci/CPackConfig.cmake -C Release
 
-      - name: Test the extracted portable application
+      - name: Build the installer from the portable ZIP
         run: |
           $zip = Get-Item build/ci/dist/TorrentClient-*-windows-x64.zip
-          node tests/integration/test_portable.cjs $zip.FullName
+          ./packaging/build-installer.ps1 -Archive $zip.FullName
 
-      - name: Save portable ZIP and SHA256
+      - name: Save Windows packages and checksums
         uses: actions/upload-artifact@v7
         with:
           name: TorrentClient-windows-x64
           path: |
             build/ci/dist/*.zip
             build/ci/dist/*.zip.sha256
+            build/ci/dist/*-setup.exe
+            build/ci/dist/*-setup.exe.sha256
           if-no-files-found: error
           compression-level: 0
+
+  verify:
+    needs: portable
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8
+        with:
+          name: TorrentClient-windows-x64
+          path: build/dist
+      - name: Verify the portable application on a fresh runner
+        run: |
+          $zip = Get-Item build/dist/TorrentClient-*-windows-x64.zip
+          node tests/integration/test_portable.cjs $zip.FullName
+      - name: Install, interrupt a download, restart and uninstall
+        run: |
+          $zip = Get-Item build/dist/TorrentClient-*-windows-x64.zip
+          ./tests/integration/test_installer.ps1 -Archive $zip.FullName
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: TorrentClient-windows-x64
+          path: dist
+      - name: Publish the tested packages for the version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: dist
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          base="TorrentClient-${GITHUB_REF_NAME#v}-windows-x64"
+          cat "$base.zip.sha256" "$base-setup.exe.sha256" | tr -d '\r' | sha256sum --check --strict
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            "$base.zip" "$base.zip.sha256" "$base-setup.exe" "$base-setup.exe.sha256"

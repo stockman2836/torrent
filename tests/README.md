@@ -460,7 +460,7 @@ It starts with a saved 1 B/s global cap, applies new rates using the real dialog
 during a download, and verifies completed bytes and the saved global/individual
 settings in the fixture's config. It does not write the user's preferences.
 
-## Portable distribution
+## Windows distribution
 
 `test_tracker_tls` uses the OpenSSL command-line tool to generate a temporary
 self-signed certificate. The same valid tracker payload succeeds over HTTP;
@@ -470,6 +470,12 @@ It does not modify the user's certificate stores.
 `test_portable.cjs` checks a completed Release ZIP and runs the extracted native
 window with only system directories on PATH. It verifies actual downloads and
 uploads through local fixtures. See [distribution checks](../docs/DISTRIBUTION.md#verify-the-archive).
+
+`test_installer.ps1` compares installed files with the ZIP, checks Windows
+integration and runs the installed GUI twice using `test_transfer.cjs desktop-restart`.
+The second process restores the queue and finishes the download without requesting
+the first verified piece again. Uninstall must preserve the fixture's user files.
+See [installer verification](../docs/DISTRIBUTION.md#verify-installation-and-restart).
 
 ## Manual public-network checks
 

@@ -1,8 +1,8 @@
 TorrentClient для Windows
 
-1. Распакуйте ZIP целиком в отдельную папку.
-2. Запустите TorrentClient.exe двойным щелчком.
-3. Добавьте .torrent или magnet и выберите папку загрузки.
+При установке через setup.exe откройте TorrentClient из меню «Пуск».
+Для portable-версии распакуйте ZIP целиком и запустите TorrentClient.exe.
+Добавьте .torrent или magnet и выберите папку загрузки.
 
 Все DLL из архива должны оставаться рядом с TorrentClient.exe.
 Установка компилятора, CMake или Node.js для запуска не требуется.

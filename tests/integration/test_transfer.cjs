@@ -30,7 +30,8 @@ function listen(server) {
 
 async function main() {
   const [scenario, executable, partialExecutable] = process.argv.slice(2);
-  assert.ok(['multi', 'resume', 'corrupt', 'disconnect', 'multifile'].includes(scenario));
+  const desktopRestart = scenario === 'desktop-restart';
+  assert.ok(['multi', 'resume', 'corrupt', 'disconnect', 'multifile', 'desktop-restart'].includes(scenario));
   const work = fs.mkdtempSync(path.join(process.cwd(), `transfer-${scenario}-`));
   const pieceLength = 32768;
   const data = Buffer.alloc(pieceLength * 7 + 123);
@@ -47,7 +48,7 @@ async function main() {
   const peers = [];
   const requests = [];
   const announces = [];
-  let stage = scenario === 'resume' || scenario === 'corrupt' ? 'partial' : 'full';
+  let stage = desktopRestart || scenario === 'resume' || scenario === 'corrupt' ? 'partial' : 'full';
   let protocolError;
   let disconnected = false;
   let child;
@@ -118,8 +119,14 @@ async function main() {
   async function run(program, label) {
     const start = Date.now();
     let output = '';
-    const args = program === executable ? ['test.torrent', '--config', 'config.json'] : ['test.torrent', 'config.json'];
-    child = spawn(path.resolve(program), args, { cwd: work });
+    let args;
+    if (desktopRestart) {
+      args = [stage === 'partial' ? '--ui-test-interrupt' : '--ui-test-restore',
+        path.join(work, 'test.torrent'), path.join(work, 'files'), path.join(work, 'config.json')];
+    } else {
+      args = program === executable ? ['test.torrent', '--config', 'config.json'] : ['test.torrent', 'config.json'];
+    }
+    child = spawn(path.resolve(program), args, { cwd: work, windowsHide: true });
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     const timer = setTimeout(() => child.kill(), 15000);
@@ -142,8 +149,14 @@ async function main() {
       enable_lsd: false, enable_webseeds: false, enable_utp: false, enable_encryption: false,
       sequential_download: scenario !== 'multi', download_dir: './files', log_file: './client.log', listen_port: await availablePort() }));
     if (stage === 'partial') {
-      await run(partialExecutable, 'partial');
+      await run(desktopRestart ? executable : partialExecutable, 'partial');
       assert.deepEqual(fs.readFileSync(path.join(work, 'files', 'payload.bin')).subarray(0, pieceLength), data.subarray(0, pieceLength));
+      if (desktopRestart) {
+        const { downloads } = JSON.parse(fs.readFileSync(path.join(work, 'downloads.json')));
+        assert.equal(downloads.length, 1);
+        assert.equal(path.resolve(downloads[0].source), path.join(work, 'test.torrent'));
+        assert.equal(path.resolve(downloads[0].directory), path.join(work, 'files'));
+      }
       if (scenario === 'corrupt') {
         const file = fs.openSync(path.join(work, 'files', 'payload.bin'), 'r+');
         fs.writeSync(file, Buffer.from([data[0] ^ 0xff]), 0, 1, 0);
@@ -152,7 +165,7 @@ async function main() {
       stage = 'full';
     }
     const output = await run(executable, 'full');
-    assert.ok(output.includes('Download complete!'), output);
+    if (!desktopRestart) assert.ok(output.includes('Download complete!'), output);
     if (scenario === 'multifile') {
       const saved = Buffer.concat(info.files.map(file => fs.readFileSync(path.join(work, 'files', info.name, ...file.path))));
       assert.deepEqual(saved, data);
@@ -168,8 +181,8 @@ async function main() {
       assert.equal(new Set(keys).size, keys.length, 'Duplicate block requests across peers');
       assert.equal(announces.find(a => a.event === 'stopped').downloaded, data.length);
     }
-    if (scenario === 'resume') {
-      assert.ok(output.includes('Resume data loaded successfully'));
+    if (scenario === 'resume' || desktopRestart) {
+      if (!desktopRestart) assert.ok(output.includes('Resume data loaded successfully'));
       assert.ok(!full.some(r => r.index === 0), 'Verified saved piece was requested again');
       assert.equal(announces.find(a => a.stage === 'full' && a.event === 'started').left, data.length - pieceLength);
     }
