@@ -1,0 +1,72 @@
+name: Windows CI
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install MinGW and native dependencies
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          pacboy: >-
+            gcc:p ninja:p openssl:p curl-winssl:p
+            spdlog:p nlohmann-json:p gtest:p
+
+      - name: Select the UCRT64 toolchain
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          $prefix = Join-Path $env:MSYS2_ROOT 'ucrt64'
+          "$prefix/bin" >> $env:GITHUB_PATH
+          "MINGW_PREFIX=$prefix" >> $env:GITHUB_ENV
+
+      - name: Configure Release with desktop and tests
+        run: |
+          $licenses = Get-ChildItem "$env:MINGW_PREFIX/share/licenses" -Recurse -File
+          $notices = ($licenses.FullName -replace '\\', '/') -join ';'
+          cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_CXX_COMPILER=g++.exe" "-DCMAKE_RC_COMPILER=windres.exe" `
+            "-DCMAKE_PREFIX_PATH=$env:MINGW_PREFIX" "-DPORTABLE_LICENSE_FILES=$notices" `
+            "-DNODE_EXECUTABLE=$((Get-Command node.exe).Source)" `
+            "-DOPENSSL_PROGRAM=$((Get-Command openssl.exe).Source)" `
+            -DBUILD_DESKTOP=ON -DBUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build/ci --parallel 4
+
+      - name: Run unit and integration tests
+        run: ctest --test-dir build/ci --output-on-failure --no-tests=error --parallel 2
+
+      - name: Package the tested build
+        run: cpack --config build/ci/CPackConfig.cmake -C Release
+
+      - name: Test the extracted portable application
+        run: |
+          $zip = Get-Item build/ci/dist/TorrentClient-*-windows-x64.zip
+          node tests/integration/test_portable.cjs $zip.FullName
+
+      - name: Save portable ZIP and SHA256
+        uses: actions/upload-artifact@v7
+        with:
+          name: TorrentClient-windows-x64
+          path: |
+            build/ci/dist/*.zip
+            build/ci/dist/*.zip.sha256
+          if-no-files-found: error
+          compression-level: 0

@@ -51,7 +51,11 @@ async function main() {
     assert.equal(hash(target), match[1], `Checksum mismatch: ${relative}`);
   }
   assert.deepEqual([...recorded].sort(), packaged.filter(file => file !== 'SHA256SUMS.txt'), 'Manifest does not match archive contents');
-  assert.ok(!packaged.some(file => /\.(a|lib|obj|pdb|cmake|torrent|log)$/i.test(file)), 'Archive contains development/runtime artifacts');
+  for (const file of packaged) {
+    // MSYS2 ships upstream license texts with names such as COPYING.LIB.
+    if (/^licenses\/[^/]+\/(COPYING3?|LICENSE)\.LIB$/.test(file)) continue;
+    assert.doesNotMatch(file, /\.(a|lib|obj|pdb|cmake|torrent|log)$/i, `Unexpected development/runtime file: ${file}`);
+  }
   assert.deepEqual(packaged.filter(file => file.endsWith('.exe')), ['TorrentClient.exe']);
   assert.match(fs.readFileSync(path.join(root, 'BUILD-INFO.txt'), 'utf8'), /Configuration: Release/);
   const binary = fs.readFileSync(executable), pe = binary.readUInt32LE(0x3c);

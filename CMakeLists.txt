@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(TorrentClient VERSION 1.0.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ language standard")
 
 option(BUILD_TESTS "Build automated tests" ON)
 option(BUILD_EXAMPLES "Build standalone examples" OFF)

@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-11-15.
+Last updated: 2026-11-20.
 
 The main application is the native Windows desktop client. The CLI and automated
 fixtures use the same engine. Follow [architecture](architecture.md) when adding
@@ -90,6 +90,7 @@ encrypted/uTP transfers and other network environments still need validation.
 - [x] Produce a portable release archive containing the executable and required DLLs.
 - [x] Verify startup, download and upload in a clean destination folder with only system directories on PATH.
 - [x] Check package integrity and reject untrusted HTTPS tracker certificates.
+- [x] Configure Windows CI to build Release, run the offline suite and verify the portable ZIP before upload.
 - [ ] Verify the archive on a fresh Windows installation.
 - [ ] Add a Windows installer and release automation when portable builds are reliable.
 
@@ -97,7 +98,7 @@ encrypted/uTP transfers and other network environments still need validation.
 
 - Verify public port reachability from another network; local socket diagnostics are already available.
 - Check port mapping compatibility on physical routers and across upstream NAT/firewall configurations.
-- Windows and POSIX CI plus broader protocol and encryption checks.
+- POSIX CI and broader protocol and encryption checks.
 - Profile disk I/O and memory usage before adding caches or tuning performance.
 
 Torrent creation, watch folders and remote management are separate future

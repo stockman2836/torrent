@@ -65,6 +65,13 @@ install anything into the user's system.
 
 ## Verify the archive
 
+For a CI build, open **Actions → Windows CI**, select the successful run for the
+commit you want to test and download **TorrentClient-windows-x64** under
+**Artifacts**. Extract the artifact to get the portable ZIP and its SHA256 file.
+To check it on another Windows PC, extract the inner ZIP, launch
+`TorrentClient.exe`, download a small torrent and reopen the application to
+confirm that its saved entry is still present.
+
 With Node.js available on the build machine:
 
 ```powershell

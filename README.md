@@ -355,6 +355,10 @@ See [selective downloads](docs/SELECTIVE_DOWNLOADS.md).
 
 ## Verification
 
+On each push and pull request, Windows CI builds the x64 Release application,
+runs CTest and checks the packaged GUI. Download the verified ZIP and its SHA256
+from the **TorrentClient-windows-x64** artifact on the workflow run's summary page.
+
 ```sh
 ctest --test-dir build --output-on-failure
 ctest --test-dir build -R test_download --output-on-failure
